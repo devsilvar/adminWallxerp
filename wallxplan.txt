@@ -1,0 +1,371 @@
+
+PROJECT:  PayMyTax By WallX – In Partnership with FIRS
+
+Product Document
+SME Tax Calculation, Reporting & Remittance Tool
+Product Name
+PayMyTax (PMT) BY WallX
+Purpose
+The SME Tax Calculation and Remittance Tool enables small businesses (SMEs/MSMEs) to easily calculate their monthly tax obligations, generate tax statements, and remit taxes directly to the Federal Inland Revenue Service (FIRS).
+The tool simplifies tax compliance by automatically computing tax payable using the formula:
+Tax Payable = 7.5% of Gross Profit
+Where:
+Gross Profit = Total Monthly Sales − Total Monthly Expenses
+
+1. Target Users
+Primary users include:
+Small business owners
+Retailers
+Online sellers
+Market traders
+SMEs using digital payment tools
+Businesses using the WallX payment ecosystem
+
+2. Key Features
+2.1 Monthly Sales Capture
+The system must automatically capture or allow entry of Total Monthly Sales.
+Sales sources may include:
+Bank Transfers
+PayCode Payments
+Online Store Transactions
+POS Payments
+Manual Sales Entry
+Fields
+Field	Description
+Sales Source	Bank transfer, PayCode, POS, Online store
+Date	Transaction date
+Amount	Value of sale
+Description	Optional description
+Output
+Total Monthly Sales = Sum of all sales transactions for the month
+
+3. Expense Recording Module
+The system must provide a simple expense entry form for business owners to record their monthly expenses.
+Expense Entry Form
+Field	Description
+Expense Category	Rent, Utilities, Inventory, Transport, etc
+Expense Description	Short note
+Date	Date of expense
+Amount	Expense amount
+Users can add multiple expenses throughout the month.
+Output
+Total Monthly Expenses = Sum of all expenses recorded
+
+4. Profit Margin Configuration
+The system should allow businesses to define an Average Profit Margin.
+Range:
+0% – 200%
+This feature helps the system estimate profitability for analytics.
+Fields
+Field	Description
+Profit Margin	Percentage value
+Default Value	20%
+
+5. Tax Calculation Engine
+The system will automatically compute tax using the formula below.
+Step 1 — Calculate Gross Profit
+Gross Profit = Total Monthly Sales − Total Monthly Expenses
+Step 2 — Calculate Tax Payable
+Tax Payable = 7.5% × Gross Profit
+If Gross Profit ≤ 0
+Tax Payable = 0
+
+6. Tax Summary Dashboard
+The dashboard must display a clear monthly tax overview.
+Monthly Tax Summary
+Item	Value
+Total Monthly Sales	₦XXX
+Total Monthly Expenses	₦XXX
+Gross Profit	₦XXX
+Tax Rate	7.5%
+Tax Payable	₦XXX
+
+7. Tax Remittance Feature
+The platform must allow users to remit tax directly to the government.
+Button
+[ PAY TAX TO FIRS ]
+Integration may include:
+Direct payment via bank transfer
+PayCode payment
+Debit card
+Wallet balance (Preferred) 
+Payment goes directly to:
+Federal Inland Revenue Service
+
+8. Monthly Tax Statement Generator
+Users must be able to generate a Monthly Tax Statement PDF.
+Button
+[ DOWNLOAD TAX STATEMENT ]
+The statement should be automatically generated after tax calculation.
+
+9. Tax Statement PDF Structure
+Document Title
+Monthly SME Tax Statement
+Sections
+Business Information
+Field	Value
+Business Name	
+Business ID	
+Tax Period	Month/Year
+
+Sales Summary
+Metric	Amount
+Total Monthly Sales	₦XXX
+
+Expense Summary
+Metric	Amount
+Total Monthly Expenses	₦XXX
+
+Profit Calculation
+Metric	Amount
+Gross Profit	₦XXX
+
+Tax Computation
+Metric	Value
+Applicable Tax Rate	7.5%
+Tax Payable	₦XXX
+
+Payment Status
+Field	Value
+Payment Status	Paid / Unpaid
+Payment Date	
+Transaction Reference	
+
+10. User Flow
+Step 1
+User logs into WallX dashboard
+Step 2
+System auto-fetches monthly sales
+Step 3
+User records monthly expenses
+Step 4
+System calculates:
+Gross Profit
+Step 5
+System calculates:
+7.5% Tax Payable
+Step 6
+User clicks:
+Pay Tax to FIRS
+Step 7
+System generates:
+Monthly Tax Statement PDF
+
+11. Compliance & Audit Trail
+The system should store:
+Monthly sales logs
+Expense entries
+Tax calculations
+Payment confirmations
+Generated tax reports
+This ensures audit readiness.
+
+
+
+
+
+
+14. MVP Scope
+This first version should include the following alerts:
+Sales tracking
+Expense entry
+Gross profit calculation
+7.5% tax computation
+Tax payment button
+PDF tax statement generation
+Automated tax remittance reminders (Business set a reminder)
+Profit Margin Met Alert
+
+N:B
+Integration to Paystack to Generate Virtual Business acc
+Digital Simple Invoicing tool (Reference GT Squad)
+Integrate to Storefront on WallX for their online store setup to capture sales inflow
+
+
+
+
+
+
+
+
+
+
+
+
+ENGINEERING APPROACH
+Database Structure (For Engineers)
+
+Table 1 — Businesses
+Stores SME details.
+businesses
+----------------------------
+
+id (UUID)
+business_name
+owner_name
+email
+phone
+tax_id
+created_at
+updated_at
+
+Table 2 — Sales Transactions
+Captures all business revenue.
+sales_transactions
+----------------------------
+
+id (UUID)
+
+business_id (FK)
+
+amount
+
+source
+(bank_transfer
+paycode
+pos
+online_store
+manual)
+
+reference_id
+
+transaction_date
+
+created_at
+
+Table 3 — Expenses
+Stores business expenses.
+expenses
+----------------------------
+
+id (UUID)
+
+business_id (FK)
+
+category
+(rent
+inventory
+salary
+utility
+fuel
+logistics
+other)
+
+description
+
+amount
+
+expense_date
+
+created_at
+
+Table 4 — Monthly Tax Reports
+Stores monthly calculations.
+monthly_tax_reports
+--------------------------------
+
+id (UUID)
+
+business_id (FK)
+
+tax_month
+(2026-03)
+
+total_sales
+
+total_expenses
+
+gross_profit
+
+tax_rate
+(default 7.5)
+
+tax_payable
+
+profit_margin
+
+payment_status
+(paid/unpaid)
+
+created_at
+
+Table 5 — Tax Payments
+Tracks tax remittance.
+tax_payments
+--------------------------------
+
+id (UUID)
+
+business_id (FK)
+
+tax_report_id (FK)
+
+amount_paid
+
+payment_method
+(wallet
+bank_transfer
+card
+paycode)
+
+transaction_reference
+
+payment_status
+
+payment_date
+
+Table 6 — Generated Tax Statements
+tax_statements
+--------------------------------
+
+id (UUID)
+
+business_id
+
+tax_report_id
+
+pdf_url
+
+generated_at
+
+
+3. Tax Calculation Logic (Backend)
+The backend should run monthly:
+total_sales = SUM(sales_transactions.amount)
+
+total_expenses = SUM(expenses.amount)
+
+gross_profit = total_sales - total_expenses
+
+tax_payable = gross_profit * 0.075
+If:
+gross_profit <= 0
+Then:
+tax_payable = 0
+
+4. API Endpoints (Example)
+Get Monthly Tax Summary
+GET /api/tax/monthly-summary
+
+Add Expense
+POST /api/expenses/add
+
+Calculate Tax
+POST /api/tax/calculate
+
+Pay Tax
+POST /api/tax/pay
+
+Download Statement
+GET /api/tax/statement/pdf
+
+5. Smart Feature we May Consider (Important)
+Because we are building SME finance infrastructure, you can add:
+Automated Expense Intelligence
+Example:
+If sales = ₦1M and expenses entered = ₦50k
+System alerts:
+Your expenses appear too low.
+This may affect your tax report.
+This protects SMEs from incorrect tax reporting.
+
