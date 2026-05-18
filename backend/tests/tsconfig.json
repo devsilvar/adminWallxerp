@@ -8,7 +8,7 @@
       "jest",
       "node"
     ],
-    "rootDir": "..",
+    "rootDir": "./src",
     "outDir": "../dist-tests",
     "baseUrl": "..",
     "paths": {
@@ -20,5 +20,9 @@
   "include": [
     "./**/*",
     "../src/**/*"
+  ],
+  "exclude": [
+    "tests",
+    "**/*.test.ts"
   ]
 }
