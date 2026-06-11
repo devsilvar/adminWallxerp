@@ -13,15 +13,17 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 /**
- * Validates that required environment variables are present
+ * Validates that required environment variables are present.
+ *
+ * SUPABASE_* are NOT in the required set — the app uses Prisma + Postgres
+ * for all DB access; Supabase is only needed if you opt into Supabase
+ * Storage / Auth helpers (currently unused in this codebase).
  */
 function validateConfig() {
   const required = [
     'DATABASE_URL',
     'JWT_ACCESS_SECRET',
     'JWT_REFRESH_SECRET',
-    'SUPABASE_URL',
-    'SUPABASE_SERVICE_ROLE_KEY',
   ];
 
   const missing = required.filter((key) => !process.env[key]);
@@ -40,11 +42,30 @@ validateConfig();
 /**
  * Application Configuration Object
  */
+/**
+ * Parse PORT defensively. Render/Heroku inject PORT automatically; if a user
+ * also adds it in the dashboard with a bad value (empty string, whitespace,
+ * non-numeric), parseInt returns NaN and app.listen throws ERR_SOCKET_BAD_PORT.
+ * Fall back to 10000 (Render's default) and log loudly so it's findable.
+ */
+const parsePort = (raw: string | undefined): number => {
+  const fallback = 10000;
+  if (!raw || !raw.trim()) return fallback;
+  const n = Number(raw.trim());
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    console.error(
+      `[config] Invalid PORT="${raw}" (must be integer 1-65535). Falling back to ${fallback}.`
+    );
+    return fallback;
+  }
+  return n;
+};
+
 export const config = {
   // Application
   app: {
     env: process.env.NODE_ENV || 'development',
-    port: parseInt(process.env.PORT || '3000', 10),
+    port: parsePort(process.env.PORT),
     apiVersion: process.env.API_VERSION || 'v1',
     isDevelopment: process.env.NODE_ENV === 'development',
     isProduction: process.env.NODE_ENV === 'production',
@@ -55,10 +76,10 @@ export const config = {
     url: process.env.DATABASE_URL!,
   },
 
-  // Supabase
+  // Supabase (optional — only set if you use Supabase Storage / Auth helpers)
   supabase: {
-    url: process.env.SUPABASE_URL!,
-    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    url: process.env.SUPABASE_URL || '',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   },
 
   // JWT
@@ -80,10 +101,22 @@ export const config = {
   },
 
   // Paystack
+  //
+  // `preferredBank` is the DVA-creation bank slug Paystack expects on
+  // POST /dedicated_account. Test mode REQUIRES `test-bank` — `wema-bank`
+  // returns a 400 with test keys. Live mode accepts `wema-bank` (default),
+  // `titan-paystack`, etc. We auto-pick based on the secret-key prefix so
+  // local dev with test keys just works; explicit env var overrides if you
+  // ever need a different live partner bank.
   paystack: {
     secretKey: process.env.PAYSTACK_SECRET_KEY || '',
     publicKey: process.env.PAYSTACK_PUBLIC_KEY || '',
     webhookSecret: process.env.PAYSTACK_WEBHOOK_SECRET || '',
+    preferredBank:
+      process.env.PAYSTACK_PREFERRED_BANK ||
+      ((process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_test_')
+        ? 'test-bank'
+        : 'wema-bank'),
   },
 
   // DigitalOcean Spaces
@@ -144,7 +177,7 @@ export const config = {
   // Rate Limiting
   rateLimit: {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
-    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100', 10),
+    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '10000', 10),
   },
 
   // Scheduled Jobs (node-cron)

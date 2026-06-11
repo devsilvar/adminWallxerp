@@ -20,124 +20,90 @@
 
 ---
 
-## Phase 0 — Project Bootstrap & DevOps (Week 1: March 24–30)
+## Phase 0 — Project Bootstrap & DevOps (Week 1: March 24–30) ✅ COMPLETE
 
 **Goal:** Both repos initialized, database connected, CI working, dev environment fully functional. Zero features — just plumbing.
 
-### Tasks:
-1. **Create GitHub repos**
-   - `paymytax-api` (Node/Express/TypeScript)
-   - `paymytax-web` (React/Vite/TypeScript)
-   - Set up branch protection on `main` (require PR)
+### What was delivered:
+- [x] Backend scaffold (Express + TypeScript + Prisma)
+- [x] Full database schema (9 tables) migrated to Neon PostgreSQL
+- [x] Folder structure: controllers, services, routes, middleware, lib, validators, config
+- [x] Winston logger, global error handler, security middleware (Helmet, CORS, rate limiting)
+- [x] Health check endpoint working
+- [x] Seed script with test data
+- [x] `.env.example` with all config options
 
-2. **Backend scaffold**
-   - Initialize Express + TypeScript project
-   - Set up folder structure: `src/{controllers, services, routes, middleware, lib, validators, config}`
-   - Configure: `tsconfig.json`, `nodemon`, `tsx` for dev
-   - Install core deps: express, prisma, bcrypt, jsonwebtoken, helmet, cors, rate-limit, winston, zod, dotenv
-   - Create `src/server.ts` with health check endpoint (`GET /health`)
-   - Set up Winston logger
-   - Set up global error handler middleware
-
-3. **Database setup (Neon)**
-   - Create Neon project: `paymytax-prod`
-   - Initialize Prisma, write full schema (all 9 tables from implementation.md)
-   - Run `prisma migrate dev --name init`
-   - Verify with `prisma studio`
-   - Create seed script with test data
-
-4. **Frontend scaffold**
-   - `npm create vite@latest paymytax-web -- --template react-ts`
-   - Install all deps: react-router-dom, tanstack-query, zustand, axios, zod, react-hook-form, tailwind, shadcn, recharts, lucide-react, date-fns
-   - Initialize Tailwind + shadcn/ui
-   - Set up folder structure from implementation.md
-   - Create basic routing: `/login`, `/register`, `/dashboard` (empty pages)
-   - Set up Axios client with interceptors (from implementation.md)
-
-5. **Environment & deployment pipeline**
-   - Create `.env.example` for both projects
-   - Set up Render for backend (auto-deploy on push to `main`)
-   - Set up Vercel for frontend (auto-deploy on push to `main`)
-   - Verify both deploy successfully (even if just health check + blank page)
-
-6. **DigitalOcean Spaces**
-   - Create Space: `paymytax-documents`
-   - Generate access keys
-   - Test upload/download from backend
-
-### Deliverables:
-- [ ] Both repos on GitHub with CI deploying
-- [ ] Database migrated with all tables
-- [ ] Backend returns `200 OK` on `/health` in production
-- [ ] Frontend loads on Vercel (blank dashboard shell)
-- [ ] DO Spaces tested
-
-### Exit Criteria: `curl https://paymytax-api.onrender.com/health` → `{ "status": "ok" }`
+### Not done (deferred or N/A):
+- [ ] Frontend scaffold — not started yet
+- [ ] Render / Vercel deployment — not set up yet
+- [ ] DigitalOcean Spaces — configured in env but not tested
+- [ ] GitHub branch protection — not confirmed
 
 ---
 
-## Phase 1 — Authentication & Business Setup (Weeks 2–3: March 31 – April 13)
+## Phase 1 — Authentication & Business Setup (Weeks 2–3: March 31 – April 13) ✅ COMPLETE
 
-**Goal:** Users can register, login, create a business profile. This is the foundation everything else builds on.
+**Goal:** Users can register, login, create a business profile. Foundation for everything else.
 
-### Week 2 — Backend Auth + Business CRUD
+### What was delivered:
 
-1. **Authentication system (backend)**
-   - `PasswordService` — bcrypt hashing, strength validation
-   - `JwtService` — separate access/refresh secrets, token generation/verification
-   - `AuthService` — register, login, refresh token
-   - `AuthController` + routes: register, login, logout, refresh-token, me, update-profile, change-password
-   - `authenticate` middleware (JWT verification)
-   - Rate limiting on auth endpoints (5 attempts / 15 min)
-   - Audit logging service (append-only)
+**Backend (all complete):**
+- [x] Auth system: register, login, refresh token, get me, change password, forgot password, reset password
+- [x] Business CRUD: create, list (paginated), get by ID, update, delete
+- [x] JWT auth with separate access/refresh secrets
+- [x] `authenticate` middleware + `authorize(...roles)` middleware
+- [x] Role-based authorization (admin/user enum, UserRole in Prisma)
+- [x] Admin panel: dashboard stats, user management, business listing, audit logs
+- [x] Auth rate limiting (5 attempts / 15 min)
+- [x] Zod validation on all endpoints
+- [x] Ownership enforcement on business operations
+- [x] Audit logging (`logAudit()` helper, 11 events tracked across auth/business/admin)
+- [x] Transaction patterns (`TxClient` type, `$transaction()` on all multi-step mutations)
+- [x] Consistent bcrypt rounds (12 everywhere)
+- [x] Admin seed user (admin@paymytax.com)
 
-2. **Business management (backend)**
-   - `BusinessService` — CRUD operations
-   - `BusinessController` + routes: create, read, update, delete, list
-   - Ownership validation middleware (user can only access their own businesses)
-   - Input validation with Zod schemas
+**Frontend (not started):**
+- [ ] Login / Register pages
+- [ ] Auth store (Zustand)
+- [ ] Protected route component
+- [ ] Dashboard layout (sidebar + header)
+- [ ] Business creation form
+- [ ] Business selector
 
-3. **Upstash Redis setup**
-   - Connect Redis for rate limiting
-   - Set up token blacklist for logout
+**Infrastructure (not done):**
+- [ ] Upstash Redis connection
+- [ ] Token blacklist for logout
 
-### Week 3 — Frontend Auth + Business UI
+### API Endpoints Delivered:
 
-4. **Auth pages (frontend)**
-   - Login page with form validation (react-hook-form + zod)
-   - Register page with form validation
-   - Auth store (Zustand with persist)
-   - Protected route component
-   - Token refresh interceptor in Axios client
-   - Auth layout (centered card for login/register)
-
-5. **Business setup (frontend)**
-   - Dashboard layout (sidebar + header + content area)
-   - Business creation form (name, owner, tax ID, type, address, city, state, profit margin)
-   - Business profile/settings page
-   - Business selector (if user has multiple businesses)
-
-6. **Integration testing**
-   - Test full flow: register → login → create business → view dashboard
-   - Test token refresh flow
-   - Test rate limiting
-
-### Deliverables:
-- [ ] User can register and login
-- [ ] User can create and manage a business profile
-- [ ] JWT auth with refresh tokens working
-- [ ] Audit logs recording auth events
-- [ ] Dashboard layout with sidebar navigation
-
-### Exit Criteria: Full register → login → create business flow works end-to-end in production.
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/api/v1/auth/register` | No | Register new user |
+| POST | `/api/v1/auth/login` | No | Login |
+| POST | `/api/v1/auth/refresh` | No | Refresh access token |
+| GET | `/api/v1/auth/me` | JWT | Get current user |
+| PUT | `/api/v1/auth/change-password` | JWT | Change password |
+| POST | `/api/v1/auth/forgot-password` | No | Request password reset |
+| POST | `/api/v1/auth/reset-password` | No | Reset password with token |
+| POST | `/api/v1/businesses` | JWT | Create business |
+| GET | `/api/v1/businesses` | JWT | List user's businesses |
+| GET | `/api/v1/businesses/:id` | JWT | Get business detail |
+| PUT | `/api/v1/businesses/:id` | JWT | Update business |
+| DELETE | `/api/v1/businesses/:id` | JWT | Delete business |
+| GET | `/api/v1/admin/dashboard` | Admin | Dashboard stats |
+| GET | `/api/v1/admin/users` | Admin | List all users |
+| GET | `/api/v1/admin/users/:id` | Admin | User detail |
+| PATCH | `/api/v1/admin/users/:id/status` | Admin | Toggle user active |
+| GET | `/api/v1/admin/businesses` | Admin | All businesses |
+| GET | `/api/v1/admin/audit-logs` | Admin | Audit trail |
 
 ---
 
-## Phase 2 — Sales & Expenses Modules (Weeks 4–5: April 14 – April 27)
+## Phase 2 — Sales & Expenses Modules (Weeks 4–5: April 14 – April 27) ⬅️ NEXT
 
 **Goal:** Users can record sales and expenses. This is the data entry layer that feeds into tax calculation.
 
-### Week 4 — Sales Module
+### Week 4 — Sales Module (Backend + Frontend if applicable)
 
 1. **Sales backend**
    - `SalesService` — CRUD, monthly summary, bulk import
@@ -146,55 +112,75 @@
    - Query filters: by month, by source, date range, pagination
    - Sales summary endpoint (total for a given month)
    - Period lock check — refuse edits if month is locked
-   - Deduplication index enforcement
+   - Deduplication index enforcement (already in schema: `unique_sales_reference`)
+   - Transaction + audit logging on all mutations
 
-2. **Sales frontend**
-   - Sales list page with filters (month, source)
-   - Add sale form (amount, source, date, description, customer name)
-   - Edit/delete sale (with confirmation)
-   - Sales summary card (total monthly sales)
-   - Mobile-responsive table/list view
+   **Endpoints to build:**
+   | Method | Path | Description |
+   |--------|------|-------------|
+   | POST | `/api/v1/businesses/:businessId/sales` | Create sale |
+   | GET | `/api/v1/businesses/:businessId/sales` | List sales (filtered, paginated) |
+   | GET | `/api/v1/businesses/:businessId/sales/:id` | Get sale detail |
+   | PUT | `/api/v1/businesses/:businessId/sales/:id` | Update sale |
+   | DELETE | `/api/v1/businesses/:businessId/sales/:id` | Delete sale |
+   | GET | `/api/v1/businesses/:businessId/sales/summary` | Monthly sales summary |
 
-### Week 5 — Expenses Module
+### Week 5 — Expenses Module (Backend + Frontend if applicable)
 
-3. **Expenses backend**
+2. **Expenses backend**
    - `ExpenseService` — CRUD, monthly summary, by-category breakdown
    - `ExpenseController` + routes
    - Zod validators
    - Query filters: by month, by category, pagination
    - Category breakdown endpoint
    - Period lock check
-   - Receipt URL field (upload comes later, manual URL for now)
+   - Receipt URL field (manual URL for now, upload later)
+   - Transaction + audit logging on all mutations
 
-4. **Expenses frontend**
-   - Expenses list page with filters (month, category)
-   - Add expense form (category dropdown, description, amount, date)
-   - Edit/delete expense
-   - Expense summary card + category breakdown chart (Recharts pie chart)
+   **Endpoints to build:**
+   | Method | Path | Description |
+   |--------|------|-------------|
+   | POST | `/api/v1/businesses/:businessId/expenses` | Create expense |
+   | GET | `/api/v1/businesses/:businessId/expenses` | List expenses (filtered, paginated) |
+   | GET | `/api/v1/businesses/:businessId/expenses/:id` | Get expense detail |
+   | PUT | `/api/v1/businesses/:businessId/expenses/:id` | Update expense |
+   | DELETE | `/api/v1/businesses/:businessId/expenses/:id` | Delete expense |
+   | GET | `/api/v1/businesses/:businessId/expenses/summary` | Monthly summary + category breakdown |
 
-5. **Expense Intelligence Alert (from wallxplan MVP scope)**
-   - Backend: When calculating, if expenses < 5% of sales, flag warning
-   - Frontend: Show alert banner: "Your expenses appear too low. This may affect your tax report."
+3. **Expense Intelligence Alert** (from wallxplan MVP scope)
+   - Shipped as two warning types returned in the `warnings[]` array of
+     `POST /tax/calculate` (see `tax.service.ts` margin-warnings block and
+     `CLAUDE.md` "Expense intelligence alerts"):
+     - `no_expenses` — sales > 0 but expenses = 0 for the month
+     - `margin_deviation` — actual profit margin deviates from
+       `Business.defaultProfitMargin` (default 20%) by more than 15 pts
+   - Each warning that fires also writes/refreshes a `margin_warning`
+     reminder row via `createMarginWarning` so the bell surfaces it
+   - The original `< 5% of sales` heuristic from the MVP scope was replaced
+     by `margin_deviation` during Phase 3 — same goal, uses the per-business
+     expected-margin baseline so businesses with non-standard cost structures
+     stop seeing false positives
 
 ### Deliverables:
 - [ ] Full sales CRUD with filtering and pagination
 - [ ] Full expenses CRUD with category breakdown
 - [ ] Period lock enforcement on both modules
 - [ ] Expense intelligence warning
-- [ ] Both modules tested end-to-end
+- [ ] Audit logs for all sales/expense mutations
+- [ ] Both modules use transaction patterns
 
 ### Exit Criteria: User can record multiple sales and expenses for a month, see summaries, and get warned if expenses are suspiciously low.
 
 ---
 
-## Phase 3 — Tax Calculation & Dashboard (Weeks 6–7: April 28 – May 11)
+## Phase 3 — Tax Calculation & Reports (Weeks 6–7: April 28 – May 11)
 
-**Goal:** The core value proposition — automatic tax calculation, visual dashboard, and period finalization.
+**Goal:** The core value proposition — automatic tax calculation, monthly reports, and period finalization.
 
-### Week 6 — Tax Engine + Dashboard Backend
+### Week 6 — Tax Engine Backend
 
-1. **Tax calculation engine (backend)**
-   - `TaxService` — calculate monthly tax
+1. **Tax calculation engine**
+   - `TaxService`:
      ```
      total_sales = SUM(confirmed sales for month)
      total_expenses = SUM(expenses for month)
@@ -203,7 +189,7 @@
      profit_margin = (gross_profit / total_sales) * 100
      ```
    - Create/update `monthly_tax_reports` record
-   - Finalize endpoint — sets `is_finalized = true`, prevents further edits
+   - Finalize endpoint — sets `is_finalized = true`, prevents further sales/expense edits
    - Un-finalize endpoint — only if NOT locked (not paid)
    - Dashboard data endpoint — current month summary + trends (last 6 months)
 
@@ -212,82 +198,71 @@
    - Profit margin tracking over time
    - Expense breakdown by category for current month
 
-### Week 7 — Tax Dashboard Frontend
+   **Endpoints to build:**
+   | Method | Path | Description |
+   |--------|------|-------------|
+   | POST | `/api/v1/businesses/:businessId/tax/calculate` | Calculate/recalculate month |
+   | GET | `/api/v1/businesses/:businessId/tax/reports` | List all monthly reports |
+   | GET | `/api/v1/businesses/:businessId/tax/reports/:id` | Get report detail |
+   | POST | `/api/v1/businesses/:businessId/tax/reports/:id/finalize` | Finalize month |
+   | POST | `/api/v1/businesses/:businessId/tax/reports/:id/unfinalize` | Undo finalize |
+   | GET | `/api/v1/businesses/:businessId/tax/dashboard` | Dashboard summary + trends |
 
-3. **Tax dashboard page**
-   - 4 summary cards: Total Sales, Total Expenses, Gross Profit, Tax Payable
-   - Monthly trends line chart (Recharts)
-   - Expense breakdown pie chart
-   - Payment status indicator (paid/unpaid/pending)
-   - "Calculate Tax" button (triggers recalculation)
-   - "Finalize Month" button with confirmation dialog
+### Week 7 — Tax Reminders (Basic)
 
-4. **Tax reports page**
-   - List of all monthly tax reports
-   - Status badges (open, finalized, paid)
-   - Click to view detail for any month
-   - Profit margin met alert (from wallxplan MVP scope)
-     - If profit margin > configured threshold, show green indicator
-     - If below, show warning
-
-5. **Tax reminders (basic — from wallxplan MVP scope)**
-   - Business settings: "Reminder Day" (default: 25th of month)
+3. **In-app reminders**
+   - Business settings: "Reminder Day" (default: 25th of month, already in schema)
    - Backend: Create reminder records when approaching tax deadline
-   - Frontend: Show in-app notification/banner when reminder is due
+   - Profit margin met alert — include in dashboard response
    - (Email/SMS reminders deferred to Phase 5)
 
 ### Deliverables:
 - [ ] Tax calculation working correctly (7.5% formula)
-- [ ] Dashboard with real-time summary and charts
+- [ ] Monthly tax reports list with status (open/finalized/paid)
 - [ ] Period finalization/locking flow
-- [ ] Monthly tax reports list with status
-- [ ] In-app tax reminders
+- [ ] Dashboard summary endpoint with trends
 - [ ] Profit margin alert
+- [ ] In-app reminder records
 
-### Exit Criteria: User sees accurate tax calculation dashboard, can finalize a month, and gets reminded about upcoming tax deadlines.
+### Exit Criteria: User sees accurate tax calculation, can finalize a month, and period-locked months refuse edits.
 
 ---
 
 ## Phase 4 — Payment Integration & PDF Generation (Weeks 8–9: May 12 – May 25)
 
-**Goal:** Users can pay their tax via Paystack and download PDF tax statements. This is the money flow.
+**Goal:** Users can pay their tax via Paystack and download PDF tax statements.
 
 ### Week 8 — Paystack Payment Integration
 
 1. **Paystack integration (backend)**
-   - Initialize Paystack SDK
    - `PaymentService`:
      - Initialize payment (create Paystack transaction)
      - Verify payment
      - Handle webhooks
-   - `PaymentController` + routes:
-     - `POST /tax/pay` — initiate payment
-     - `GET /tax/payments` — list payments
-     - `GET /tax/payments/:id/verify` — verify specific payment
-     - `POST /webhooks/paystack` — webhook handler
+   - `PaymentController` + routes
    - Webhook security:
      - Verify Paystack signature FIRST
      - Idempotent processing (check if already processed)
-     - Return 200 immediately, process async via queue if possible
+     - Return 200 immediately, process async
      - Log ALL webhook events to audit_logs
    - On successful payment:
      - Update `tax_payments` record
      - Update `monthly_tax_reports.payment_status = 'completed'`
      - Set `is_locked = true`, `locked_at = NOW()`
-   - **Settlement:** For now, Paystack settles to WallX's designated account. When FIRS flow is confirmed, update the subaccount/settlement config.
+   - All wrapped in `$transaction()` for atomicity
 
-2. **Payment frontend**
-   - "Pay Tax to FIRS" button on dashboard (only shows when tax > 0 and unpaid)
-   - Payment method selection (card, bank transfer, etc.)
-   - Redirect to Paystack checkout OR inline popup
-   - Payment verification callback page
-   - Payment history page with status badges
-   - Payment success/failure UI states
+   **Endpoints to build:**
+   | Method | Path | Description |
+   |--------|------|-------------|
+   | POST | `/api/v1/businesses/:businessId/tax/pay` | Initiate payment |
+   | GET | `/api/v1/businesses/:businessId/tax/payments` | List payments |
+   | GET | `/api/v1/businesses/:businessId/tax/payments/:id/verify` | Verify payment |
+   | POST | `/api/v1/webhooks/paystack` | Paystack webhook handler |
 
 ### Week 9 — PDF Tax Statement Generation
 
-3. **PDF generation (backend)**
-   - `PdfService` using PDFKit:
+2. **PDF generation (backend)**
+   - `PdfService` using PDFKit (already installed):
      - Business information header
      - Sales summary section
      - Expense summary section
@@ -299,27 +274,25 @@
      - "Electronically generated" disclaimer
    - Upload PDF to DigitalOcean Spaces
    - Generate signed download URL (expires in 24h)
-   - `StatementController` + routes:
-     - `POST /tax/statements/generate`
-     - `GET /tax/statements/:id/download`
 
-4. **PDF frontend**
-   - "Download Tax Statement" button on dashboard
-   - Statement generation loading state
-   - Download triggered via signed URL
-   - Statement history list
+   **Endpoints to build:**
+   | Method | Path | Description |
+   |--------|------|-------------|
+   | POST | `/api/v1/businesses/:businessId/tax/statements/generate` | Generate PDF |
+   | GET | `/api/v1/businesses/:businessId/tax/statements/:id/download` | Download PDF |
+   | GET | `/api/v1/businesses/:businessId/tax/statements` | List statements |
 
-5. **Business-scoped rate limiting**
+3. **Business-scoped rate limiting**
    - Tax calculations: max 10/hour per business
    - PDF generation: max 20/day per business
-   - Payment initiation: max 5/hour per business
+   - Payment initiation: max 5/hour per business (rate limiter already exists)
 
 ### Deliverables:
-- [ ] Full Paystack payment flow working (initiate → pay → webhook → verify)
+- [ ] Full Paystack payment flow (initiate -> pay -> webhook -> verify)
 - [ ] Tax report locked after payment
-- [ ] PDF statement generation with QR code verification
+- [ ] PDF statement generation with all sections from wallxplan spec
 - [ ] PDF upload to DO Spaces with signed URLs
-- [ ] Payment history page
+- [ ] Payment history
 - [ ] Rate limiting per business
 
 ### Exit Criteria: User can pay tax via Paystack, see payment confirmed, and download a professional PDF tax statement.
@@ -350,18 +323,16 @@
 ### Week 11 — Testing, Bug Fixes & UI Polish
 
 4. **End-to-end testing**
-   - Full user journey: register → business → sales → expenses → calculate → pay → PDF
+   - Full user journey: register -> business -> sales -> expenses -> calculate -> pay -> PDF
    - Edge cases: zero sales, zero expenses, negative profit, very large numbers
    - Mobile responsiveness testing
-   - Cross-browser testing (Chrome, Safari, Firefox)
 
 5. **UI polish**
    - Loading skeletons on all pages
-   - Empty states (no sales yet, no expenses yet, no reports yet)
+   - Empty states
    - Error boundaries
-   - Toast notifications for success/error actions
-   - Consistent color scheme and typography
-   - Accessible forms (labels, aria attributes, focus management)
+   - Toast notifications
+   - Accessible forms
 
 6. **Security hardening**
    - Review all input validation
@@ -369,23 +340,20 @@
    - Verify audit log coverage
    - Review CORS settings for production
    - Ensure no sensitive data in error responses
-   - Move refresh tokens to httpOnly cookies (production hardening)
 
 ### Week 12 — Pre-Launch & Soft Launch
 
 7. **Production deployment checklist**
    - Swap all test API keys for production (Paystack live keys, etc.)
-   - Set up custom domain: `paymytax.ng` or subdomain
+   - Set up custom domain
    - SSL verification
-   - Set up Sentry for error monitoring (backend + frontend)
-   - Set up Morgan for HTTP logging in production
+   - Set up Sentry for error monitoring
    - Database backup strategy (Neon automated backups)
 
 8. **Soft launch**
    - Deploy to production
    - Test with 5-10 real businesses (internal or beta users)
-   - Collect feedback
-   - Fix critical bugs
+   - Collect feedback, fix critical bugs
 
 ### Deliverables:
 - [ ] Email + SMS notifications working
@@ -426,8 +394,6 @@
 
 ## DEFERRED to Post-Launch (Q3 2026)
 
-These items from the original plan are **intentionally deferred** — they are either blocked (FIRS), dependent on ecosystem readiness (WallX storefront), or lower priority than shipping MVP:
-
 | Feature | Reason Deferred | Phase |
 |---------|----------------|-------|
 | FIRS Direct API Integration | Blocked — partnership not confirmed | Post-launch |
@@ -442,22 +408,22 @@ These items from the original plan are **intentionally deferred** — they are e
 
 ## Weekly Milestone Summary
 
-| Week | Phase | Milestone | Ship? |
-|------|-------|-----------|-------|
-| 1 | Phase 0 | Repos, DB, infra, both apps deploying | No |
-| 2 | Phase 1 | Backend auth + business CRUD | No |
-| 3 | Phase 1 | Frontend auth + business UI | No |
-| 4 | Phase 2 | Sales module (full stack) | No |
-| 5 | Phase 2 | Expenses module (full stack) | No |
-| 6 | Phase 3 | Tax engine + dashboard backend | No |
-| 7 | Phase 3 | Tax dashboard frontend + reminders | No |
-| 8 | Phase 4 | Paystack payment integration | No |
-| 9 | Phase 4 | PDF generation + download | No |
-| 10 | Phase 5 | Email/SMS notifications | No |
-| 11 | Phase 5 | Testing, bug fixes, UI polish | No |
-| 12 | Phase 5 | Production deploy + soft launch | **YES** |
-| 13 | Phase 6 | Bug fixes from soft launch | **YES** |
-| 14 | Phase 6 | Stretch: virtual accounts / invoicing | **YES** |
+| Week | Phase | Milestone | Status |
+|------|-------|-----------|--------|
+| 1 | Phase 0 | Repos, DB, infra, both apps deploying | ✅ Complete |
+| 2 | Phase 1 | Backend auth + business CRUD | ✅ Complete |
+| 3 | Phase 1 | Frontend auth + business UI | ❌ Backend only |
+| 4 | Phase 2 | Sales module (backend) | ⬅️ Next |
+| 5 | Phase 2 | Expenses module (backend) | Planned |
+| 6 | Phase 3 | Tax engine + dashboard backend | Planned |
+| 7 | Phase 3 | Tax reminders | Planned |
+| 8 | Phase 4 | Paystack payment integration | Planned |
+| 9 | Phase 4 | PDF generation + download | Planned |
+| 10 | Phase 5 | Email/SMS notifications | Planned |
+| 11 | Phase 5 | Testing, bug fixes, UI polish | Planned |
+| 12 | Phase 5 | Production deploy + soft launch | **SHIP** |
+| 13 | Phase 6 | Bug fixes from soft launch | **SHIP** |
+| 14 | Phase 6 | Stretch: virtual accounts / invoicing | **SHIP** |
 
 ---
 
@@ -470,6 +436,7 @@ These items from the original plan are **intentionally deferred** — they are e
 | Paystack webhook reliability | MEDIUM — missed payments | Idempotent processing, audit logging, manual verification endpoint |
 | Neon free tier limits | LOW — may hit connection limits | Monitor, upgrade to $19/mo if needed |
 | Render cold starts | LOW — first request slow after idle | Health check ping from uptime monitor |
+| Frontend not started | MEDIUM — backend-heavy so far | Can be parallelized or built as React app consuming existing API |
 
 ---
 
@@ -477,8 +444,8 @@ These items from the original plan are **intentionally deferred** — they are e
 
 The MVP is shippable when ALL of these work in production:
 
-- [ ] User registration and login
-- [ ] Business profile creation
+- [x] User registration and login
+- [x] Business profile creation
 - [ ] Manual sales entry with monthly totals
 - [ ] Manual expense entry with category breakdown
 - [ ] Automatic tax calculation (7.5% of gross profit)
@@ -492,5 +459,5 @@ The MVP is shippable when ALL of these work in production:
 
 ---
 
-*Last Updated: March 23, 2026*
+*Last Updated: March 27, 2026*
 *Author: Implementation Plan for PayMyTax by WallX*

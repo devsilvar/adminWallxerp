@@ -1,5 +1,6 @@
 import prisma from '@/lib/prisma';
 import logger from '@/lib/logger';
+import { config } from '@/config';
 import { AppError } from '@/middleware/errorHandler';
 import { logAudit } from '@/lib/audit';
 import { getPaymentProvider } from '@/lib/payment';
@@ -28,13 +29,41 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
   return { firstName, lastName };
 }
 
-// ─── Validate Customer (BVN) ────────────────────────────────
+// ─── Validate Customer (BVN + bank account) ──────────────────
+//
+// Paystack moved off the deprecated `type: 'bvn'` validation shape to
+// `type: 'bank_account'` — they now cross-check the BVN against a bank
+// account registered under the same NIBSS record. The caller MUST supply
+// both the bank's NIBSS clearing code (e.g. "044" for Access) and the
+// 10-digit NUBAN account number alongside the BVN. The bank list comes
+// from `GET /api/v1/banks` (cached `bank.service.ts`); the BVN form on
+// Account.tsx renders a dropdown sourced from that endpoint.
+//
+// Validation is asynchronous on Paystack's side — they queue the check
+// and emit `customeridentification.success` / `customeridentification.failed`
+// webhooks (not yet handled — see plan Phase 4.1). For now we return
+// `validated: true` to mean "submission accepted" and tell the user to
+// retry DVA setup in a few moments.
 
-export async function validateCustomer(userId: string, businessId: string, bvn: string) {
+export interface ValidateCustomerInput {
+  bvn: string;
+  bankCode: string;
+  accountNumber: string;
+}
+
+export async function validateCustomer(
+  userId: string,
+  businessId: string,
+  input: ValidateCustomerInput,
+) {
   const business = await verifyBusinessOwnership(userId, businessId);
 
   if (!business.paystackCustomerCode) {
-    throw new AppError(400, 'No Paystack customer exists for this business. Set up virtual account first.', 'NO_CUSTOMER');
+    throw new AppError(
+      400,
+      'No Paystack customer exists for this business. Set up virtual account first.',
+      'NO_CUSTOMER',
+    );
   }
 
   const provider = getPaymentProvider();
@@ -42,7 +71,9 @@ export async function validateCustomer(userId: string, businessId: string, bvn: 
 
   await provider.validateCustomer({
     customerCode: business.paystackCustomerCode,
-    bvn,
+    bvn: input.bvn,
+    bankCode: input.bankCode,
+    accountNumber: input.accountNumber,
     firstName,
     lastName,
   });
@@ -53,9 +84,18 @@ export async function validateCustomer(userId: string, businessId: string, bvn: 
     action: 'dva.customer_validated',
     resourceType: 'business',
     resourceId: businessId,
+    // We DELIBERATELY do not log the BVN or full account number — both are
+    // PII. Last-4 of the account is enough for support traceability.
+    newData: {
+      bankCode: input.bankCode,
+      accountLast4: input.accountNumber.slice(-4),
+    },
   });
 
-  logger.info('Customer BVN validation submitted', { businessId, customerCode: business.paystackCustomerCode });
+  logger.info('Customer BVN+bank validation submitted', {
+    businessId,
+    customerCode: business.paystackCustomerCode,
+  });
 
   return { validated: true };
 }
@@ -84,13 +124,35 @@ export async function setupVirtualAccount(userId: string, businessId: string) {
     throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
   }
 
+  // Paystack rejects fintech-DVA customer creation when the upstream record
+  // has no phone — `customeridentification.failed` fires later with a vague
+  // "phone required" message that's hostile to surface to the SME. Block at
+  // the door instead so the UI can inline-capture the missing field, PATCH
+  // /auth/me, and retry setup. Frontend Account.tsx catches this code and
+  // renders the inline phone form. Path (b) from paymentPlan.md §2.3 —
+  // intentionally NOT enforced at registration so users who never want a
+  // DVA aren't gated on phone collection.
+  if (!user.phone || !user.phone.trim()) {
+    throw new AppError(
+      400,
+      'Add your phone number before setting up a virtual account. Paystack requires it for identity verification.',
+      'USER_PHONE_REQUIRED',
+    );
+  }
+
   const provider = getPaymentProvider();
   const { firstName, lastName } = splitName(business.ownerName);
 
-  // Step 1: Create Paystack customer (or reuse existing)
-  let customerCode = business.paystackCustomerCode;
+  // Step 1: Create Paystack customer (or reuse existing).
+  //
+  // Returns the code we should pass to /dedicated_account. Persists newly
+  // created codes to the business row. Reused as the retry path below when
+  // a stale code triggers customer_not_found.
+  const ensureCustomerCode = async (force = false): Promise<string> => {
+    if (!force && business.paystackCustomerCode) {
+      return business.paystackCustomerCode;
+    }
 
-  if (!customerCode) {
     const customer = await provider.createCustomer({
       email: user.email,
       firstName,
@@ -98,20 +160,55 @@ export async function setupVirtualAccount(userId: string, businessId: string) {
       phone: user.phone || undefined,
     });
 
-    customerCode = customer.customerCode;
-
     await prisma.business.update({
       where: { id: businessId },
-      data: { paystackCustomerCode: customerCode },
+      data: { paystackCustomerCode: customer.customerCode },
     });
 
-    logger.info('Paystack customer created', { businessId, customerCode });
-  }
+    logger.info('Paystack customer created', {
+      businessId,
+      customerCode: customer.customerCode,
+      recreated: force,
+    });
 
-  // Step 2: Request dedicated virtual account
+    return customer.customerCode;
+  };
+
+  let customerCode = await ensureCustomerCode();
+
+  // Step 2: Request dedicated virtual account.
+  //
   // NOTE: On live mode, Paystack requires customer BVN validation before DVA.
   // If Paystack returns an error about validation, we surface it clearly.
-  const dva = await provider.createDedicatedAccount(customerCode);
+  //
+  // Self-heal on stale customer_code: if the code we have was created against
+  // a different Paystack integration (e.g. test→live swap, or restored from a
+  // backup with another team's data), Paystack returns customer_not_found.
+  // Recreate the customer once against the current key and retry. If the
+  // retry also fails, let the original AppError propagate to the caller.
+  // Bank slug is mode-aware (test-bank in test mode, wema-bank in live). See
+  // config.paystack.preferredBank — env var PAYSTACK_PREFERRED_BANK overrides.
+  const preferredBank = config.paystack.preferredBank;
+
+  let dva;
+  try {
+    dva = await provider.createDedicatedAccount(customerCode, preferredBank);
+  } catch (err) {
+    const isStaleCode =
+      err instanceof AppError &&
+      err.code === 'PAYSTACK_ERROR' &&
+      (err.details as { paystackCode?: string } | undefined)?.paystackCode === 'customer_not_found';
+
+    if (!isStaleCode) throw err;
+
+    logger.warn('Stale Paystack customer code detected — recreating', {
+      businessId,
+      staleCustomerCode: customerCode,
+    });
+
+    customerCode = await ensureCustomerCode(true);
+    dva = await provider.createDedicatedAccount(customerCode, preferredBank);
+  }
 
   // If Paystack returned account details synchronously, save them now
   if (dva.accountNumber) {
@@ -278,12 +375,20 @@ export async function processDVATransferWebhook(event: any) {
   }
 
   // Auto-create sales transaction
+  // Extract customer hint from metadata or narration
+  const customerHint = 
+    data.metadata?.purpose || 
+    data.narration || 
+    (data.customer?.first_name 
+      ? `${data.customer.first_name} ${data.customer.last_name || ''}`.trim()
+      : null);
+
   const sale = await prisma.salesTransaction.create({
     data: {
       businessId: business.id,
       amount,
       source: 'bank_transfer',
-      status: 'confirmed',
+      status: 'pending',
       referenceId: reference,
       customerName: data.customer?.first_name
         ? `${data.customer.first_name} ${data.customer.last_name || ''}`.trim()
@@ -294,6 +399,9 @@ export async function processDVATransferWebhook(event: any) {
         paystackTransactionId: data.id,
         autoRecorded: true,
       },
+      needsVerification: true,
+      customerHint,
+      isTaxable: true,
     },
   });
 
@@ -315,17 +423,78 @@ export async function processDVATransferWebhook(event: any) {
   // duplicate-check above, so this only fires once per real sale.
   void createReminderOnce({
     businessId: business.id,
-    reminderType: 'dva_received',
+    reminderType: 'transaction_needs_verification',
     scheduledDate: new Date(),
-    message: `We auto-captured a sale of ${formatNaira(amount)} from your virtual account.`,
+    message: `New payment of ${formatNaira(amount)} received. Please verify the transaction.`,
     referenceType: 'sales_transaction',
     referenceId: sale.id,
   }).catch((err) =>
-    logger.warn('Failed to create dva_received reminder', {
+    logger.warn('Failed to create transaction_needs_verification reminder', {
       saleId: sale.id,
       err: err instanceof Error ? err.message : err,
     })
   );
 
   return true;
+}
+
+
+// ─── Requery DVA ────────────────────────────────────────────
+
+const lastRequeryTimes = new Map<string, number>();
+const REQUERY_RATE_LIMIT_MS = 10 * 60 * 1000; // 10 minutes
+
+export async function requeryDVA(userId: string, businessId: string) {
+  const business = await prisma.business.findUnique({
+    where: { id: businessId },
+    include: { user: true },
+  });
+
+  if (!business) {
+    throw new AppError(404, 'Business not found', 'BUSINESS_NOT_FOUND');
+  }
+  if (business.userId !== userId) {
+    throw new AppError(403, 'You do not have access to this business', 'FORBIDDEN');
+  }
+
+  if (!business.virtualAccountNumber) {
+    throw new AppError(400, 'No virtual account set up for this business', 'NO_DVA');
+  }
+
+  // Rate limit check
+  const now = Date.now();
+  const lastRequery = lastRequeryTimes.get(businessId);
+  if (lastRequery && now - lastRequery < REQUERY_RATE_LIMIT_MS) {
+    const waitMinutes = Math.ceil((REQUERY_RATE_LIMIT_MS - (now - lastRequery)) / 60000);
+    throw new AppError(
+      429,
+      `Please wait ${waitMinutes} more minutes before requerying`,
+      'RATE_LIMITED'
+    );
+  }
+
+  const provider = getPaymentProvider();
+  const result = await provider.requeryDVA(
+    business.virtualAccountNumber,
+    config.paystack.preferredBank
+  );
+
+  lastRequeryTimes.set(businessId, now);
+
+  logAudit({
+    userId,
+    businessId,
+    action: 'dva.requeried',
+    resourceType: 'business',
+    resourceId: businessId,
+    newData: { transactionCount: result.transactions.length },
+  });
+
+  logger.info('DVA requeried', { businessId, userId, transactionCount: result.transactions.length });
+
+  return {
+    accountNumber: result.accountNumber,
+    transactionCount: result.transactions.length,
+    message: 'DVA requeried successfully. Any missing transfers should appear shortly.',
+  };
 }

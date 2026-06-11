@@ -499,7 +499,12 @@ async function assertMonthNotLocked(
   date: Date,
   db: TxClient | typeof prisma,
 ) {
-  const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+  // UTC — taxMonth is written in UTC by calculateTax; local-tz derivation
+  // would miss the row on UTC+ hosts and let an invoice be marked paid in
+  // a locked month.
+  const monthStart = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)
+  );
 
   const report = await db.monthlyTaxReport.findUnique({
     where: { businessId_taxMonth: { businessId, taxMonth: monthStart } },

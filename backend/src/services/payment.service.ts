@@ -15,7 +15,7 @@ async function firePaymentSuccessReminder(payment: {
   id: string;
   businessId: string;
   taxReportId: string;
-  amount: unknown;
+  amountPaid: number | string;
 }) {
   try {
     const report = await prisma.monthlyTaxReport.findUnique({
@@ -25,7 +25,7 @@ async function firePaymentSuccessReminder(payment: {
     if (!report) return;
 
     const monthLabel = formatTaxMonth(report.taxMonth);
-    const amountLabel = formatNaira(payment.amount as never);
+    const amountLabel = formatNaira(payment.amountPaid);
 
     await createReminderOnce({
       businessId: payment.businessId,
@@ -155,17 +155,54 @@ export async function initiatePayment(
 // ─── Webhook Processing ─────────────────────────────────────
 
 export async function processWebhook(signature: string, rawBody: string) {
-  // Verify HMAC-SHA512 signature
-  const hash = crypto
-    .createHmac('sha512', config.paystack.webhookSecret)
-    .update(rawBody)
-    .digest('hex');
+  const eventData = JSON.parse(rawBody);
+  const reference = eventData?.data?.reference || eventData?.data?.dedicated_account?.account_number || null;
 
-  if (hash !== signature) {
-    throw new AppError(401, 'Invalid webhook signature', 'INVALID_SIGNATURE');
-  }
+  // Log event BEFORE signature verification (even rejected events)
+  const webhookEvent = await prisma.paystackWebhookEvent.create({
+    data: {
+      event: eventData.event || 'unknown',
+      reference,
+      signature,
+      rawBody,
+      status: 'received',
+    },
+  });
 
-  const event = JSON.parse(rawBody);
+  try {
+    // Replay prevention: check for duplicate signature in last 5 minutes
+    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const duplicate = await prisma.paystackWebhookEvent.findFirst({
+      where: {
+        signature,
+        createdAt: { gte: fiveMinutesAgo },
+        id: { not: webhookEvent.id },
+      },
+    });
+
+    if (duplicate) {
+      await prisma.paystackWebhookEvent.update({
+        where: { id: webhookEvent.id },
+        data: { status: 'failed', error: 'Duplicate signature (replay attack)', processedAt: new Date() },
+      });
+      throw new AppError(401, 'Duplicate webhook signature detected', 'REPLAY_ATTACK');
+    }
+
+    // Verify HMAC-SHA512 signature
+    const hash = crypto
+      .createHmac('sha512', config.paystack.webhookSecret)
+      .update(rawBody)
+      .digest('hex');
+
+    if (hash !== signature) {
+      await prisma.paystackWebhookEvent.update({
+        where: { id: webhookEvent.id },
+        data: { status: 'failed', error: 'Invalid signature', processedAt: new Date() },
+      });
+      throw new AppError(401, 'Invalid webhook signature', 'INVALID_SIGNATURE');
+    }
+
+    const event = eventData;
 
   // ─── DVA Assignment Webhooks ──────────────────────────────
   if (event.event === 'dedicatedaccount.assign.success' || event.event === 'dedicatedaccount.assign.failed') {
@@ -231,8 +268,27 @@ export async function processWebhook(signature: string, rawBody: string) {
       id: payment.id,
       businessId: payment.businessId,
       taxReportId: payment.taxReportId,
-      amount: payment.amount,
+      amountPaid: Number(payment.amountPaid),
     });
+  }
+
+    // Mark webhook as processed
+    await prisma.paystackWebhookEvent.update({
+      where: { id: webhookEvent.id },
+      data: { status: 'processed', processedAt: new Date() },
+    });
+  } catch (err) {
+    // Log failure and re-throw
+    await prisma.paystackWebhookEvent.update({
+      where: { id: webhookEvent.id },
+      data: {
+        status: 'failed',
+        error: err instanceof Error ? err.message : String(err),
+        processedAt: new Date(),
+      },
+    }).catch(() => {}); // ignore DB errors during error handling
+
+    throw err;
   }
 }
 
@@ -293,7 +349,7 @@ export async function verifyPayment(userId: string, businessId: string, paymentI
       id: updated.id,
       businessId: updated.businessId,
       taxReportId: updated.taxReportId,
-      amount: updated.amount,
+      amountPaid: Number(updated.amountPaid),
     });
 
     return updated;

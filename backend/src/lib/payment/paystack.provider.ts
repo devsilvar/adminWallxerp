@@ -10,9 +10,20 @@ import {
   CreateDVAResult,
   ValidateCustomerParams,
   ValidateCustomerResult,
+  BankRecord,
+  RequeryDVAResult,
 } from './types';
 
 const BASE_URL = 'https://api.paystack.co';
+
+interface PaystackResponse<T> {
+  status: boolean;
+  message: string;
+  data: T;
+  meta?: { nextStep?: string };
+  code?: string;
+  type?: string;
+}
 
 export class PaystackProvider implements PaymentProvider {
   private secretKey: string;
@@ -37,20 +48,20 @@ export class PaystackProvider implements PaymentProvider {
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
 
-    const data = await response.json();
+    const responseData = await response.json() as PaystackResponse<T>;
 
-    if (!data.status) {
-      const message = data.message || 'Paystack request failed';
-      const meta = data.meta?.nextStep ? ` ${data.meta.nextStep}` : '';
+    if (!responseData.status) {
+      const message = responseData.message || 'Paystack request failed';
+      const meta = responseData.meta?.nextStep ? ` ${responseData.meta.nextStep}` : '';
       throw new AppError(
         response.status >= 400 && response.status < 500 ? 400 : 502,
         `${message}${meta}`,
         'PAYSTACK_ERROR',
-        { paystackCode: data.code, type: data.type },
+        { paystackCode: responseData.code, type: responseData.type },
       );
     }
 
-    return data.data;
+    return responseData.data;
   }
 
   async initialize(params: InitializePaymentParams): Promise<InitializePaymentResult> {
@@ -82,7 +93,7 @@ export class PaystackProvider implements PaymentProvider {
     };
   }
 
-  // ─── DVA Methods ──────────────────────────────────────────
+  // ─── DVA Methods ────────────────────────────────────────────────────
 
   async createCustomer(params: CreateCustomerParams): Promise<CreateCustomerResult> {
     const data = await this.request('POST', '/customer', {
@@ -98,11 +109,27 @@ export class PaystackProvider implements PaymentProvider {
     };
   }
 
+  /**
+   * Validate a Paystack customer's identity.
+   *
+   * Paystack deprecated the BVN-only shape (`type: 'bvn'`) in favour of the
+   * bank-account-verification shape (`type: 'bank_account'`), which requires
+   * a bank account number registered against the same BVN. The new shape
+   * cross-references NIBSS records and is the only shape that lifts the
+   * fintech "validation_required" gate on DVA creation.
+   *
+   * Reference: https://paystack.com/docs/identity-verification/validate-customer/
+   *
+   * Note `country: 'NG'` (two-letter ISO) — the validation endpoint expects
+   * the ISO code, not the slug used by `GET /bank?country=nigeria`.
+   */
   async validateCustomer(params: ValidateCustomerParams): Promise<ValidateCustomerResult> {
     await this.request('POST', `/customer/${params.customerCode}/identification`, {
       country: 'NG',
-      type: 'bvn',
-      value: params.bvn,
+      type: 'bank_account',
+      account_number: params.accountNumber,
+      bank_code: params.bankCode,
+      bvn: params.bvn,
       first_name: params.firstName,
       last_name: params.lastName,
     });
@@ -110,7 +137,55 @@ export class PaystackProvider implements PaymentProvider {
     return { validated: true };
   }
 
-  async createDedicatedAccount(customerCode: string, preferredBank = 'wema-bank'): Promise<CreateDVAResult> {
+  /**
+   * Fetch the list of banks Paystack supports for the given country.
+   *
+   * Used by `bank.service.ts` to populate the BVN-validation dropdown. Heavy
+   * to call on every request — 24h cached in the `banks` table. The response
+   * is paginated by Paystack but the Nigeria list is ~50 entries; we request
+   * `perPage=100` and surface a single page. If the list ever exceeds 100 we
+   * will need to paginate (the API supports `?next` cursors).
+   */
+  async listBanks(country = 'nigeria'): Promise<BankRecord[]> {
+    const path = `/bank?country=${encodeURIComponent(country)}&perPage=100`;
+    const data = await this.request<Array<Record<string, any>>>('GET', path);
+
+    if (!Array.isArray(data)) {
+      throw new AppError(502, 'Paystack returned unexpected bank list shape', 'PAYSTACK_ERROR');
+    }
+
+    return data.map((b) => ({
+      name: b.name,
+      slug: b.slug,
+      code: b.code,
+      longCode: b.longcode ?? null,
+      country: b.country ?? country,
+      currency: b.currency ?? 'NGN',
+      type: b.type ?? null,
+      active: b.active !== false,
+    }));
+  }
+
+  /**
+   * Create a Dedicated Virtual Account for a Paystack customer.
+   *
+   * `preferredBank` is REQUIRED and intentionally not defaulted at this layer.
+   * The correct slug is mode-dependent (`test-bank` for sk_test_*, `wema-bank`
+   * for live, `titan-paystack` for some live partners) and the resolution lives
+   * in `config.paystack.preferredBank`. Defaulting here would silently send
+   * `wema-bank` from any forgetful caller — Paystack rejects that with a 400
+   * in test mode and the failure mode is "DVA never sets up locally" which is
+   * exactly what bit us before. Pass `config.paystack.preferredBank`.
+   */
+  async createDedicatedAccount(customerCode: string, preferredBank: string): Promise<CreateDVAResult> {
+    if (!preferredBank) {
+      throw new AppError(
+        500,
+        'preferredBank is required for createDedicatedAccount — pass config.paystack.preferredBank',
+        'PAYSTACK_CONFIG_ERROR',
+      );
+    }
+
     const data = await this.request('POST', '/dedicated_account', {
       customer: customerCode,
       preferred_bank: preferredBank,
@@ -123,6 +198,20 @@ export class PaystackProvider implements PaymentProvider {
       accountNumber: account?.account_number || null,
       bankName: account?.bank?.name || null,
       bankId: account?.bank?.id || 0,
+    };
+  }
+
+  /**
+   * Requery a Dedicated Virtual Account to refresh transactions.
+   * Useful when webhooks are missed or delayed.
+   */
+  async requeryDVA(accountNumber: string, providerSlug: string): Promise<RequeryDVAResult> {
+    const path = `/dedicated_account/requery?account_number=${encodeURIComponent(accountNumber)}&provider_slug=${encodeURIComponent(providerSlug)}`;
+    const data = await this.request<any>('GET', path);
+
+    return {
+      accountNumber: data.account_number || accountNumber,
+      transactions: data.transactions || [],
     };
   }
 }

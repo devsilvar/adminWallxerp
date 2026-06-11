@@ -3,10 +3,17 @@
   "version": "1.0.0",
   "description": "PayMyTax by WallX — SME Tax Calculation, Reporting & Remittance API",
   "main": "dist/server.js",
+  "engines": {
+    "node": ">=20.0.0 <23.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js",
+    "build": "prisma generate && tsc && tsc-alias",
+    "postinstall": "prisma generate",
+    "start": "prisma migrate deploy && node dist/server.js",
+    "start:no-migrate": "node dist/server.js",
+    "start:migrate": "prisma migrate deploy && node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
@@ -15,9 +22,12 @@
     "prisma:reset": "prisma migrate reset --force",
     "db:setup": "npm run prisma:generate && npm run prisma:migrate && npm run prisma:seed",
     "test:setup": "tsx src/test-setup.ts",
+    "test": "jest --config jest.config.ts",
+    "test:unit": "jest --config jest.config.ts tests/unit",
+    "test:integration": "jest --config jest.config.ts tests/integration --runInBand",
+    "test:e2e": "jest --config jest.config.ts tests/e2e --runInBand --forceExit --testTimeout=30000",
     "lint": "eslint src --ext .ts",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "test:e2e": "jest --config jest.config.ts --runInBand --forceExit --testTimeout=30000"
+    "format": "prettier --write \"src/**/*.ts\""
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -35,6 +45,7 @@
     "@aws-sdk/client-s3": "^3.1014.0",
     "@aws-sdk/s3-request-presigner": "^3.1014.0",
     "@prisma/client": "^6.0.1",
+    "@sentry/node": "^10.57.0",
     "@supabase/supabase-js": "^2.100.1",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
@@ -76,6 +87,7 @@
     "prisma": "^6.0.1",
     "supertest": "^7.2.2",
     "ts-jest": "^29.4.6",
+    "tsc-alias": "^1.8.10",
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"

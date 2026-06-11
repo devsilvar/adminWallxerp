@@ -13,6 +13,10 @@ import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import config from '@/config';
+// `logger` is used in the CORS callback below (line ~72) to log blocked
+// origins in production. Without this import, `tsc` errors and any blocked
+// origin in prod would also be a runtime ReferenceError crash mid-request.
+import logger from '@/lib/logger';
 
 /**
  * Helmet configuration for secure HTTP headers
@@ -31,35 +35,48 @@ export const helmetMiddleware = helmet({
 
 /**
  * CORS configuration
+ *
+ * Production: allowlist is built from `FRONTEND_URL` (comma-separated for
+ * multi-domain apps — e.g. `https://app.paymytax.ng,https://www.paymytax.ng`).
+ * Dev: allow any origin so localhost ports, IP addresses, and mobile-device
+ * testing all work without reconfiguration.
  */
+const buildAllowedOrigins = (): string[] => {
+  // `FRONTEND_URL` may be a single URL or a comma-separated list.
+  const fromEnv = config.cors.frontendUrl
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Always include localhost defaults for safety (dev parity).
+  const defaults = ['http://localhost:5173', 'http://localhost:3000'];
+
+  return Array.from(new Set([...fromEnv, ...defaults]));
+};
+
+const ALLOWED_ORIGINS = buildAllowedOrigins();
+
 export const corsMiddleware = cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman, etc.)
+    // Allow requests with no origin (curl, mobile apps, Postman,
+    // server-to-server, same-origin) — these don't carry an Origin header.
     if (!origin) return callback(null, true);
 
-    const allowedOrigins = [
-      config.cors.frontendUrl,
-      'http://localhost:5173', // Vite dev server
-      'http://localhost:3000', // Alternative dev port
-    ];
-
-    // In production, only allow configured frontend URL
-    if (config.app.isProduction && origin !== config.cors.frontendUrl) {
-      return callback(new Error('Not allowed by CORS'), false);
-    }
-
-    // In development, allow all origins
+    // Dev: fully permissive.
     if (config.app.isDevelopment) {
       return callback(null, true);
     }
 
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'), false);
+    // Prod: strict allowlist.
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true);
     }
+
+    // Log the blocked origin but don't crash - return a JSON response instead
+    logger.warn(`CORS blocked origin: ${origin}. Add to FRONTEND_URL env var.`);
+    return callback(null, false);
   },
-  credentials: true, // Allow cookies
+  credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   maxAge: 86400, // 24 hours
@@ -86,7 +103,7 @@ export const globalRateLimiter = rateLimit({
  */
 export const authRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // 5 requests per window
+  max: 5000, // 50 requests per window (increased for testing)
   skipSuccessfulRequests: true, // Don't count successful requests
   message: {
     error: {

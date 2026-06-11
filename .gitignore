@@ -1,0 +1,74 @@
+# =================================
+# Dependencies
+# =================================
+node_modules/
+**/node_modules/
+
+# =================================
+# Build output
+# =================================
+dist/
+**/dist/
+build/
+**/build/
+*.tsbuildinfo
+
+# =================================
+# Logs
+# =================================
+logs/
+**/logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =================================
+# Environment variables — NEVER commit secrets
+# =================================
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+!.env.example
+
+# =================================
+# OS / Editor files
+# =================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# =================================
+# Test / Coverage
+# =================================
+coverage/
+**/coverage/
+.nyc_output/
+
+# =================================
+# Misc
+# =================================
+*.local
+.cache/
+.parcel-cache/
+.turbo/
+
+# =================================
+# Local-only scratch docs (root scratchpads kept out of git)
+# Note: backend/*.md and frontend/*.md (README etc.) ARE committed.
+# =================================
+/*.md
+/*.txt
+!/CLAUDE.md
+!/README.md
