@@ -12,6 +12,9 @@ import {
   ValidateCustomerResult,
   BankRecord,
   RequeryDVAResult,
+  ResolveAccountResult,
+  CreateSubaccountParams,
+  CreateSubaccountResult,
 } from './types';
 
 const BASE_URL = 'https://api.paystack.co';
@@ -177,7 +180,11 @@ export class PaystackProvider implements PaymentProvider {
    * in test mode and the failure mode is "DVA never sets up locally" which is
    * exactly what bit us before. Pass `config.paystack.preferredBank`.
    */
-  async createDedicatedAccount(customerCode: string, preferredBank: string): Promise<CreateDVAResult> {
+  async createDedicatedAccount(
+    customerCode: string,
+    preferredBank: string,
+    subaccount?: string,
+  ): Promise<CreateDVAResult> {
     if (!preferredBank) {
       throw new AppError(
         500,
@@ -189,6 +196,7 @@ export class PaystackProvider implements PaymentProvider {
     const data = await this.request('POST', '/dedicated_account', {
       customer: customerCode,
       preferred_bank: preferredBank,
+      ...(subaccount ? { subaccount } : {}),
     });
 
     // DVA creation can be synchronous or async depending on Paystack
@@ -212,6 +220,38 @@ export class PaystackProvider implements PaymentProvider {
     return {
       accountNumber: data.account_number || accountNumber,
       transactions: data.transactions || [],
+    };
+  }
+
+  /**
+   * Resolve account - name enquiry to verify bank account ownership
+   */
+  async resolveAccount(accountNumber: string, bankCode: string): Promise<ResolveAccountResult> {
+    const data = await this.request(
+      'GET',
+      `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`,
+    );
+
+    return {
+      accountNumber: data.account_number,
+      accountName: data.account_name,
+      bankCode: data.bank_code || bankCode,
+    };
+  }
+
+  /**
+   * Create subaccount for split-settlement
+   */
+  async createSubaccount(params: CreateSubaccountParams): Promise<CreateSubaccountResult> {
+    const data = await this.request('POST', '/subaccount', {
+      business_name: params.businessName,
+      bank_code: params.bankCode,
+      account_number: params.accountNumber,
+      percentage_charge: params.percentageCharge,
+    });
+
+    return {
+      subaccountCode: data.subaccount_code,
     };
   }
 }

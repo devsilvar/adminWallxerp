@@ -64,3 +64,31 @@ export const requery = asyncHandler(async (req: AuthenticatedRequest, res: Respo
     message: result.message,
   });
 });
+
+
+
+export const resolveSettlement = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { bankCode, accountNumber } = req.body;
+
+  const result = await dvaService.resolveSettlementAccount(
+    req.user!.userId,
+    req.params.businessId,
+    bankCode,
+    accountNumber,
+  );
+
+  res.status(200).json({ success: true, data: result });
+});
+
+export const connectSettlement = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { bankCode, bankName, accountNumber, commissionPct } = req.body;
+
+  const result = await dvaService.connectSettlementBank(req.user!.userId, req.params.businessId, {
+    bankCode,
+    bankName,
+    accountNumber,
+    commissionPct,
+  });
+
+  res.status(200).json({ success: true, data: result });
+});

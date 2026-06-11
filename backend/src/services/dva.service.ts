@@ -189,10 +189,11 @@ export async function setupVirtualAccount(userId: string, businessId: string) {
   // Bank slug is mode-aware (test-bank in test mode, wema-bank in live). See
   // config.paystack.preferredBank — env var PAYSTACK_PREFERRED_BANK overrides.
   const preferredBank = config.paystack.preferredBank;
+  const subaccount = business.paystackSubaccountCode || undefined;
 
   let dva;
   try {
-    dva = await provider.createDedicatedAccount(customerCode, preferredBank);
+    dva = await provider.createDedicatedAccount(customerCode, preferredBank, subaccount);
   } catch (err) {
     const isStaleCode =
       err instanceof AppError &&
@@ -207,7 +208,7 @@ export async function setupVirtualAccount(userId: string, businessId: string) {
     });
 
     customerCode = await ensureCustomerCode(true);
-    dva = await provider.createDedicatedAccount(customerCode, preferredBank);
+    dva = await provider.createDedicatedAccount(customerCode, preferredBank, subaccount);
   }
 
   // If Paystack returned account details synchronously, save them now
@@ -497,4 +498,69 @@ export async function requeryDVA(userId: string, businessId: string) {
     transactionCount: result.transactions.length,
     message: 'DVA requeried successfully. Any missing transfers should appear shortly.',
   };
+}
+
+
+
+// ─── Settlement Bank Connection (Subaccount Split-Settlement) ────────────────
+
+export async function resolveSettlementAccount(
+  userId: string,
+  businessId: string,
+  bankCode: string,
+  accountNumber: string,
+) {
+  await verifyBusinessOwnership(userId, businessId);
+  const provider = getPaymentProvider();
+
+  const result = await provider.resolveAccount(accountNumber, bankCode);
+
+  return {
+    bankCode: result.bankCode,
+    accountNumber: result.accountNumber,
+    accountName: result.accountName,
+  };
+}
+
+export async function connectSettlementBank(
+  userId: string,
+  businessId: string,
+  params: { bankCode: string; bankName: string; accountNumber: string; commissionPct?: number },
+) {
+  const business = await verifyBusinessOwnership(userId, businessId);
+  const provider = getPaymentProvider();
+
+  // Re-resolve server-side (never trust client-supplied name)
+  const { accountName } = await provider.resolveAccount(params.accountNumber, params.bankCode);
+
+  const { subaccountCode } = await provider.createSubaccount({
+    businessName: business.businessName,
+    bankCode: params.bankCode,
+    accountNumber: params.accountNumber,
+    percentageCharge: params.commissionPct ?? 0,
+  });
+
+  await prisma.business.update({
+    where: { id: businessId },
+    data: {
+      paystackSubaccountCode: subaccountCode,
+      settlementBankCode: params.bankCode,
+      settlementBankName: params.bankName,
+      settlementAccountNumber: params.accountNumber,
+      settlementAccountName: accountName,
+      platformCommissionPct: params.commissionPct ?? 0,
+      settlementConnectedAt: new Date(),
+    },
+  });
+
+  logAudit({
+    userId,
+    businessId,
+    action: 'settlement.connected',
+    resourceType: 'business',
+    resourceId: businessId,
+    newData: { subaccountCode, bankCode: params.bankCode, accountLast4: params.accountNumber.slice(-4) },
+  });
+
+  return { subaccountCode, accountName, bankName: params.bankName };
 }

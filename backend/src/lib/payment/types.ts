@@ -46,6 +46,25 @@ export interface RequeryDVAResult {
   transactions: any[];
 }
 
+// ─── Subaccount & Settlement Types ─────────────────
+
+export interface ResolveAccountResult {
+  accountNumber: string;
+  accountName: string;
+  bankCode: string;
+}
+
+export interface CreateSubaccountParams {
+  businessName: string;
+  bankCode: string;
+  accountNumber: string;
+  percentageCharge: number; // Platform commission %
+}
+
+export interface CreateSubaccountResult {
+  subaccountCode: string;
+}
+
 // Paystack moved from `type:'bvn'` to `type:'bank_account'` validation —
 // the new shape requires both the customer's BVN *and* a bank account on
 // their name (account_number + bank_code) so Paystack can cross-check.
@@ -89,7 +108,13 @@ export interface PaymentProvider {
   validateCustomer(params: ValidateCustomerParams): Promise<ValidateCustomerResult>;
   // `preferredBank` is required (no default) — resolution lives in
   // `config.paystack.preferredBank`. See PaystackProvider.createDedicatedAccount.
-  createDedicatedAccount(customerCode: string, preferredBank: string): Promise<CreateDVAResult>;
+  createDedicatedAccount(
+    customerCode: string,
+    preferredBank: string,
+    subaccount?: string
+  ): Promise<CreateDVAResult>;
   requeryDVA(accountNumber: string, providerSlug: string): Promise<RequeryDVAResult>;
   listBanks(country?: string): Promise<BankRecord[]>;
+  resolveAccount(accountNumber: string, bankCode: string): Promise<ResolveAccountResult>;
+  createSubaccount(params: CreateSubaccountParams): Promise<CreateSubaccountResult>;
 }
