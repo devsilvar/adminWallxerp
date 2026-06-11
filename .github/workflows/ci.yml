@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    env:
+      DATABASE_URL: postgresql://test:test@localhost:5432/test_db
+      NODE_ENV: test
+      JWT_SECRET: test-secret-for-ci
+      PAYSTACK_SECRET_KEY: sk_test_mock
+      PAYSTACK_PUBLIC_KEY: pk_test_mock
+      PAYSTACK_WEBHOOK_SECRET: sk_test_mock
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: Run migrations
+        working-directory: backend
+        run: npx prisma migrate deploy
+
+      - name: Verify schema matches database
+        working-directory: backend
+        run: npx prisma validate
+
+      - name: TypeScript compilation check
+        working-directory: backend
+        run: npx tsc --noEmit
+
+      - name: Run tests
+        working-directory: backend
+        run: npm run test:e2e
