@@ -272,6 +272,104 @@ export async function processWebhook(signature: string, rawBody: string) {
     });
   }
 
+  if (event.event === 'charge.refunded') {
+    const { reference } = event.data;
+
+    // Check if this was a tax payment
+    const payment = await prisma.taxPayment.findFirst({
+      where: { transactionReference: reference },
+    });
+
+    if (payment) {
+      await prisma.taxPayment.update({
+        where: { id: payment.id },
+        data: { paymentStatus: 'refunded' },
+      });
+
+      logAudit({
+        businessId: payment.businessId,
+        action: 'payment.refunded',
+        resourceType: 'tax_payment',
+        resourceId: payment.id,
+        newData: { reference },
+      });
+
+      await createReminderOnce({
+        businessId: payment.businessId,
+        reminderType: 'payment_refunded',
+        scheduledDate: new Date(),
+        message: `Your tax payment of ${formatNaira(Number(payment.amountPaid))} was refunded`,
+      });
+
+      logger.info('Tax payment refunded', { paymentId: payment.id, reference });
+      return;
+    }
+
+    // Check if this was a DVA transfer (reverse the sale)
+    const sale = await prisma.salesTransaction.findFirst({
+      where: { referenceId: reference, source: 'bank_transfer' },
+    });
+
+    if (sale) {
+      await prisma.salesTransaction.update({
+        where: { id: sale.id },
+        data: { status: 'reversed' },
+      });
+
+      logAudit({
+        businessId: sale.businessId,
+        action: 'sale.reversed',
+        resourceType: 'sales_transaction',
+        resourceId: sale.id,
+        newData: { reference, reason: 'refunded' },
+      });
+
+      logger.info('DVA sale reversed due to refund', { saleId: sale.id, reference });
+      return;
+    }
+
+    // Check if this was an invoice payment (find by linkedSale referenceId)
+    const invoice = await prisma.invoice.findFirst({
+      where: {
+        linkedSale: {
+          referenceId: reference,
+          source: 'online_store',
+        },
+      },
+      include: { linkedSale: true },
+    });
+
+    if (invoice && invoice.linkedSale) {
+      await prisma.$transaction(async (tx) => {
+        // Update invoice to unpaid
+        await tx.invoice.update({
+          where: { id: invoice.id },
+          data: {
+            status: 'overdue',
+            paidAt: null,
+            linkedSaleId: null,
+          },
+        });
+
+        // Reverse the linked sale
+        await tx.salesTransaction.update({
+          where: { id: invoice.linkedSale.id },
+          data: { status: 'reversed' },
+        });
+      });
+
+      logAudit({
+        businessId: invoice.businessId,
+        action: 'invoice.refunded',
+        resourceType: 'invoice',
+        resourceId: invoice.id,
+        newData: { reference },
+      });
+
+      logger.info('Invoice refunded and unlinked', { invoiceId: invoice.id, reference });
+    }
+  }
+
     // Mark webhook as processed
     await prisma.paystackWebhookEvent.update({
       where: { id: webhookEvent.id },

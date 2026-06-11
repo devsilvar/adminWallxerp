@@ -42,6 +42,7 @@ export type ReminderType =
   | 'margin_warning'
   | 'invoice_overdue'
   | 'payment_successful'
+  | 'payment_refunded'
   | 'dva_received'
   | 'transaction_needs_verification';
 
