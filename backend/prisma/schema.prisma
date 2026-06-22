@@ -184,15 +184,41 @@ model TaxPayment {
   paymentDate          DateTime?        @map("payment_date")
   firsRemittanceRef    String?          @map("firs_remittance_ref")
   firsReceiptUrl       String?          @map("firs_receipt_url")
+  remittanceStatus     RemittanceStatus @default(collected) @map("remittance_status")
+  remittanceId         String?          @map("remittance_id")
   createdAt            DateTime         @default(now()) @map("created_at")
   updatedAt            DateTime         @updatedAt @map("updated_at")
   business             Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
   taxReport            MonthlyTaxReport @relation(fields: [taxReportId], references: [id], onDelete: Cascade)
+  remittance           FirsRemittance?  @relation(fields: [remittanceId], references: [id], onDelete: SetNull)
 
   @@index([businessId])
   @@index([transactionReference])
   @@index([paymentStatus])
+  @@index([remittanceStatus])
   @@map("tax_payments")
+}
+
+/// FIRS remittance batches - groups collected tax payments forwarded to FIRS as a lump sum.
+/// FIRS has no API yet, so remittance is recorded manually by an admin (transport='manual').
+model FirsRemittance {
+  id             String           @id @default(uuid())
+  status         RemittanceStatus @default(remitting)
+  totalAmount    Decimal          @default(0) @map("total_amount") @db.Decimal(15, 2)
+  paymentCount   Int              @default(0) @map("payment_count")
+  firsReference  String?          @map("firs_reference")
+  firsReceiptUrl String?          @map("firs_receipt_url")
+  transport      String           @default("manual")
+  note           String?
+  createdBy      String?          @map("created_by")
+  remittedAt     DateTime?        @map("remitted_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  payments       TaxPayment[]
+
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@map("firs_remittances")
 }
 
 /// Tax statements - generated PDF documents
@@ -358,6 +384,12 @@ enum PaymentStatus {
   completed
   failed
   refunded
+}
+
+enum RemittanceStatus {
+  collected
+  remitting
+  remitted
 }
 
 enum SalesSource {
