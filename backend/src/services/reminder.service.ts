@@ -44,9 +44,10 @@ export type ReminderType =
   | 'payment_successful'
   | 'payment_refunded'
   | 'dva_received'
+  | 'dva_validation_failed'
   | 'transaction_needs_verification';
 
-export type ReminderReferenceType = 'invoice' | 'payment' | 'sales_transaction';
+export type ReminderReferenceType = 'invoice' | 'payment' | 'sales_transaction' | 'business';
 
 const REPORT_REMINDER_MESSAGES: Record<
   'tax_deadline' | 'unfiled_tax' | 'unfinalized_report' | 'unpaid_tax',
