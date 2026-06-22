@@ -191,6 +191,33 @@ export async function setupVirtualAccount(userId: string, businessId: string) {
   const preferredBank = config.paystack.preferredBank;
   const subaccount = business.paystackSubaccountCode || undefined;
 
+  // Normalize Paystack's "needs BVN validation" error to the stable
+  // `validation_required` code the frontend (Account.tsx handleSetup) keys on
+  // to open the BVN form. Test mode returns the `validation_required` code
+  // directly, but LIVE mode rejects DVA creation with the message
+  // "Customer has not been identified" and a different/empty code — which
+  // previously fell through to a generic toast and dead-ended the user. We
+  // match on the message text (case-insensitive) and re-throw with the code
+  // the UI already handles, so both modes drive the same BVN-form path.
+  const normalizeValidationError = (err: unknown): never => {
+    if (err instanceof AppError && err.code === 'PAYSTACK_ERROR') {
+      const paystackCode = (err.details as { paystackCode?: string } | undefined)?.paystackCode;
+      const needsIdentification =
+        paystackCode === 'validation_required' ||
+        /not been identified|customer.*not.*identified/i.test(err.message);
+
+      if (needsIdentification) {
+        throw new AppError(
+          400,
+          'Paystack requires your BVN and a bank account in your name before issuing a virtual account.',
+          'PAYSTACK_ERROR',
+          { paystackCode: 'validation_required', type: 'validation' },
+        );
+      }
+    }
+    throw err;
+  };
+
   let dva;
   try {
     dva = await provider.createDedicatedAccount(customerCode, preferredBank, subaccount);
@@ -200,7 +227,7 @@ export async function setupVirtualAccount(userId: string, businessId: string) {
       err.code === 'PAYSTACK_ERROR' &&
       (err.details as { paystackCode?: string } | undefined)?.paystackCode === 'customer_not_found';
 
-    if (!isStaleCode) throw err;
+    if (!isStaleCode) normalizeValidationError(err);
 
     logger.warn('Stale Paystack customer code detected — recreating', {
       businessId,
@@ -208,7 +235,11 @@ export async function setupVirtualAccount(userId: string, businessId: string) {
     });
 
     customerCode = await ensureCustomerCode(true);
-    dva = await provider.createDedicatedAccount(customerCode, preferredBank, subaccount);
+    try {
+      dva = await provider.createDedicatedAccount(customerCode, preferredBank, subaccount);
+    } catch (retryErr) {
+      normalizeValidationError(retryErr);
+    }
   }
 
   // If Paystack returned account details synchronously, save them now
@@ -331,6 +362,146 @@ export async function processDVAAssignmentWebhook(event: any) {
       resourceType: 'business',
       newData: { customerCode, reason: data.message || 'Unknown' },
     });
+  }
+}
+
+// ─── Process Customer Identification Webhook ────────────────
+//
+// Live-mode DVA creation is gated on BVN identity validation, which Paystack
+// processes ASYNCHRONOUSLY after `POST /customer/:code/identification` (our
+// validateCustomer). It then emits one of these terminal events:
+//
+//   customeridentification.success — BVN matched. We now request the DVA
+//     (Wema/Titan) on the SME's behalf so the account just appears without
+//     them having to click "Set Up" again.
+//   customeridentification.failed  — BVN/account-name mismatch (or similar).
+//     We capture the reason on a `dva_validation_failed` reminder so the SME
+//     finally sees WHY (previously invisible — the gap that left setup stuck
+//     in a silent retry loop).
+//
+// Idempotent: success re-creates the DVA via createDedicatedAccount, which
+// short-circuits in setupVirtualAccount-style guards isn't reused here — but
+// Paystack itself returns the existing account if one already exists, and we
+// no-op when virtualAccountNumber is already stored.
+export async function processCustomerIdentificationWebhook(event: any) {
+  const eventType = event.event;
+  const data = event.data || {};
+  const customerCode = data.customer_code || data.customer?.customer_code;
+
+  if (!customerCode) {
+    logger.warn('Customer identification webhook missing customer code', { eventType, data });
+    return;
+  }
+
+  const business = await prisma.business.findFirst({
+    where: { paystackCustomerCode: customerCode },
+  });
+
+  if (!business) {
+    logger.warn('Customer identification webhook: no business for customer code', { customerCode });
+    return;
+  }
+
+  if (eventType === 'customeridentification.success') {
+    logger.info('Customer identification succeeded', { businessId: business.id, customerCode });
+
+    logAudit({
+      businessId: business.id,
+      action: 'dva.customer_identified',
+      resourceType: 'business',
+      resourceId: business.id,
+      newData: { customerCode },
+    });
+
+    // Already has a DVA — nothing to do (a re-validation or replayed webhook).
+    if (business.virtualAccountNumber) {
+      logger.info('Identification success but DVA already assigned — skipping', {
+        businessId: business.id,
+      });
+      return;
+    }
+
+    // Request the dedicated account now that identity is confirmed. Mirrors
+    // the createDedicatedAccount call in setupVirtualAccount (same bank slug +
+    // optional subaccount split). If Paystack returns the account
+    // synchronously we persist it; otherwise the dedicatedaccount.assign.success
+    // webhook will land shortly and processDVAAssignmentWebhook stores it.
+    try {
+      const provider = getPaymentProvider();
+      const subaccount = business.paystackSubaccountCode || undefined;
+      const dva = await provider.createDedicatedAccount(
+        customerCode,
+        config.paystack.preferredBank,
+        subaccount,
+      );
+
+      if (dva.accountNumber) {
+        await prisma.business.update({
+          where: { id: business.id },
+          data: {
+            virtualAccountNumber: dva.accountNumber,
+            virtualAccountBank: dva.bankName,
+          },
+        });
+
+        logAudit({
+          businessId: business.id,
+          action: 'dva.assigned',
+          resourceType: 'business',
+          resourceId: business.id,
+          newData: { accountNumber: dva.accountNumber, bank: dva.bankName, via: 'identification_webhook' },
+        });
+
+        logger.info('DVA assigned after identification success', {
+          businessId: business.id,
+          accountNumber: dva.accountNumber,
+        });
+      } else {
+        logger.info('DVA requested after identification — awaiting assign webhook', {
+          businessId: business.id,
+        });
+      }
+    } catch (err) {
+      logger.error('Failed to create DVA after identification success', {
+        businessId: business.id,
+        customerCode,
+        err: err instanceof Error ? err.message : err,
+      });
+    }
+
+    return;
+  }
+
+  if (eventType === 'customeridentification.failed') {
+    const reason = data.reason || data.message || 'Identity verification failed';
+
+    logger.error('Customer identification failed', { businessId: business.id, customerCode, reason });
+
+    logAudit({
+      businessId: business.id,
+      action: 'dva.customer_identification_failed',
+      resourceType: 'business',
+      resourceId: business.id,
+      newData: { customerCode, reason },
+    });
+
+    // Surface the reason to the SME via the bell. referenceId = customerCode
+    // dedupes repeated failures for the same customer to a single reminder row
+    // (whose message refreshes with the latest reason).
+    void createReminderOnce({
+      businessId: business.id,
+      reminderType: 'dva_validation_failed',
+      scheduledDate: new Date(),
+      message: `We couldn't verify your identity for your virtual account: ${reason}. Please check your BVN and that the bank account is in your name, then try again.`,
+      referenceType: 'business',
+      referenceId: customerCode,
+      updateMessageOnDup: true,
+    }).catch((err) =>
+      logger.warn('Failed to create dva_validation_failed reminder', {
+        businessId: business.id,
+        err: err instanceof Error ? err.message : err,
+      }),
+    );
   }
 }
 
@@ -513,6 +684,7 @@ export async function resolveSettlementAccount(
   await verifyBusinessOwnership(userId, businessId);
   const provider = getPaymentProvider();
 
+  logger.info('Resolving settlement account', { bankCode, accountNumber });
   const result = await provider.resolveAccount(accountNumber, bankCode);
 
   return {
@@ -553,14 +725,40 @@ export async function connectSettlementBank(
     },
   });
 
+  // Retrofit: if a DVA already exists, it was created WITHOUT this subaccount,
+  // so inbound money is still pooling in the platform balance instead of
+  // settling to the SME's bank. Attach the split now so it starts settling.
+  // New DVAs (set up after this point) are born attached via setupVirtualAccount.
+  //
+  // Wrapped so a split-attach failure never loses the already-saved subaccount —
+  // the SME can retry attach via re-connecting, or a new DVA setup will attach
+  // it natively. `splitAttached` lets the caller surface a soft warning.
+  let splitAttached = false;
+  if (business.virtualAccountNumber && business.paystackCustomerCode) {
+    try {
+      await provider.splitDedicatedAccount(business.paystackCustomerCode, subaccountCode);
+      splitAttached = true;
+      logger.info('Subaccount split attached to existing DVA', {
+        businessId,
+        subaccountCode,
+      });
+    } catch (err) {
+      logger.error('Failed to attach subaccount split to existing DVA', {
+        businessId,
+        subaccountCode,
+        err: err instanceof Error ? err.message : err,
+      });
+    }
+  }
+
   logAudit({
     userId,
     businessId,
     action: 'settlement.connected',
     resourceType: 'business',
     resourceId: businessId,
-    newData: { subaccountCode, bankCode: params.bankCode, accountLast4: params.accountNumber.slice(-4) },
+    newData: { subaccountCode, bankCode: params.bankCode, accountLast4: params.accountNumber.slice(-4), splitAttached },
   });
 
-  return { subaccountCode, accountName, bankName: params.bankName };
+  return { subaccountCode, accountName, bankName: params.bankName, splitAttached };
 }

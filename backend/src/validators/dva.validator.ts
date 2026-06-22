@@ -36,3 +36,35 @@ export const validateCustomerSchema = z.object({
 });
 
 export type ValidateCustomerInput = z.infer<typeof validateCustomerSchema>;
+
+/**
+ * Settlement bank connection (Option A subaccount split-settlement).
+ *
+ * `resolveSettlementSchema` is the name-enquiry preview (bank + account →
+ * resolved account name). `connectSettlementSchema` commits it: it carries the
+ * human-readable `bankName` for display (the resolved account name is fetched
+ * server-side, never trusted from the client) and an optional platform
+ * commission percentage (0–100). Mirrors the NUBAN/NIBSS shapes above.
+ */
+export const resolveSettlementSchema = z.object({
+  bankCode: z
+    .string()
+    .trim()
+    .regex(/^\d{3,6}$/, 'Bank code must be a 3-6 digit NIBSS code'),
+  accountNumber: z
+    .string()
+    .trim()
+    .regex(/^\d{10}$/, 'Account number must be exactly 10 digits (NUBAN)'),
+});
+
+export const connectSettlementSchema = resolveSettlementSchema.extend({
+  bankName: z.string().trim().min(1, 'Bank name is required'),
+  commissionPct: z
+    .number()
+    .min(0, 'Commission cannot be negative')
+    .max(100, 'Commission cannot exceed 100%')
+    .optional(),
+});
+
+export type ResolveSettlementInput = z.infer<typeof resolveSettlementSchema>;
+export type ConnectSettlementInput = z.infer<typeof connectSettlementSchema>;

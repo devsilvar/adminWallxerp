@@ -15,6 +15,7 @@ import {
   ResolveAccountResult,
   CreateSubaccountParams,
   CreateSubaccountResult,
+  SplitDedicatedAccountResult,
 } from './types';
 
 const BASE_URL = 'https://api.paystack.co';
@@ -143,30 +144,101 @@ export class PaystackProvider implements PaymentProvider {
   /**
    * Fetch the list of banks Paystack supports for the given country.
    *
-   * Used by `bank.service.ts` to populate the BVN-validation dropdown. Heavy
-   * to call on every request — 24h cached in the `banks` table. The response
-   * is paginated by Paystack but the Nigeria list is ~50 entries; we request
-   * `perPage=100` and surface a single page. If the list ever exceeds 100 we
-   * will need to paginate (the API supports `?next` cursors).
+   * Used by `bank.service.ts` to populate the bank dropdowns (BVN validation +
+   * settlement). Heavy to call on every request — 24h cached in the `banks`
+   * table. The full Nigerian list (including microfinance banks) is several
+   * HUNDRED entries, so a single `perPage=100` page truncates it badly. We use
+   * Paystack's cursor pagination (`use_cursor=true` → `meta.next`) and follow
+   * the cursor until exhausted, accumulating every page. A hard page cap stops
+   * a misbehaving cursor from looping forever.
    */
   async listBanks(country = 'nigeria'): Promise<BankRecord[]> {
-    const path = `/bank?country=${encodeURIComponent(country)}&perPage=100`;
-    const data = await this.request<Array<Record<string, any>>>('GET', path);
+    const out: BankRecord[] = [];
+    const seen = new Set<string>();
+    let next: string | null = null;
+    const MAX_PAGES = 20; // 20 × 100 = 2000 banks, far above the real total
 
-    if (!Array.isArray(data)) {
-      throw new AppError(502, 'Paystack returned unexpected bank list shape', 'PAYSTACK_ERROR');
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const params = new URLSearchParams({
+        country,
+        use_cursor: 'true',
+        perPage: '100',
+      });
+      if (next) params.set('next', next);
+
+      const { data, meta } = await this.requestWithMeta<Array<Record<string, any>>>(
+        'GET',
+        `/bank?${params.toString()}`,
+      );
+
+      if (!Array.isArray(data)) {
+        throw new AppError(502, 'Paystack returned unexpected bank list shape', 'PAYSTACK_ERROR');
+      }
+
+      for (const b of data) {
+        // De-dupe by code — cursor overlaps can repeat the boundary row.
+        if (seen.has(b.code)) continue;
+        seen.add(b.code);
+        out.push({
+          name: b.name,
+          slug: b.slug,
+          code: b.code,
+          longCode: b.longcode ?? null,
+          // Canonicalise to lowercase. Paystack returns "Nigeria" for most
+          // rows but omits `country` on a few (e.g. Sparkle), which then fell
+          // back to the lowercase `country` param. That casing split made the
+          // case-sensitive cache query match only the lowercase rows. Always
+          // store lowercase so reads are consistent.
+          country: (b.country ?? country).toLowerCase(),
+          currency: b.currency ?? 'NGN',
+          type: b.type ?? null,
+          active: b.active !== false,
+        });
+      }
+
+      next = meta?.next ?? null;
+      if (!next) break;
     }
 
-    return data.map((b) => ({
-      name: b.name,
-      slug: b.slug,
-      code: b.code,
-      longCode: b.longcode ?? null,
-      country: b.country ?? country,
-      currency: b.currency ?? 'NGN',
-      type: b.type ?? null,
-      active: b.active !== false,
-    }));
+    return out;
+  }
+
+  /**
+   * Like `request()` but returns Paystack's `meta` block alongside `data` —
+   * needed for cursor pagination (`meta.next`), which the standard helper
+   * discards.
+   */
+  private async requestWithMeta<T = any>(
+    method: string,
+    path: string,
+    body?: Record<string, any>,
+  ): Promise<{ data: T; meta?: { next?: string | null; previous?: string | null; perPage?: number } }> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.secretKey}`,
+    };
+    if (body) headers['Content-Type'] = 'application/json';
+
+    const response = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+
+    const responseData = (await response.json()) as PaystackResponse<T> & {
+      meta?: { next?: string | null; previous?: string | null; perPage?: number };
+    };
+
+    if (!responseData.status) {
+      const message = responseData.message || 'Paystack request failed';
+      throw new AppError(
+        response.status >= 400 && response.status < 500 ? 400 : 502,
+        message,
+        'PAYSTACK_ERROR',
+        { paystackCode: responseData.code, type: responseData.type },
+      );
+    }
+
+    return { data: responseData.data, meta: responseData.meta };
   }
 
   /**
@@ -252,6 +324,31 @@ export class PaystackProvider implements PaymentProvider {
 
     return {
       subaccountCode: data.subaccount_code,
+    };
+  }
+
+  /**
+   * Attach (or update) a subaccount split on an existing dedicated virtual
+   * account — the retrofit path for DVAs created before the SME connected a
+   * payout bank. Idempotent on Paystack's side: re-posting the same subaccount
+   * just re-sets it, so calling this on an already-split DVA is safe.
+   *
+   * Endpoint: POST /dedicated_account/split with { customer, subaccount }.
+   * `customer` is the Paystack customer code (CUS_xxxx) that owns the DVA.
+   * Reference: https://paystack.com/docs/api/dedicated-virtual-account/
+   */
+  async splitDedicatedAccount(
+    customerCode: string,
+    subaccount: string,
+  ): Promise<SplitDedicatedAccountResult> {
+    const data = await this.request('POST', '/dedicated_account/split', {
+      customer: customerCode,
+      subaccount,
+    });
+
+    return {
+      accountNumber: data?.account_number ?? null,
+      bankName: data?.bank?.name ?? null,
     };
   }
 }

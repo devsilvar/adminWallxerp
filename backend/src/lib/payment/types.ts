@@ -65,6 +65,11 @@ export interface CreateSubaccountResult {
   subaccountCode: string;
 }
 
+export interface SplitDedicatedAccountResult {
+  accountNumber: string | null;
+  bankName: string | null;
+}
+
 // Paystack moved from `type:'bvn'` to `type:'bank_account'` validation —
 // the new shape requires both the customer's BVN *and* a bank account on
 // their name (account_number + bank_code) so Paystack can cross-check.
@@ -117,4 +122,12 @@ export interface PaymentProvider {
   listBanks(country?: string): Promise<BankRecord[]>;
   resolveAccount(accountNumber: string, bankCode: string): Promise<ResolveAccountResult>;
   createSubaccount(params: CreateSubaccountParams): Promise<CreateSubaccountResult>;
+  // Attach (or update) a subaccount split on an EXISTING dedicated virtual
+  // account. New DVAs get the subaccount at creation time via
+  // createDedicatedAccount's `subaccount` arg; this is the retrofit path for
+  // accounts that were created before the SME connected their payout bank.
+  splitDedicatedAccount(
+    customerCode: string,
+    subaccount: string
+  ): Promise<SplitDedicatedAccountResult>;
 }

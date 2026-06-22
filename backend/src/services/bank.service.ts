@@ -72,7 +72,10 @@ function toDto(row: {
  */
 async function cacheIsStale(country: string): Promise<boolean> {
   const newest = await prisma.bank.findFirst({
-    where: { country },
+    // Case-insensitive: cached rows may have mixed casing ("Nigeria" vs
+    // "nigeria") from before we canonicalised to lowercase. Matching only the
+    // exact-case param previously wedged this on a single stray row.
+    where: { country: { equals: country, mode: 'insensitive' } },
     orderBy: { lastFetchedAt: 'desc' },
     select: { lastFetchedAt: true },
   });
@@ -107,7 +110,7 @@ async function refreshFromProvider(country: string): Promise<void> {
           name: b.name,
           slug: b.slug,
           longCode: b.longCode ?? null,
-          country: b.country ?? country,
+          country: (b.country ?? country).toLowerCase(),
           currency: b.currency ?? 'NGN',
           type: b.type ?? null,
           active: b.active,
@@ -116,7 +119,7 @@ async function refreshFromProvider(country: string): Promise<void> {
           code: b.code,
           name: b.name,
           longCode: b.longCode ?? null,
-          country: b.country ?? country,
+          country: (b.country ?? country).toLowerCase(),
           currency: b.currency ?? 'NGN',
           type: b.type ?? null,
           active: b.active,
@@ -150,7 +153,10 @@ export async function listBanks(country = DEFAULT_COUNTRY): Promise<BankDto[]> {
   }
 
   const rows = await prisma.bank.findMany({
-    where: { country, active: true },
+    // Case-insensitive country match — see cacheIsStale for why. Without this
+    // a "Nigeria"/"nigeria" casing split silently hides every row whose casing
+    // differs from the param (the Sparkle-only-dropdown bug).
+    where: { country: { equals: country, mode: 'insensitive' }, active: true },
     orderBy: { name: 'asc' },
     select: {
       id: true,

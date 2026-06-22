@@ -2,7 +2,11 @@ import { Response } from 'express';
 import { asyncHandler } from '@/middleware/errorHandler';
 import { AuthenticatedRequest } from '@/types';
 import * as dvaService from '@/services/dva.service';
-import { validateCustomerSchema } from '@/validators/dva.validator';
+import {
+  validateCustomerSchema,
+  resolveSettlementSchema,
+  connectSettlementSchema,
+} from '@/validators/dva.validator';
 
 export const setupVirtualAccount = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const result = await dvaService.setupVirtualAccount(
@@ -68,7 +72,7 @@ export const requery = asyncHandler(async (req: AuthenticatedRequest, res: Respo
 
 
 export const resolveSettlement = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { bankCode, accountNumber } = req.body;
+  const { bankCode, accountNumber } = resolveSettlementSchema.parse(req.body);
 
   const result = await dvaService.resolveSettlementAccount(
     req.user!.userId,
@@ -81,7 +85,7 @@ export const resolveSettlement = asyncHandler(async (req: AuthenticatedRequest, 
 });
 
 export const connectSettlement = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { bankCode, bankName, accountNumber, commissionPct } = req.body;
+  const { bankCode, bankName, accountNumber, commissionPct } = connectSettlementSchema.parse(req.body);
 
   const result = await dvaService.connectSettlementBank(req.user!.userId, req.params.businessId, {
     bankCode,
