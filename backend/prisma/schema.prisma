@@ -13,6 +13,10 @@ model User {
   email               String     @unique
   passwordHash        String     @map("password_hash")
   phone               String?    @unique
+  bvn                 String?    @map("bvn") @db.VarChar(11)
+  nin                 String?    @map("nin") @db.VarChar(11)
+  bvnVerifiedAt       DateTime?  @map("bvn_verified_at")
+  ninVerifiedAt       DateTime?  @map("nin_verified_at")
   isVerified          Boolean    @default(false) @map("is_verified")
   isActive            Boolean    @default(true) @map("is_active")
   lastLoginAt         DateTime?  @map("last_login_at")
@@ -26,6 +30,7 @@ model User {
 
   @@index([email])
   @@index([phone])
+  @@index([bvn])
   @@map("users")
 }
 
@@ -127,20 +132,22 @@ model SalesTransaction {
 
 /// Expenses - business expenditure tracking
 model Expense {
-  id          String          @id @default(uuid())
-  businessId  String          @map("business_id")
-  category    ExpenseCategory
-  description String
-  amount      Decimal         @db.Decimal(15, 2)
-  expenseDate DateTime        @map("expense_date") @db.Date
-  receiptUrl  String?         @map("receipt_url")
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
-  createdBy   String?         @map("created_by")
-  business    Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id           String          @id @default(uuid())
+  businessId   String          @map("business_id")
+  category     ExpenseCategory
+  description  String
+  amount       Decimal         @db.Decimal(15, 2)
+  expenseDate  DateTime        @map("expense_date") @db.Date
+  receiptUrl   String?         @map("receipt_url")
+  isDeductible Boolean         @default(true) @map("is_deductible")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  createdBy    String?         @map("created_by")
+  business     Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, expenseDate(sort: Desc)])
   @@index([category])
+  @@index([businessId, isDeductible])
   @@map("expenses")
 }
 

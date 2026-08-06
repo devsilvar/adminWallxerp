@@ -47,6 +47,7 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
 
 export interface ValidateCustomerInput {
   bvn: string;
+  nin?: string;
   bankCode: string;
   accountNumber: string;
 }
@@ -78,6 +79,17 @@ export async function validateCustomer(
     lastName,
   });
 
+  // Store BVN and NIN on User record after successful Paystack validation
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      bvn: input.bvn,
+      nin: input.nin || undefined,
+      bvnVerifiedAt: new Date(),
+      ninVerifiedAt: input.nin ? new Date() : undefined,
+    },
+  });
+
   logAudit({
     userId,
     businessId,
@@ -89,6 +101,7 @@ export async function validateCustomer(
     newData: {
       bankCode: input.bankCode,
       accountLast4: input.accountNumber.slice(-4),
+      ninProvided: !!input.nin,
     },
   });
 

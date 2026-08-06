@@ -70,7 +70,7 @@ export async function calculateTax(
       _sum: { amount: true },
     }),
     prisma.expense.aggregate({
-      where: { businessId, expenseDate: dateFilter },
+      where: { businessId, expenseDate: dateFilter, isDeductible: true },
       _sum: { amount: true },
     }),
   ]);

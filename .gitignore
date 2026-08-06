@@ -65,6 +65,12 @@ coverage/
 .turbo/
 
 # =================================
+# Local-only test tooling / artifacts
+# =================================
+ngrok.zip
+run-dva-test.bat
+
+# =================================
 # Local-only scratch docs (root scratchpads kept out of git)
 # Note: backend/*.md and frontend/*.md (README etc.) ARE committed.
 # =================================

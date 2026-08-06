@@ -5,7 +5,11 @@ import logger from '@/lib/logger';
 import { AppError } from '@/middleware/errorHandler';
 import { logAudit } from '@/lib/audit';
 import { getPaymentProvider } from '@/lib/payment';
-import { processDVAAssignmentWebhook, processDVATransferWebhook } from '@/services/dva.service';
+import {
+  processDVAAssignmentWebhook,
+  processDVATransferWebhook,
+  processCustomerIdentificationWebhook,
+} from '@/services/dva.service';
 import { createReminderOnce } from '@/services/reminder.service';
 import { formatNaira, formatTaxMonth } from '@/lib/format';
 
@@ -97,20 +101,48 @@ export async function initiatePayment(
     throw new AppError(400, 'No tax payable for this report', 'ZERO_TAX');
   }
 
-  // Generate unique reference
-  const reference = `PMT-${businessId.slice(0, 8)}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-
-  // Create pending payment record
-  const payment = await prisma.taxPayment.create({
-    data: {
-      businessId,
-      taxReportId,
-      amountPaid: amount,
-      paymentMethod: 'card',
-      transactionReference: reference,
-      paymentStatus: 'pending',
-    },
+  // Idempotency: if an open pending payment already exists for this report,
+  // reuse it instead of spawning a second Paystack transaction. Guards against
+  // double-clicks, refreshes, back-button, and multiple tabs — without
+  // requiring the client to send an idempotency key. Paystack's
+  // /transaction/initialize is itself idempotent on `reference`, so
+  // re-initializing the same reference returns the same checkout session.
+  // A stale pending whose amount no longer matches the report (sales/expenses
+  // edited between attempts) is abandoned and replaced so the SME is never
+  // sent to pay the wrong figure.
+  const existingPending = await prisma.taxPayment.findFirst({
+    where: { taxReportId, paymentStatus: 'pending' },
+    orderBy: { createdAt: 'desc' },
   });
+
+  let payment = existingPending;
+
+  if (existingPending && Number(existingPending.amountPaid) !== amount) {
+    await prisma.taxPayment.update({
+      where: { id: existingPending.id },
+      data: { paymentStatus: 'failed', gatewayResponse: { abandoned: 'amount_changed' } },
+    });
+    payment = null;
+  }
+
+  if (!payment) {
+    // Generate unique reference
+    const reference = `PMT-${businessId.slice(0, 8)}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+
+    // Create pending payment record
+    payment = await prisma.taxPayment.create({
+      data: {
+        businessId,
+        taxReportId,
+        amountPaid: amount,
+        paymentMethod: 'card',
+        transactionReference: reference,
+        paymentStatus: 'pending',
+      },
+    });
+  }
+
+  const reference = payment.transactionReference;
 
   // Update report status to processing
   await prisma.monthlyTaxReport.update({
@@ -207,6 +239,15 @@ export async function processWebhook(signature: string, rawBody: string) {
   // ─── DVA Assignment Webhooks ──────────────────────────────
   if (event.event === 'dedicatedaccount.assign.success' || event.event === 'dedicatedaccount.assign.failed') {
     await processDVAAssignmentWebhook(event);
+    return;
+  }
+
+  // ─── Customer Identification Webhooks (async BVN validation result) ──
+  if (
+    event.event === 'customeridentification.success' ||
+    event.event === 'customeridentification.failed'
+  ) {
+    await processCustomerIdentificationWebhook(event);
     return;
   }
 
