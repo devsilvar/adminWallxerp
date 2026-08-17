@@ -90,6 +90,14 @@ export async function validateCustomer(
     },
   });
 
+  // A new attempt is now in flight with Paystack — clear any stale failure
+  // from a previous attempt so the UI doesn't show a leftover error while
+  // this submission is being processed.
+  await prisma.business.update({
+    where: { id: businessId },
+    data: { dvaFailureReason: null, dvaFailedAt: null },
+  });
+
   logAudit({
     userId,
     businessId,
@@ -262,6 +270,8 @@ export async function setupVirtualAccount(userId: string, businessId: string) {
       data: {
         virtualAccountNumber: dva.accountNumber,
         virtualAccountBank: dva.bankName,
+        dvaFailureReason: null,
+        dvaFailedAt: null,
       },
     });
 
@@ -314,9 +324,94 @@ export async function getVirtualAccount(userId: string, businessId: string) {
     };
   }
 
+  // Surfaces a `customeridentification.failed` / `dedicatedaccount.assign.failed`
+  // webhook that landed since the last check. Without this, the frontend's
+  // poll only ever sees 'none' — identical to "never started" — and has no
+  // way to distinguish "still processing" from "already failed", so it just
+  // spins until its own client-side timeout regardless of what actually
+  // happened on Paystack's side.
+  if (business.dvaFailureReason) {
+    return {
+      status: 'failed',
+      message: business.dvaFailureReason,
+      failedAt: business.dvaFailedAt,
+    };
+  }
+
   return {
     status: 'none',
     message: 'No virtual account set up for this business.',
+  };
+}
+
+// ─── Get DVA Balance / Transaction Summary ──────────────────
+//
+// IMPORTANT: this is NOT a live query against Paystack. Paystack does not
+// expose a running balance for a specific dedicated account — a transfer
+// either has already generated a charge.success (and therefore a row in
+// our own SalesTransaction table via processDVATransferWebhook), or it
+// hasn't happened yet. There is nothing else to ask Paystack for. This
+// endpoint summarizes OUR OWN records, which is the only "balance" that
+// actually exists for a DVA under split-settlement.
+//
+// Two totals on purpose: `confirmed` only counts sales a human has verified
+// (see POST /sales/:id/verify) and is what feeds tax calculations. Every
+// DVA transfer lands in `pendingVerification` first — see the explicit
+// `status: 'pending', needsVerification: true` inside the
+// prisma.salesTransaction.create() call in processDVATransferWebhook below.
+// A transaction sitting only in pendingVerification is real money that has
+// already settled to the business's bank — it just hasn't been confirmed
+// as taxable revenue yet.
+
+export async function getDVABalance(userId: string, businessId: string) {
+  const business = await verifyBusinessOwnership(userId, businessId);
+
+  // Scoped to DVA-originated transactions specifically — source alone
+  // ('bank_transfer') would also catch manually-logged bank transfer sales
+  // that a user entered by hand via POST /sales, which aren't DVA money.
+  const dvaFilter = {
+    businessId: business.id,
+    source: 'bank_transfer' as const,
+    metadata: { path: ['channel'], equals: 'dva' },
+  };
+
+  const [confirmed, pending, lastTransaction] = await Promise.all([
+    prisma.salesTransaction.aggregate({
+      where: { ...dvaFilter, status: 'confirmed' },
+      _sum: { amount: true },
+      _count: true,
+    }),
+    prisma.salesTransaction.aggregate({
+      where: { ...dvaFilter, needsVerification: true },
+      _sum: { amount: true },
+      _count: true,
+    }),
+    prisma.salesTransaction.findFirst({
+      where: dvaFilter,
+      orderBy: { transactionDate: 'desc' },
+      select: { amount: true, transactionDate: true, status: true },
+    }),
+  ]);
+
+  return {
+    accountNumber: business.virtualAccountNumber,
+    accountStatus: business.virtualAccountNumber ? 'active' : 'none',
+    confirmed: {
+      total: confirmed._sum.amount ?? 0,
+      count: confirmed._count,
+    },
+    pendingVerification: {
+      total: pending._sum.amount ?? 0,
+      count: pending._count,
+    },
+    lastTransaction: lastTransaction
+      ? {
+          amount: lastTransaction.amount,
+          date: lastTransaction.transactionDate,
+          status: lastTransaction.status,
+        }
+      : null,
+    note: 'confirmed = verified sales that count toward tax. pendingVerification = money already received via the DVA but awaiting confirmation at POST /sales/:id/verify. This is computed from our own records, not a live Paystack balance check.',
   };
 }
 
@@ -351,6 +446,8 @@ export async function processDVAAssignmentWebhook(event: any) {
       data: {
         virtualAccountNumber: accountNumber,
         virtualAccountBank: bankName || 'Wema Bank',
+        dvaFailureReason: null,
+        dvaFailedAt: null,
       },
     });
 
@@ -367,13 +464,31 @@ export async function processDVAAssignmentWebhook(event: any) {
 
   if (eventType === 'dedicatedaccount.assign.failed') {
     const customerCode = data.customer?.customer_code;
+    const reason = data.message || 'Dedicated account assignment failed';
 
     logger.error('DVA assignment failed', { customerCode, data });
 
+    // Previously this branch never looked up the business, so the failure
+    // was only ever visible in logs/audit — never surfaced to the SME via
+    // GET /dva/virtual-account. Mirrors the success branch's lookup so the
+    // frontend poll can stop spinning and show the real reason.
+    const business = customerCode
+      ? await prisma.business.findFirst({ where: { paystackCustomerCode: customerCode } })
+      : null;
+
+    if (business) {
+      await prisma.business.update({
+        where: { id: business.id },
+        data: { dvaFailureReason: reason, dvaFailedAt: new Date() },
+      });
+    }
+
     logAudit({
+      businessId: business?.id,
       action: 'dva.failed',
       resourceType: 'business',
-      newData: { customerCode, reason: data.message || 'Unknown' },
+      resourceId: business?.id,
+      newData: { customerCode, reason },
     });
   }
 }
@@ -426,6 +541,13 @@ export async function processCustomerIdentificationWebhook(event: any) {
       newData: { customerCode },
     });
 
+    // Identification succeeded — clear any prior failure record so a stale
+    // reason from an earlier attempt doesn't linger on the business row.
+    await prisma.business.update({
+      where: { id: business.id },
+      data: { dvaFailureReason: null, dvaFailedAt: null },
+    });
+
     // Already has a DVA — nothing to do (a re-validation or replayed webhook).
     if (business.virtualAccountNumber) {
       logger.info('Identification success but DVA already assigned — skipping', {
@@ -454,6 +576,8 @@ export async function processCustomerIdentificationWebhook(event: any) {
           data: {
             virtualAccountNumber: dva.accountNumber,
             virtualAccountBank: dva.bankName,
+            dvaFailureReason: null,
+            dvaFailedAt: null,
           },
         });
 
@@ -489,6 +613,13 @@ export async function processCustomerIdentificationWebhook(event: any) {
     const reason = data.reason || data.message || 'Identity verification failed';
 
     logger.error('Customer identification failed', { businessId: business.id, customerCode, reason });
+
+    // Persist so GET /dva/virtual-account can report `status: 'failed'` with
+    // the reason instead of the frontend polling forever with no signal.
+    await prisma.business.update({
+      where: { id: business.id },
+      data: { dvaFailureReason: reason, dvaFailedAt: new Date() },
+    });
 
     logAudit({
       businessId: business.id,
@@ -529,8 +660,14 @@ export async function processDVATransferWebhook(event: any) {
   // Only handle dedicated_nuban transfers
   if (channel !== 'dedicated_nuban') return false;
 
-  // Find the virtual account number from the transaction
+  // Find the virtual account number from the transaction.
+  // `authorization.receiver_bank_account_number` is the field real Paystack
+  // charge.success payloads use for DVA transfers — checked first. The other
+  // two are kept as fallbacks in case Paystack's shape varies, but this order
+  // has NOT been confirmed against a live payload yet. First thing to do:
+  // log one real test-mode transfer's raw body and confirm which path hits.
   const accountNumber =
+    data.authorization?.receiver_bank_account_number ||
     data.dedicated_account?.account_number ||
     data.metadata?.receiver_account_number;
 
@@ -674,6 +811,7 @@ export async function requeryDVA(userId: string, businessId: string) {
     resourceId: businessId,
     newData: { transactionCount: result.transactions.length },
   });
+  // ...
 
   logger.info('DVA requeried', { businessId, userId, transactionCount: result.transactions.length });
 
