@@ -3,25 +3,9 @@ import logger from '@/lib/logger';
 import { AppError } from '@/middleware/errorHandler';
 import { logAudit } from '@/lib/audit';
 import { CreateExpenseInput, UpdateExpenseInput } from '@/validators/expense.validator';
+import { verifyBusinessOwnership } from '@/lib/ownership';
 
 // ─── Helpers ────────────────────────────────────────────────
-
-async function verifyBusinessOwnership(
-  userId: string,
-  businessId: string,
-  db: TxClient | typeof prisma = prisma
-) {
-  const business = await db.business.findUnique({ where: { id: businessId } });
-
-  if (!business) {
-    throw new AppError(404, 'Business not found', 'BUSINESS_NOT_FOUND');
-  }
-  if (business.userId !== userId) {
-    throw new AppError(403, 'You do not have access to this business', 'FORBIDDEN');
-  }
-
-  return business;
-}
 
 async function assertMonthNotLocked(
   businessId: string,
@@ -80,6 +64,7 @@ export async function createExpense(
       businessId,
       category: input.category,
       description: input.description,
+      categoryDetail: input.categoryDetail ?? null,
       amount: input.amount,
       expenseDate: input.expenseDate,
       receiptUrl: input.receiptUrl,
@@ -94,7 +79,7 @@ export async function createExpense(
     action: 'expense.created',
     resourceType: 'expense',
     resourceId: expense.id,
-    newData: { amount: input.amount, category: input.category, isDeductible: expense.isDeductible },
+    newData: { amount: input.amount, category: input.category, categoryDetail: input.categoryDetail ?? null, isDeductible: expense.isDeductible },
   }, tx);
 
   logger.info('Expense created', { expenseId: expense.id, businessId, userId });
@@ -200,6 +185,7 @@ export async function updateExpense(
   const data: Record<string, any> = {};
   if (input.category !== undefined) data.category = input.category;
   if (input.description !== undefined) data.description = input.description;
+  if (input.categoryDetail !== undefined) data.categoryDetail = input.categoryDetail;
   if (input.amount !== undefined) data.amount = input.amount;
   if (input.expenseDate !== undefined) data.expenseDate = input.expenseDate;
   if (input.receiptUrl !== undefined) data.receiptUrl = input.receiptUrl;
@@ -299,12 +285,14 @@ export async function getMonthlySummary(
       where: { businessId, expenseDate: dateFilter },
     }),
 
-    // Confirmed sales for the same month — needed for expense intelligence
+    // Completed sales for the same month — needed for expense intelligence.
+    // Same settled-status rule as the sales overview: 'confirmed' is canonical,
+    // 'completed' is the legacy manual-entry status.
     prisma.salesTransaction.aggregate({
       where: {
         businessId,
         transactionDate: dateFilter,
-        status: 'confirmed',
+        status: { in: ['confirmed', 'completed'] },
       },
       _sum: { amount: true },
     }),

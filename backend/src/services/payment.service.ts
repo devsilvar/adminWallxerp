@@ -5,11 +5,13 @@ import logger from '@/lib/logger';
 import { AppError } from '@/middleware/errorHandler';
 import { logAudit } from '@/lib/audit';
 import { getPaymentProvider } from '@/lib/payment';
+import { verifyBusinessOwnership } from '@/lib/ownership';
 import {
   processDVAAssignmentWebhook,
   processDVATransferWebhook,
   processCustomerIdentificationWebhook,
 } from '@/services/dva.service';
+import { applyTransferOutcome } from '@/services/settlement.service';
 import { createReminderOnce } from '@/services/reminder.service';
 import { formatNaira, formatTaxMonth } from '@/lib/format';
 
@@ -47,20 +49,80 @@ async function firePaymentSuccessReminder(payment: {
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────────
+async function dispatchPaymentReceiptEmail(payment: {
+  id: string;
+  businessId: string;
+  taxReportId: string;
+  amountPaid: number | string;
+  transactionReference: string;
+  paymentDate?: Date;
+}) {
+  try {
+    const business = await prisma.business.findUnique({
+      where: { id: payment.businessId },
+      include: { user: { select: { email: true } } },
+    });
+    const report = await prisma.monthlyTaxReport.findUnique({
+      where: { id: payment.taxReportId },
+    });
 
-async function verifyBusinessOwnership(userId: string, businessId: string) {
-  const business = await prisma.business.findUnique({ where: { id: businessId } });
+    if (!business || !report || !business.user?.email) return;
 
-  if (!business) {
-    throw new AppError(404, 'Business not found', 'BUSINESS_NOT_FOUND');
+    const { getTaxPaymentReceipt } = await import('@/services/receipt.service');
+    const { sendEmail } = await import('@/lib/email');
+    const { generatePaymentReceiptHtml, generatePaymentReceiptText } = await import(
+      '@/lib/email/templates/payment-receipt'
+    );
+
+    const receipt = await getTaxPaymentReceipt(business.userId, business.id, payment.id);
+    const taxMonthLabel = formatTaxMonth(report.taxMonth);
+    const amountFormatted = formatNaira(payment.amountPaid);
+    const paymentDateStr = (payment.paymentDate || new Date()).toLocaleDateString('en-NG', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+
+    await sendEmail({
+      to: business.user.email,
+      subject: `Tax Payment Receipt - ${taxMonthLabel} (${amountFormatted})`,
+      html: generatePaymentReceiptHtml({
+        businessName: business.businessName,
+        ownerName: business.ownerName,
+        amountFormatted,
+        taxMonthLabel,
+        paymentReference: payment.transactionReference,
+        paymentDate: paymentDateStr,
+        receiptNumber: receipt.receiptNumber,
+      }),
+      text: generatePaymentReceiptText({
+        businessName: business.businessName,
+        ownerName: business.ownerName,
+        amountFormatted,
+        taxMonthLabel,
+        paymentReference: payment.transactionReference,
+        paymentDate: paymentDateStr,
+        receiptNumber: receipt.receiptNumber,
+      }),
+      attachments: [
+        {
+          filename: receipt.filename,
+          content: receipt.buffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    });
+
+    logger.info('Tax payment receipt email dispatched', { paymentId: payment.id, to: business.user.email });
+  } catch (err) {
+    logger.warn('Failed to send payment receipt email', {
+      paymentId: payment.id,
+      err: err instanceof Error ? err.message : err,
+    });
   }
-  if (business.userId !== userId) {
-    throw new AppError(403, 'You do not have access to this business', 'FORBIDDEN');
-  }
-
-  return business;
 }
+
+// ─── Helpers ────────────────────────────────────────────────
 
 // ─── Initiate Payment ───────────────────────────────────────
 
@@ -214,6 +276,8 @@ export async function initiatePayment(
     data: { paymentStatus: 'processing' },
   });
 
+  const callback = callbackUrl || `${config.cors.frontendUrl}/payments/callback?businessId=${businessId}&reportId=${taxReportId}&paymentId=${payment.id}&reference=${reference}`;
+
   // Initialize with payment provider
   const provider = getPaymentProvider();
   const result = await provider.initialize({
@@ -226,7 +290,7 @@ export async function initiatePayment(
       taxReportId,
       businessName: business.businessName,
     },
-    callbackUrl,
+    callbackUrl: callback,
   });
 
   logAudit({
@@ -382,6 +446,16 @@ export async function processWebhook(signature: string, rawBody: string) {
       taxReportId: payment.taxReportId,
       amountPaid: Number(payment.amountPaid),
     });
+
+    // Fire-and-forget email receipt with PDF attachment
+    void dispatchPaymentReceiptEmail({
+      id: payment.id,
+      businessId: payment.businessId,
+      taxReportId: payment.taxReportId,
+      amountPaid: Number(payment.amountPaid),
+      transactionReference: reference,
+      paymentDate: paid_at ? new Date(paid_at) : new Date(),
+    });
   }
 
   if (event.event === 'charge.refunded') {
@@ -479,6 +553,53 @@ export async function processWebhook(signature: string, rawBody: string) {
       });
 
       logger.info('Invoice refunded and unlinked', { invoiceId: invoice.id, reference });
+      return;
+    }
+  }
+
+  // ─── Settlement Payout Transfer Webhooks ───────────────────
+  if (event.event === 'transfer.success') {
+    const transferData = event.data || {};
+    const ref = transferData.reference;
+    const transferCode = transferData.transfer_code;
+
+    const payout = await prisma.settlementPayout.findFirst({
+      where: {
+        OR: [
+          ...(ref ? [{ transferReference: ref }] : []),
+          ...(transferCode ? [{ paystackTransferCode: transferCode }] : []),
+        ],
+      },
+    });
+
+    if (payout) {
+      await applyTransferOutcome(payout.id, 'success', undefined, {
+        reference: ref,
+        transferCode,
+      });
+    }
+  }
+
+  if (event.event === 'transfer.failed' || event.event === 'transfer.reversed') {
+    const transferData = event.data || {};
+    const ref = transferData.reference;
+    const transferCode = transferData.transfer_code;
+    const reason = transferData.reason || event.event;
+
+    const payout = await prisma.settlementPayout.findFirst({
+      where: {
+        OR: [
+          ...(ref ? [{ transferReference: ref }] : []),
+          ...(transferCode ? [{ paystackTransferCode: transferCode }] : []),
+        ],
+      },
+    });
+
+    if (payout) {
+      await applyTransferOutcome(payout.id, 'failed', reason, {
+        reference: ref,
+        transferCode,
+      });
     }
   }
 
@@ -562,6 +683,16 @@ export async function verifyPayment(userId: string, businessId: string, paymentI
       amountPaid: Number(updated.amountPaid),
     });
 
+    // Fire-and-forget email receipt with PDF attachment
+    void dispatchPaymentReceiptEmail({
+      id: updated.id,
+      businessId: updated.businessId,
+      taxReportId: updated.taxReportId,
+      amountPaid: Number(updated.amountPaid),
+      transactionReference: updated.transactionReference,
+      paymentDate: updated.paymentDate || new Date(),
+    });
+
     return updated;
   }
 
@@ -635,4 +766,50 @@ export async function getPayment(userId: string, businessId: string, paymentId: 
   }
 
   return payment;
+}
+
+// ─── Abandon Stale / Pending Payment ────────────────────────
+
+export async function abandonPayment(userId: string, businessId: string, paymentId: string) {
+  await verifyBusinessOwnership(userId, businessId);
+
+  const payment = await prisma.taxPayment.findUnique({ where: { id: paymentId } });
+  if (!payment || payment.businessId !== businessId) {
+    throw new AppError(404, 'Payment not found', 'PAYMENT_NOT_FOUND');
+  }
+
+  if (payment.paymentStatus === 'completed') {
+    throw new AppError(400, 'Cannot abandon an already completed payment', 'PAYMENT_ALREADY_COMPLETED');
+  }
+
+  const updatedPayment = await prisma.$transaction(async (tx) => {
+    const p = await tx.taxPayment.update({
+      where: { id: paymentId },
+      data: {
+        paymentStatus: 'failed',
+        gatewayResponse: { abandoned: true, abandonedAt: new Date().toISOString() },
+      },
+    });
+
+    // Reset report status back to pending so the SME can re-calculate or re-attempt payment
+    await tx.monthlyTaxReport.update({
+      where: { id: payment.taxReportId },
+      data: { paymentStatus: 'pending' },
+    });
+
+    return p;
+  });
+
+  logAudit({
+    userId,
+    businessId,
+    action: 'payment.abandoned',
+    resourceType: 'tax_payment',
+    resourceId: paymentId,
+    newData: { reference: payment.transactionReference },
+  });
+
+  logger.info('Tax payment abandoned and report reset to pending', { paymentId, businessId });
+
+  return updatedPayment;
 }

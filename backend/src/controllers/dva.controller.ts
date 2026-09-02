@@ -66,7 +66,23 @@ export const getBalance = asyncHandler(async (req: AuthenticatedRequest, res: Re
   });
 });
 
+export const getDVATransactions = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const page = req.query.page ? Number(req.query.page) : 1;
+  const limit = req.query.limit ? Number(req.query.limit) : 20;
+  const status = typeof req.query.status === 'string' ? req.query.status : undefined;
 
+  const result = await dvaService.getDVATransactions(req.user!.userId, req.params.businessId, {
+    page,
+    limit,
+    status,
+  });
+
+  res.status(200).json({
+    success: true,
+    data: result.transactions,
+    pagination: result.pagination,
+  });
+});
 
 export const requery = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const result = await dvaService.requeryDVA(

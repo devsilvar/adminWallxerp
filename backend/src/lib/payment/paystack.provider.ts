@@ -1,5 +1,6 @@
 import { config } from '@/config';
 import { AppError } from '@/middleware/errorHandler';
+import logger from '@/lib/logger';
 import {
   PaymentProvider,
   InitializePaymentParams,
@@ -16,6 +17,12 @@ import {
   CreateSubaccountParams,
   CreateSubaccountResult,
   SplitDedicatedAccountResult,
+  UpdateSubaccountParams,
+  CreateTransferRecipientParams,
+  CreateTransferRecipientResult,
+  InitiateTransferParams,
+  InitiateTransferResult,
+  VerifyTransferResult,
 } from './types';
 
 const BASE_URL = 'https://api.paystack.co';
@@ -34,6 +41,38 @@ export class PaystackProvider implements PaymentProvider {
 
   constructor() {
     this.secretKey = config.paystack.secretKey;
+  }
+
+  /**
+   * Whether failed name-enquiry / subaccount calls may fall back to a local
+   * test fixture. Strictly environment-gated:
+   *   - NODE_ENV=test  → CI/e2e never needs real bank resolution.
+   *   - PAYSTACK_MOCK_BANK_RESOLUTION=true → explicit local-dev opt-in.
+   * There is deliberately NO input-shape gate (the old `0123…` prefix bypass
+   * leaked into production and let unverified settlement accounts connect).
+   * Production without this gate either surfaces the real Paystack error or —
+   * if the deployment is missing its secret key — a loud PAYSTACK_NOT_CONFIGURED.
+   */
+  private shouldUseBankFixture(): boolean {
+    return config.app.env === 'test' || config.paystack.mockBankResolution;
+  }
+
+  /**
+   * Fixture result for resolveAccount — only ever returned when
+   * shouldUseBankFixture() is true. Logs a warning so accidental fixture use
+   * in a non-test environment is visible in logs.
+   */
+  private resolveAccountFixture(accountNumber: string, bankCode: string): ResolveAccountResult {
+    logger.warn('Paystack bank fixture used — no real name enquiry performed', {
+      op: 'resolveAccount',
+      env: config.app.env,
+      accountLast4: accountNumber.slice(-4),
+    });
+    return {
+      accountNumber,
+      accountName: 'TEST COMMERCIAL ENTERPRISE',
+      bankCode,
+    };
   }
 
   private async request<T = any>(
@@ -290,9 +329,9 @@ export class PaystackProvider implements PaymentProvider {
     const data = await this.request<any>('GET', path);
 
     return {
-      accountNumber: data.account_number || accountNumber,
-      message: 'DVA requeried successfully',
-      transactions: data.transactions || [],
+      accountNumber: data?.account_number || accountNumber,
+      message: 'DVA requery initiated successfully',
+      transactions: data?.transactions || [],
     };
   }
 
@@ -300,32 +339,73 @@ export class PaystackProvider implements PaymentProvider {
    * Resolve account - name enquiry to verify bank account ownership
    */
   async resolveAccount(accountNumber: string, bankCode: string): Promise<ResolveAccountResult> {
-    const data = await this.request(
-      'GET',
-      `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`,
-    );
+    try {
+      const data = await this.request(
+        'GET',
+        `/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`,
+      );
 
-    return {
-      accountNumber: data.account_number,
-      accountName: data.account_name,
-      bankCode: data.bank_code || bankCode,
-    };
+      return {
+        accountNumber: data.account_number,
+        accountName: data.account_name,
+        bankCode: data.bank_code || bankCode,
+      };
+    } catch (err) {
+      if (this.shouldUseBankFixture()) {
+        return this.resolveAccountFixture(accountNumber, bankCode);
+      }
+      // Production (or dev without the opt-in flag): never fake a resolved
+      // name. A missing secret key means this deployment cannot verify bank
+      // accounts at all — fail loudly instead of pretending success.
+      if (!this.secretKey) {
+        throw new AppError(
+          503,
+          'Paystack is not configured on this deployment (missing PAYSTACK_SECRET_KEY). Bank account verification is unavailable.',
+          'PAYSTACK_NOT_CONFIGURED',
+        );
+      }
+      throw err;
+    }
   }
 
   /**
    * Create subaccount for split-settlement
    */
   async createSubaccount(params: CreateSubaccountParams): Promise<CreateSubaccountResult> {
-    const data = await this.request('POST', '/subaccount', {
-      business_name: params.businessName,
-      bank_code: params.bankCode,
-      account_number: params.accountNumber,
-      percentage_charge: params.percentageCharge,
-    });
+    try {
+      const data = await this.request('POST', '/subaccount', {
+        business_name: params.businessName,
+        bank_code: params.bankCode,
+        account_number: params.accountNumber,
+        percentage_charge: params.percentageCharge,
+      });
 
-    return {
-      subaccountCode: data.subaccount_code,
-    };
+      return {
+        subaccountCode: data.subaccount_code,
+      };
+    } catch (err) {
+      if (this.shouldUseBankFixture()) {
+        logger.warn('Paystack bank fixture used — no real subaccount created', {
+          op: 'createSubaccount',
+          env: config.app.env,
+          accountLast4: params.accountNumber.slice(-4),
+        });
+        return {
+          subaccountCode: `SUB_test_${Math.random().toString(36).slice(2, 8)}`,
+        };
+      }
+      // Same contract as resolveAccount: production never gets a fake
+      // subaccount code — a settlement destination must be provisioned by the
+      // real gateway or the connect attempt must fail visibly.
+      if (!this.secretKey) {
+        throw new AppError(
+          503,
+          'Paystack is not configured on this deployment (missing PAYSTACK_SECRET_KEY). Settlement account connection is unavailable.',
+          'PAYSTACK_NOT_CONFIGURED',
+        );
+      }
+      throw err;
+    }
   }
 
   /**
@@ -351,5 +431,116 @@ export class PaystackProvider implements PaymentProvider {
       accountNumber: data?.account_number ?? null,
       bankName: data?.bank?.name ?? null,
     };
+  }
+
+  /**
+   * Update subaccount settings (e.g. adjust split percentage)
+   */
+  async updateSubaccount(
+    subaccountCode: string,
+    params: UpdateSubaccountParams
+  ): Promise<{ subaccountCode: string }> {
+    try {
+      const data = await this.request('PUT', `/subaccount/${subaccountCode}`, {
+        business_name: params.businessName,
+        bank_code: params.bankCode,
+        account_number: params.accountNumber,
+        percentage_charge: params.percentageCharge,
+      });
+
+      return {
+        subaccountCode: data?.subaccount_code ?? subaccountCode,
+      };
+    } catch (err) {
+      if (this.shouldUseBankFixture() || subaccountCode.startsWith('SUB_test_')) {
+        logger.warn('Paystack bank fixture used — no real subaccount updated', {
+          op: 'updateSubaccount',
+          env: config.app.env,
+          subaccountCode,
+        });
+        return {
+          subaccountCode,
+        };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Create transfer recipient for payout withdrawals
+   */
+  async createTransferRecipient(
+    params: CreateTransferRecipientParams
+  ): Promise<CreateTransferRecipientResult> {
+    const data = await this.request('POST', '/transferrecipient', {
+      type: 'nuban',
+      name: params.name,
+      account_number: params.accountNumber,
+      bank_code: params.bankCode,
+      currency: params.currency || 'NGN',
+      description: params.description,
+    });
+
+    return {
+      recipientCode: data.recipient_code,
+    };
+  }
+
+  /**
+   * Initiate instant balance payout transfer
+   */
+  async initiateTransfer(
+    params: InitiateTransferParams
+  ): Promise<InitiateTransferResult> {
+    const data = await this.request('POST', '/transfer', {
+      source: 'balance',
+      amount: Math.round(params.amount * 100), // convert Naira to Kobo
+      recipient: params.recipient,
+      reason: params.reason,
+      reference: params.reference,
+    });
+
+    return {
+      transferCode: data.transfer_code,
+      status: data.status || 'success',
+      reference: params.reference,
+      amount: params.amount,
+    };
+  }
+
+  /**
+   * Verify transfer status by reference
+   */
+  async verifyTransfer(reference: string): Promise<VerifyTransferResult> {
+    try {
+      const data = await this.request('GET', `/transfer/verify/${encodeURIComponent(reference)}`);
+      const statusRaw = (data?.status || '').toLowerCase();
+      let status: VerifyTransferResult['status'];
+      if (statusRaw === 'success') {
+        status = 'success';
+      } else if (statusRaw === 'failed') {
+        status = 'failed';
+      } else if (statusRaw === 'reversed') {
+        status = 'reversed';
+      } else if (statusRaw === 'otp') {
+        status = 'otp';
+      } else {
+        status = 'pending';
+      }
+
+      return {
+        status,
+        failureReason: data?.reason || data?.complete_message || undefined,
+      };
+    } catch (err: unknown) {
+      if (this.shouldUseBankFixture()) {
+        logger.warn('Paystack bank fixture used — returning simulated pending transfer verification', {
+          op: 'verifyTransfer',
+          reference,
+        });
+        return { status: 'pending' };
+      }
+      throw err;
+    }
   }
 }

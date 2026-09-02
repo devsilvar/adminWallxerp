@@ -1,28 +1,55 @@
 import prisma, { TxClient } from '@/lib/prisma';
 import { AppError } from '@/middleware/errorHandler';
 import { logAudit } from '@/lib/audit';
+import config from '@/config';
 
 export async function getDashboardStats() {
-  const [totalUsers, totalBusinesses, totalTaxReports, recentSignups] =
-    await Promise.all([
-      prisma.user.count(),
-      prisma.business.count(),
-      prisma.monthlyTaxReport.count(),
-      prisma.user.findMany({
-        where: {
-          createdAt: {
-            gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-          },
+  const staleHours = config.settlement.payoutStaleHours ?? 24;
+  const slaThreshold = new Date(Date.now() - staleHours * 60 * 60 * 1000);
+
+  const [
+    totalUsers,
+    totalBusinesses,
+    totalTaxReports,
+    recentSignups,
+    pendingCount,
+    breachedCount,
+    oldestPending,
+  ] = await Promise.all([
+    prisma.user.count(),
+    prisma.business.count(),
+    prisma.monthlyTaxReport.count(),
+    prisma.user.findMany({
+      where: {
+        createdAt: {
+          gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
         },
-        select: {
-          id: true,
-          email: true,
-          createdAt: true,
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 10,
-      }),
-    ]);
+      },
+      select: {
+        id: true,
+        email: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    }),
+    prisma.settlementPayout.count({ where: { status: 'pending' } }),
+    prisma.settlementPayout.count({
+      where: {
+        status: 'pending',
+        createdAt: { lt: slaThreshold },
+      },
+    }),
+    prisma.settlementPayout.findFirst({
+      where: { status: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      select: { createdAt: true },
+    }),
+  ]);
+
+  const oldestPendingHours = oldestPending
+    ? Math.max(0, Math.floor((Date.now() - oldestPending.createdAt.getTime()) / (1000 * 60 * 60)))
+    : 0;
 
   const revenueResult = await prisma.monthlyTaxReport.aggregate({
     _sum: { totalSales: true },
@@ -34,6 +61,11 @@ export async function getDashboardStats() {
     totalTaxReports,
     totalRevenueProcessed: revenueResult._sum.totalSales ?? 0,
     recentSignups,
+    withdrawalSla: {
+      pendingCount,
+      breachedCount,
+      oldestPendingHours,
+    },
   };
 }
 
@@ -153,6 +185,86 @@ export async function toggleUserStatus(userId: string, isActive: boolean, adminI
   return updated;
 }
 
+export async function verifyUserEmail(userId: string, adminId?: string, tx?: TxClient) {
+  const db = tx ?? prisma;
+
+  const user = await db.user.findUnique({ where: { id: userId } });
+
+  if (!user) {
+    throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+  }
+
+  if (user.isVerified) {
+    // Already verified - return current state (idempotent)
+    return {
+      id: user.id,
+      email: user.email,
+      isVerified: true,
+    };
+  }
+
+  const updated = await db.user.update({
+    where: { id: userId },
+    data: { isVerified: true },
+    select: {
+      id: true,
+      email: true,
+      isVerified: true,
+    },
+  });
+
+  logAudit({
+    userId: adminId,
+    action: 'admin.user_email_verified',
+    resourceType: 'user',
+    resourceId: userId,
+    oldData: { isVerified: false },
+    newData: { isVerified: true },
+  }, tx);
+
+  return updated;
+}
+
+export async function unverifyUserEmail(userId: string, adminId?: string, tx?: TxClient) {
+  const db = tx ?? prisma;
+
+  const user = await db.user.findUnique({ where: { id: userId } });
+
+  if (!user) {
+    throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+  }
+
+  if (!user.isVerified) {
+    // Already unverified - return current state (idempotent)
+    return {
+      id: user.id,
+      email: user.email,
+      isVerified: false,
+    };
+  }
+
+  const updated = await db.user.update({
+    where: { id: userId },
+    data: { isVerified: false },
+    select: {
+      id: true,
+      email: true,
+      isVerified: true,
+    },
+  });
+
+  logAudit({
+    userId: adminId,
+    action: 'admin.user_email_unverified',
+    resourceType: 'user',
+    resourceId: userId,
+    oldData: { isVerified: true },
+    newData: { isVerified: false },
+  }, tx);
+
+  return updated;
+}
+
 export async function listAllBusinesses(page: number, limit: number) {
   const [businesses, total] = await Promise.all([
     prisma.business.findMany({
@@ -226,4 +338,162 @@ export async function listAuditLogs(
       hasPrev: page > 1,
     },
   };
+}
+
+/**
+ * Grants one-time payout account change permission (24h expiry)
+ * 
+ * Idempotent: re-grant refreshes timestamp
+ */
+export async function grantPayoutChangePermission(
+  businessId: string,
+  adminId: string,
+  tx?: TxClient
+) {
+  const db = tx ?? prisma;
+
+  const business = await db.business.findUnique({
+    where: { id: businessId },
+    select: {
+      id: true,
+      businessName: true,
+      settlementAccountNumber: true,
+      userId: true,
+    },
+  });
+
+  if (!business) {
+    throw new AppError(404, 'Business not found', 'BUSINESS_NOT_FOUND');
+  }
+
+  if (!business.settlementAccountNumber) {
+    throw new AppError(
+      400,
+      'No payout account connected yet. Nothing to lock or unlock.',
+      'NO_PAYOUT_ACCOUNT'
+    );
+  }
+
+  const now = new Date();
+  const updatedBusiness = await db.business.update({
+    where: { id: businessId },
+    data: {
+      payoutChangePermitted: true,
+      payoutChangePermittedAt: now,
+      payoutChangePermittedBy: adminId,
+      // Clear used timestamp if re-granting after a previous use
+      payoutChangeUsedAt: null,
+    },
+    select: {
+      id: true,
+      businessName: true,
+      payoutChangePermitted: true,
+      payoutChangePermittedAt: true,
+      payoutChangePermittedBy: true,
+    },
+  });
+
+  logAudit({
+    userId: adminId,
+    businessId,
+    action: 'admin.payout_change_permitted',
+    resourceType: 'business',
+    resourceId: businessId,
+    newData: {
+      permitted: true,
+      expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    },
+  }, tx);
+
+  // Fire reminder notification (post-transaction, fire-and-forget)
+  if (!tx) {
+    // Only fire outside transaction to avoid blocking
+    const { createReminderOnce } = await import('@/services/reminder.service');
+    createReminderOnce({
+      businessId,
+      reminderType: 'payout_change_permitted',
+      scheduledDate: now,
+      referenceType: 'business',
+      referenceId: businessId,
+      updateMessageOnDup: true,
+      message: 'Support approved a one-time payout account change. You can update it now from Account → Payout settings. This permission expires in 24 hours.',
+    }).catch((err) => {
+      // Fire-and-forget — log but don't fail the grant
+      const logger = require('@/lib/logger').default;
+      logger.error('Failed to create payout permission reminder', {
+        businessId,
+        err: err instanceof Error ? err.message : err,
+      });
+    });
+  }
+
+  return updatedBusiness;
+}
+
+/**
+ * Revokes an unused payout change permission
+ */
+export async function revokePayoutChangePermission(
+  businessId: string,
+  adminId: string,
+  tx?: TxClient
+) {
+  const db = tx ?? prisma;
+
+  const business = await db.business.findUnique({
+    where: { id: businessId },
+    select: {
+      id: true,
+      businessName: true,
+      payoutChangePermitted: true,
+      payoutChangeUsedAt: true,
+    },
+  });
+
+  if (!business) {
+    throw new AppError(404, 'Business not found', 'BUSINESS_NOT_FOUND');
+  }
+
+  if (!business.payoutChangePermitted) {
+    // Already revoked or never granted — idempotent
+    return {
+      id: business.id,
+      businessName: business.businessName,
+      payoutChangePermitted: false,
+    };
+  }
+
+  if (business.payoutChangeUsedAt) {
+    throw new AppError(
+      400,
+      'Permission was already consumed. Cannot revoke.',
+      'PERMISSION_ALREADY_USED'
+    );
+  }
+
+  const updatedBusiness = await db.business.update({
+    where: { id: businessId },
+    data: {
+      payoutChangePermitted: false,
+      payoutChangePermittedAt: null,
+      payoutChangePermittedBy: null,
+    },
+    select: {
+      id: true,
+      businessName: true,
+      payoutChangePermitted: true,
+    },
+  });
+
+  logAudit({
+    userId: adminId,
+    businessId,
+    action: 'admin.payout_change_permit_revoked',
+    resourceType: 'business',
+    resourceId: businessId,
+    oldData: { permitted: true },
+    newData: { permitted: false },
+  }, tx);
+
+  return updatedBusiness;
 }

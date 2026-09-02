@@ -117,6 +117,12 @@ export const config = {
       ((process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_test_')
         ? 'test-bank'
         : 'wema-bank'),
+    // DEV/TEST-ONLY fixture switch. When true (or when NODE_ENV=test), failed
+    // Paystack name-enquiry (/bank/resolve) and subaccount-creation calls fall
+    // back to a local fixture instead of surfacing the error — lets devs and
+    // CI exercise settlement connect without real bank resolution.
+    // NEVER set this in production; see paystack.provider.ts shouldUseBankFixture().
+    mockBankResolution: process.env.PAYSTACK_MOCK_BANK_RESOLUTION === 'true',
   },
 
   // DigitalOcean Spaces
@@ -128,6 +134,14 @@ export const config = {
     secretKey: process.env.DO_SPACES_SECRET_KEY || '',
     cdnEndpoint: process.env.DO_SPACES_CDN_ENDPOINT || '',
   },
+
+  // Cloudinary
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+    apiKey: process.env.CLOUDINARY_API_KEY || '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+  },
+
 
   // Email
   email: {
@@ -180,6 +194,20 @@ export const config = {
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '10000', 10),
   },
 
+  // PIN Security
+  pin: {
+    maxAttempts: Number(process.env.PIN_MAX_ATTEMPTS ?? 5),
+    attemptWindowHours: Number(process.env.PIN_ATTEMPT_WINDOW_HOURS ?? 24),
+  },
+
+  // Settlement & Split Payouts
+  settlement: {
+    minTaxSplitPct: Number(process.env.SETTLEMENT_MIN_TAX_SPLIT_PCT ?? 7.5),
+    maxTaxSplitPct: Number(process.env.SETTLEMENT_MAX_TAX_SPLIT_PCT ?? 50),
+    platformCommissionPct: Number(process.env.PLATFORM_COMMISSION_PCT ?? 0),
+    payoutStaleHours: Number(process.env.PAYOUT_STALE_HOURS ?? 24),
+  },
+
   // Scheduled Jobs (node-cron)
   // Auto-enabled in production; opt-in for dev so `tsx watch` doesn't
   // re-register the schedule on every file save.
@@ -187,6 +215,11 @@ export const config = {
     enabled:
       process.env.ENABLE_CRON === 'true' ||
       process.env.NODE_ENV === 'production',
+  },
+
+  // PII Encryption at Rest (AES-256-GCM)
+  pii: {
+    encryptionKey: process.env.PII_ENCRYPTION_KEY,
   },
 } as const;
 

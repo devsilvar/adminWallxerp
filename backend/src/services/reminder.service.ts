@@ -3,25 +3,9 @@ import logger from '@/lib/logger';
 import { AppError } from '@/middleware/errorHandler';
 import { logAudit } from '@/lib/audit';
 import { formatNaira, formatDateISO } from '@/lib/format';
+import { verifyBusinessOwnership } from '@/lib/ownership';
 
 // ─── Helpers ────────────────────────────────────────────────
-
-async function verifyBusinessOwnership(
-  userId: string,
-  businessId: string,
-  db: TxClient | typeof prisma = prisma
-) {
-  const business = await db.business.findUnique({ where: { id: businessId } });
-
-  if (!business) {
-    throw new AppError(404, 'Business not found', 'BUSINESS_NOT_FOUND');
-  }
-  if (business.userId !== userId) {
-    throw new AppError(403, 'You do not have access to this business', 'FORBIDDEN');
-  }
-
-  return business;
-}
 
 // ─── Reminder Types ─────────────────────────────────────────
 //
@@ -33,6 +17,7 @@ async function verifyBusinessOwnership(
 // invoice_overdue     — sent invoice past its due date
 // payment_successful  — tax payment confirmed (webhook or manual verify)
 // dva_received        — DVA auto-captured a sale
+// payout_change_permitted — admin granted one-time payout account change permission
 
 export type ReminderType =
   | 'tax_deadline'
@@ -45,9 +30,15 @@ export type ReminderType =
   | 'payment_refunded'
   | 'dva_received'
   | 'dva_validation_failed'
-  | 'transaction_needs_verification';
+  | 'transaction_needs_verification'
+  | 'payout_change_permitted'
+  | 'payout_requested'
+  | 'payout_approved'
+  | 'payout_rejected'
+  | 'payout_completed'
+  | 'payout_failed';
 
-export type ReminderReferenceType = 'invoice' | 'payment' | 'sales_transaction' | 'business';
+export type ReminderReferenceType = 'invoice' | 'payment' | 'sales_transaction' | 'business' | 'settlement_payout';
 
 const REPORT_REMINDER_MESSAGES: Record<
   'tax_deadline' | 'unfiled_tax' | 'unfinalized_report' | 'unpaid_tax',

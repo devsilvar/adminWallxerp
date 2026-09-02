@@ -12,8 +12,19 @@ router.get('/dashboard', adminController.getDashboard);
 router.get('/users', adminController.listUsers);
 router.get('/users/:id', adminController.getUserDetail);
 router.patch('/users/:id/status', adminController.toggleUserStatus);
+router.patch('/users/:id/email-verification', adminController.toggleEmailVerification);
 router.get('/businesses', adminController.listBusinesses);
 router.get('/audit-logs', adminController.listAuditLogs);
+
+// Payout account change lock (admin-granted one-time permissions)
+router.post('/businesses/:businessId/payout-change-permit', adminController.grantPayoutChangePermission);
+router.delete('/businesses/:businessId/payout-change-permit', adminController.revokePayoutChangePermission);
+
+// Withdrawal request management (NEW-7 v2: admin-approved withdrawal workflow)
+router.get('/settlement/withdrawals', adminController.listWithdrawalRequests);
+router.post('/settlement/withdrawals/:id/approve', adminController.approveWithdrawalRequest);
+router.post('/settlement/withdrawals/:id/reject', adminController.rejectWithdrawalRequest);
+router.post('/settlement/withdrawals/:id/requery', adminController.requeryWithdrawalRequest);
 
 // FIRS remittance tracking & reconciliation
 router.get('/remittances/summary', remittanceController.getSummary);

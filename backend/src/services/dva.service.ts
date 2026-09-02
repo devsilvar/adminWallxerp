@@ -6,6 +6,7 @@ import { logAudit } from '@/lib/audit';
 import { getPaymentProvider } from '@/lib/payment';
 import { createReminderOnce } from '@/services/reminder.service';
 import { formatNaira } from '@/lib/format';
+import { encryptPii } from '@/lib/encryption';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -47,7 +48,6 @@ function splitName(fullName: string): { firstName: string; lastName: string } {
 
 export interface ValidateCustomerInput {
   bvn: string;
-  nin?: string;
   bankCode: string;
   accountNumber: string;
 }
@@ -79,14 +79,11 @@ export async function validateCustomer(
     lastName,
   });
 
-  // Store BVN and NIN on User record after successful Paystack validation
+  // Store encrypted BVN on User record after Paystack validation submission
   await prisma.user.update({
     where: { id: userId },
     data: {
-      bvn: input.bvn,
-      nin: input.nin || undefined,
-      bvnVerifiedAt: new Date(),
-      ninVerifiedAt: input.nin ? new Date() : undefined,
+      bvnEncrypted: encryptPii(input.bvn),
     },
   });
 
@@ -109,7 +106,6 @@ export async function validateCustomer(
     newData: {
       bankCode: input.bankCode,
       accountLast4: input.accountNumber.slice(-4),
-      ninProvided: !!input.nin,
     },
   });
 
@@ -338,6 +334,26 @@ export async function getVirtualAccount(userId: string, businessId: string) {
     };
   }
 
+  // Identity verification is in-flight — the business has a Paystack customer
+  // record and the user has submitted their BVN (bvnEncrypted is set), but
+  // no virtualAccountNumber or failure reason has arrived yet. Without this
+  // check the endpoint returns 'none' (identical to "never started"), so a
+  // page refresh kills the frontend's verification screen and shows the
+  // "Activate" button again — making the user believe verification failed.
+  if (business.paystackCustomerCode) {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { bvnEncrypted: true, bvnVerifiedAt: true },
+    });
+
+    if (user?.bvnEncrypted || user?.bvnVerifiedAt) {
+      return {
+        status: 'pending',
+        message: 'Your identity is being verified with your bank. This usually takes 1–3 minutes.',
+      };
+    }
+  }
+
   return {
     status: 'none',
     message: 'No virtual account set up for this business.',
@@ -546,6 +562,19 @@ export async function processCustomerIdentificationWebhook(event: any) {
     await prisma.business.update({
       where: { id: business.id },
       data: { dvaFailureReason: null, dvaFailedAt: null },
+    });
+
+    // Stamp bvnVerifiedAt on User now that Paystack confirmed identity
+    const user = await prisma.user.findUnique({
+      where: { id: business.userId },
+      select: { ninEncrypted: true },
+    });
+    await prisma.user.update({
+      where: { id: business.userId },
+      data: {
+        bvnVerifiedAt: new Date(),
+        ...(user?.ninEncrypted ? { ninVerifiedAt: new Date() } : {}),
+      },
     });
 
     // Already has a DVA — nothing to do (a re-validation or replayed webhook).
@@ -821,6 +850,69 @@ export async function requeryDVA(userId: string, businessId: string) {
     accountNumber: result.accountNumber,
     transactionCount,
     message: 'DVA requeried successfully. Any missing transfers should appear shortly.',
+  };
+}
+
+// ─── DVA Transactions Listing ────────────────────────────────────────────────
+
+export async function getDVATransactions(
+  userId: string,
+  businessId: string,
+  query: { page?: number; limit?: number; status?: string }
+) {
+  await verifyBusinessOwnership(userId, businessId);
+
+  const page = Math.max(1, query.page ?? 1);
+  const limit = Math.min(100, Math.max(1, query.limit ?? 20));
+  const skip = (page - 1) * limit;
+
+  // Authoritative filter: strictly records auto-captured from the Dedicated Virtual Account
+  const where: any = {
+    businessId,
+    source: 'bank_transfer',
+    metadata: { path: ['channel'], equals: 'dva' },
+  };
+
+  if (query.status === 'confirmed') {
+    where.status = 'confirmed';
+    where.needsVerification = false;
+  } else if (query.status === 'pending') {
+    where.needsVerification = true;
+  }
+
+  const [total, transactions] = await Promise.all([
+    prisma.salesTransaction.count({ where }),
+    prisma.salesTransaction.findMany({
+      where,
+      orderBy: { transactionDate: 'desc' },
+      skip,
+      take: limit,
+      select: {
+        id: true,
+        amount: true,
+        status: true,
+        referenceId: true,
+        customerName: true,
+        customerHint: true,
+        transactionDate: true,
+        needsVerification: true,
+        verifiedAt: true,
+        createdAt: true,
+        metadata: true,
+      },
+    }),
+  ]);
+
+  return {
+    transactions,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+      hasNext: page * limit < total,
+      hasPrev: page > 1,
+    },
   };
 }
 

@@ -30,11 +30,6 @@ export const validateCustomerSchema = z.object({
     .string()
     .trim()
     .regex(/^\d{11,12}$/, 'BVN must be 11 or 12 digits'),
-  nin: z
-    .string()
-    .trim()
-    .regex(/^\d{11}$/, 'NIN must be exactly 11 digits')
-    .optional(),
   bankCode: z
     .string()
     .trim()

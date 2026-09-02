@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
 }
 
 /// User accounts - business owners and administrators
@@ -13,12 +13,10 @@ model User {
   email               String     @unique
   passwordHash        String     @map("password_hash")
   phone               String?    @unique
-  // VarChar(12) — real Nigerian BVNs are 11 digits, but Paystack's official
-  // documented test-mode identity-validation fixture is a 12-digit value
-  // ("222222222221"). Widened so the sandbox credential can actually be
-  // stored; see check_bvn_length in migration 20260817120000_add_dva_failure_tracking.
-  bvn                 String?    @map("bvn") @db.VarChar(12)
-  nin                 String?    @map("nin") @db.VarChar(11)
+  // Encrypted at rest via AES-256-GCM (envelope format: v1.<iv>.<tag>.<ct>).
+  // Column type is TEXT to accommodate ~100-char ciphertext strings.
+  bvnEncrypted        String?    @map("bvn_encrypted")
+  ninEncrypted        String?    @map("nin_encrypted")
   bvnVerifiedAt       DateTime?  @map("bvn_verified_at")
   ninVerifiedAt       DateTime?  @map("nin_verified_at")
   isVerified          Boolean    @default(false) @map("is_verified")
@@ -29,12 +27,17 @@ model User {
   resetTokenExpiresAt DateTime?  @map("reset_token_expires_at")
   resetTokenHash      String?    @map("reset_token_hash")
   role                UserRole   @default(user)
+  transactionPin      String?    @map("transaction_pin")
+  pinAttempts         Int        @default(0) @map("pin_attempts")
+  pinLockedUntil      DateTime?  @map("pin_locked_until")
+  pinAttemptsResetAt  DateTime?  @map("pin_attempts_reset_at")
+  pinSetAt            DateTime?  @map("pin_set_at")
   auditLogs           AuditLog[]
   businesses          Business[]
+  sessions            Session[]
 
   @@index([email])
   @@index([phone])
-  @@index([bvn])
   @@map("users")
 }
 
@@ -61,6 +64,8 @@ model Business {
   settlementAccountName   String?   @map("settlement_account_name")
   platformCommissionPct   Decimal   @default(0.00) @map("platform_commission_pct") @db.Decimal(5, 2)
   settlementConnectedAt   DateTime? @map("settlement_connected_at")
+  autoSplitEnabled        Boolean   @default(false) @map("auto_split_enabled")
+  taxSplitPercentage      Decimal   @default(7.50) @map("tax_split_percentage") @db.Decimal(5, 2)
   // Set when Paystack sends `customeridentification.failed` or
   // `dedicatedaccount.assign.failed`. Lets the frontend stop polling
   // immediately with an actionable reason instead of spinning until a
@@ -68,9 +73,24 @@ model Business {
   // validation/assignment attempt.
   dvaFailureReason        String?   @map("dva_failure_reason")
   dvaFailedAt             DateTime? @map("dva_failed_at")
+  logoUrl                 String?   @map("logo_url")
+  logoPublicId            String?   @map("logo_public_id")
+  // Paystack transfer recipient — created on first approved payout, reused while
+  // the settlement bank account is unchanged. recipientFingerprint guards reuse:
+  // it is `bankCode:accountNumber` of the settlement account the code was built
+  // for; a bank change produces a new fingerprint, so the stale code is never
+  // reused (self-invalidating — no explicit wipe needed).
+  paystackRecipientCode   String?   @map("paystack_recipient_code")
+  recipientFingerprint    String?   @map("recipient_fingerprint")
+  // Payout account change lock — admin-granted one-time permission (24h expiry)
+  payoutChangePermitted   Boolean   @default(false) @map("payout_change_permitted")
+  payoutChangePermittedAt DateTime? @map("payout_change_permitted_at")
+  payoutChangePermittedBy String?   @map("payout_change_permitted_by")
+  payoutChangeUsedAt      DateTime? @map("payout_change_used_at")
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
   merchantId              String    @unique @map("merchant_id")
+
   auditLogs            AuditLog[]
   user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   customers            Customer[]
@@ -81,9 +101,11 @@ model Business {
   sales                SalesTransaction[]
   payments             TaxPayment[]
   statements           TaxStatement[]
+  settlementPayouts    SettlementPayout[]
 
   @@index([userId])
   @@index([taxId])
+  @@index([payoutChangePermittedBy])
   @@map("businesses")
 }
 
@@ -121,6 +143,9 @@ model SalesTransaction {
   updatedAt           DateTime                   @updatedAt @map("updated_at")
   createdBy           String?                    @map("created_by")
   metadata            Json?
+  settledViaSplit     Boolean                    @default(false) @map("settled_via_split")
+  splitPct            Decimal?                   @map("split_pct") @db.Decimal(5, 2)
+  platformRetained    Decimal?                   @map("platform_retained") @db.Decimal(15, 2)
   needsVerification   Boolean                    @default(false) @map("needs_verification")
   verifiedAt          DateTime?                  @map("verified_at")
   verifiedBy          String?                    @map("verified_by")
@@ -138,6 +163,7 @@ model SalesTransaction {
   @@index([source])
   @@index([businessId, needsVerification], map: "idx_sales_needs_verification")
   @@index([classificationId])
+  @@index([businessId, status, isTaxable, transactionDate], map: "idx_sales_tax_calc")
   @@map("sales_transactions")
 }
 
@@ -147,6 +173,9 @@ model Expense {
   businessId   String          @map("business_id")
   category     ExpenseCategory
   description  String
+  /// Free-text detail captured in the UI when category = 'other'
+  /// (e.g. "Bank charges", "Repairs"). Nullable — only populated for 'other'.
+  categoryDetail String?       @map("category_detail")
   amount       Decimal         @db.Decimal(15, 2)
   expenseDate  DateTime        @map("expense_date") @db.Date
   receiptUrl   String?         @map("receipt_url")
@@ -159,6 +188,7 @@ model Expense {
   @@index([businessId, expenseDate(sort: Desc)])
   @@index([category])
   @@index([businessId, isDeductible])
+  @@index([businessId, isDeductible, expenseDate], map: "idx_expense_tax_calc")
   @@map("expenses")
 }
 
@@ -422,6 +452,7 @@ enum SalesSource {
 
 enum TransactionStatus {
   confirmed
+  completed
   pending
   reversed
   disputed
@@ -435,6 +466,8 @@ enum ExpenseCategory {
   fuel
   logistics
   marketing
+  gift
+  subscription
   other
 }
 
@@ -525,4 +558,50 @@ model Bank {
   @@index([country, active])
   @@index([code])
   @@map("banks")
+}
+
+/// User login sessions for multi-device management and revocation
+model Session {
+  id               String    @id @default(uuid())
+  userId           String    @map("user_id")
+  refreshTokenHash String    @map("refresh_token_hash")
+  ipAddress        String?   @map("ip_address")
+  userAgent        String?   @map("user_agent")
+  deviceInfo       String?   @map("device_info")
+  lastActiveAt     DateTime  @default(now()) @map("last_active_at")
+  isRevoked        Boolean   @default(false) @map("is_revoked")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshTokenHash])
+  @@map("sessions")
+}
+
+/// Settlement payouts - on-demand balance withdrawals to commercial bank accounts
+model SettlementPayout {
+  id                    String        @id @default(uuid())
+  businessId            String        @map("business_id")
+  amount                Decimal       @map("amount") @db.Decimal(15, 2)
+  fee                   Decimal       @default(0) @map("fee") @db.Decimal(15, 2)
+  netAmount             Decimal       @map("net_amount") @db.Decimal(15, 2)
+  destinationBankCode   String        @map("destination_bank_code")
+  destinationBankName   String        @map("destination_bank_name")
+  destinationAccountNum String        @map("destination_account_num")
+  destinationAccountName String       @map("destination_account_name")
+  transferReference     String        @unique @map("transfer_reference")
+  paystackTransferCode  String?       @map("paystack_transfer_code")
+  status                PaymentStatus @default(pending) @map("payment_status")
+  initiatedAt           DateTime      @default(now()) @map("initiated_at")
+  completedAt           DateTime?     @map("completed_at")
+  failureReason         String?       @map("failure_reason")
+  narration             String?
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+  business              Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([transferReference])
+  @@index([status])
+  @@map("settlement_payouts")
 }
