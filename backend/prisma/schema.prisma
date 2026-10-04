@@ -5,6 +5,9 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
+  // Migrations MUST bypass the transaction pooler (PgBouncer) — it doesn't
+  // support the advisory locks / session semantics Prisma Migrate needs.
+  directUrl = env("DIRECT_URL")
 }
 
 /// User accounts - business owners and administrators
