@@ -106,3 +106,19 @@ export const deleteLogo = asyncHandler(async (req: AuthenticatedRequest, res: Re
   });
 });
 
+export const updateVoucherBonus = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { voucherBonusPct } = req.body as { voucherBonusPct: number };
+  if (voucherBonusPct === undefined || voucherBonusPct === null) {
+    throw new AppError(400, 'voucherBonusPct is required', 'VALIDATION_ERROR');
+  }
+  if (typeof voucherBonusPct !== 'number' || voucherBonusPct < 0 || voucherBonusPct > 10) {
+    throw new AppError(400, 'voucherBonusPct must be between 0 and 10', 'VALIDATION_ERROR');
+  }
+  const result = await businessService.updateBusinessVoucherBonus(
+    req.user!.userId,
+    req.params.id,
+    voucherBonusPct
+  );
+  res.status(200).json({ success: true, data: result, message: 'Voucher bonus updated' });
+});
+

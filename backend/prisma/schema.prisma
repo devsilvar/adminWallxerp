@@ -5,59 +5,97 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
-  // Migrations MUST bypass the transaction pooler (PgBouncer) — it doesn't
-  // support the advisory locks / session semantics Prisma Migrate needs.
   directUrl = env("DIRECT_URL")
 }
 
 /// User accounts - business owners and administrators
 model User {
-  id                  String     @id @default(uuid())
-  email               String     @unique
-  passwordHash        String     @map("password_hash")
-  phone               String?    @unique
-  // Encrypted at rest via AES-256-GCM (envelope format: v1.<iv>.<tag>.<ct>).
-  // Column type is TEXT to accommodate ~100-char ciphertext strings.
-  bvnEncrypted        String?    @map("bvn_encrypted")
-  ninEncrypted        String?    @map("nin_encrypted")
-  bvnVerifiedAt       DateTime?  @map("bvn_verified_at")
-  ninVerifiedAt       DateTime?  @map("nin_verified_at")
-  isVerified          Boolean    @default(false) @map("is_verified")
-  isActive            Boolean    @default(true) @map("is_active")
-  lastLoginAt         DateTime?  @map("last_login_at")
-  createdAt           DateTime   @default(now()) @map("created_at")
-  updatedAt           DateTime   @updatedAt @map("updated_at")
-  resetTokenExpiresAt DateTime?  @map("reset_token_expires_at")
-  resetTokenHash      String?    @map("reset_token_hash")
-  role                UserRole   @default(user)
-  transactionPin      String?    @map("transaction_pin")
-  pinAttempts         Int        @default(0) @map("pin_attempts")
-  pinLockedUntil      DateTime?  @map("pin_locked_until")
-  pinAttemptsResetAt  DateTime?  @map("pin_attempts_reset_at")
-  pinSetAt            DateTime?  @map("pin_set_at")
-  auditLogs           AuditLog[]
-  businesses          Business[]
-  sessions            Session[]
+  id                         String    @id @default(uuid())
+  email                      String    @unique
+  passwordHash               String    @map("password_hash")
+  phone                      String?   @unique
+  fullName                   String?   @map("full_name")
+  // Encrypted at rest using AES-256-GCM (enc:v1:iv:tag:ciphertext).
+  // Blind indexed via HMAC-SHA256 (bvnHash / ninHash) for O(1) indexed uniqueness lookups.
+  bvn                        String?   @map("bvn_encrypted") @db.Text
+  bvnHash                    String?   @map("bvn_hash") @db.VarChar(64)
+  nin                        String?   @map("nin_encrypted") @db.Text
+  ninHash                    String?   @map("nin_hash") @db.VarChar(64)
+  bvnVerifiedAt              DateTime? @map("bvn_verified_at")
+  ninVerifiedAt              DateTime? @map("nin_verified_at")
+  isVerified                 Boolean   @default(false) @map("is_verified")
+  verificationTokenHash      String?   @map("verification_token_hash")
+  verificationTokenExpiresAt DateTime? @map("verification_token_expires_at")
+  verifiedAt                 DateTime? @map("verified_at")
+  isActive                   Boolean   @default(true) @map("is_active")
+  lastLoginAt                DateTime? @map("last_login_at")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
+  resetTokenExpiresAt        DateTime? @map("reset_token_expires_at")
+  resetTokenHash             String?   @map("reset_token_hash")
+  role                       UserRole  @default(user)
+  transactionPin             String?   @map("transaction_pin")
+  pinAttempts                Int       @default(0) @map("pin_attempts")
+  pinLockedUntil             DateTime? @map("pin_locked_until")
+  pinAttemptsResetAt         DateTime? @map("pin_attempts_reset_at")
+  pinSetAt                   DateTime? @map("pin_set_at")
+
+  // Non-Custodial Regulatory Terms Acceptance (CBN Compliance Audit Trail)
+  regulatoryTermsAcceptedAt DateTime? @map("regulatory_terms_accepted_at")
+  regulatoryTermsVersion    String?   @map("regulatory_terms_version")
+
+  // Central Commercial Settlement Bank (Outflow)
+  settlementBankCode      String?   @map("settlement_bank_code")
+  settlementBankName      String?   @map("settlement_bank_name")
+  settlementAccountNumber String?   @map("settlement_account_number")
+  settlementAccountName   String?   @map("settlement_account_name")
+  settlementConnectedAt   DateTime? @map("settlement_connected_at")
+  autoPayoutEnabled       Boolean   @default(false) @map("auto_payout_enabled")
+
+  // Central Dedicated Virtual Account (Inflow)
+  paystackCustomerCode String?   @map("paystack_customer_code")
+  virtualAccountNumber String?   @map("virtual_account_number")
+  virtualAccountBank   String?   @map("virtual_account_bank")
+  primaryBusinessId    String?   @map("primary_business_id")
+  primaryBusiness      Business? @relation("PrimaryBusiness", fields: [primaryBusinessId], references: [id], onDelete: SetNull)
+
+  // Subscription Plan Tier & Access Expiry
+  subscriptionTier      String?   @default("free") @map("subscription_tier")
+  subscriptionExpiresAt DateTime? @map("subscription_expires_at")
+  trialEndsAt           DateTime? @map("trial_ends_at")
+
+  auditLogs               AuditLog[]
+  businesses              Business[]
+  sessions                Session[]
+  walletBalance           WalletBalance?
+  walletTransactions      WalletTransaction[]
+  memberships             BusinessMember[]
+  subscriptionSubmissions SubscriptionSubmission[]
+  feedbacks               UserFeedback[]
+  aiQueryLogs             AiQueryLog[]
 
   @@index([email])
   @@index([phone])
+  @@index([bvnHash])
+  @@index([ninHash])
+  @@index([verificationTokenHash])
   @@map("users")
 }
 
 /// Business profiles - each user can have multiple businesses
 model Business {
-  id                   String             @id @default(uuid())
-  userId               String             @map("user_id")
-  businessName         String             @map("business_name")
-  ownerName            String             @map("owner_name")
-  taxId                String?            @unique @map("tax_id")
-  businessType         String?            @map("business_type")
-  address              String?
-  city                 String?
-  state                String?
-  paystackCustomerCode String?            @map("paystack_customer_code")
-  virtualAccountNumber String?            @map("virtual_account_number")
-  virtualAccountBank   String?            @map("virtual_account_bank")
+  id                      String    @id @default(uuid())
+  userId                  String    @map("user_id")
+  businessName            String    @map("business_name")
+  ownerName               String    @map("owner_name")
+  taxId                   String?   @unique @map("tax_id")
+  businessType            String?   @map("business_type")
+  address                 String?
+  city                    String?
+  state                   String?
+  paystackCustomerCode    String?   @map("paystack_customer_code")
+  virtualAccountNumber    String?   @map("virtual_account_number")
+  virtualAccountBank      String?   @map("virtual_account_bank")
   defaultProfitMargin     Decimal   @default(20.00) @map("default_profit_margin") @db.Decimal(5, 2)
   taxReminderDay          Int       @default(25) @map("tax_reminder_day")
   paystackSubaccountCode  String?   @map("paystack_subaccount_code")
@@ -78,33 +116,37 @@ model Business {
   dvaFailedAt             DateTime? @map("dva_failed_at")
   logoUrl                 String?   @map("logo_url")
   logoPublicId            String?   @map("logo_public_id")
-  // Paystack transfer recipient — created on first approved payout, reused while
-  // the settlement bank account is unchanged. recipientFingerprint guards reuse:
-  // it is `bankCode:accountNumber` of the settlement account the code was built
-  // for; a bank change produces a new fingerprint, so the stale code is never
-  // reused (self-invalidating — no explicit wipe needed).
-  paystackRecipientCode   String?   @map("paystack_recipient_code")
-  recipientFingerprint    String?   @map("recipient_fingerprint")
   // Payout account change lock — admin-granted one-time permission (24h expiry)
   payoutChangePermitted   Boolean   @default(false) @map("payout_change_permitted")
   payoutChangePermittedAt DateTime? @map("payout_change_permitted_at")
   payoutChangePermittedBy String?   @map("payout_change_permitted_by")
   payoutChangeUsedAt      DateTime? @map("payout_change_used_at")
+  // Voucher bonus — store-wide default extra % credited on top-ups (0–10). 0 = off.
+  voucherBonusPct         Decimal   @default(0.00) @map("voucher_bonus_pct") @db.Decimal(5, 2)
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
   merchantId              String    @unique @map("merchant_id")
 
-  auditLogs            AuditLog[]
-  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  customers            Customer[]
-  expenses             Expense[]
-  invoices             Invoice[]
-  taxReports           MonthlyTaxReport[]
-  reminders            Reminder[]
-  sales                SalesTransaction[]
-  payments             TaxPayment[]
-  statements           TaxStatement[]
-  settlementPayouts    SettlementPayout[]
+  auditLogs          AuditLog[]
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  primaryForUsers    User[]              @relation("PrimaryBusiness")
+  customers          Customer[]
+  expenses           Expense[]
+  invoices           Invoice[]
+  taxReports         MonthlyTaxReport[]
+  reminders          Reminder[]
+  sales              SalesTransaction[]
+  payments           TaxPayment[]
+  statements         TaxStatement[]
+  settlementPayouts  SettlementPayout[]
+  walletTransactions WalletTransaction[]
+  credits            CustomerCredit[]
+  members            BusinessMember[]
+  invitations             Invitation[]
+  customerCards           CustomerCard[]
+  subscriptionSubmissions SubscriptionSubmission[]
+  feedbacks               UserFeedback[]
+  aiQueryLogs             AiQueryLog[]
 
   @@index([userId])
   @@index([taxId])
@@ -156,43 +198,70 @@ model SalesTransaction {
   finalClassification String?                    @map("final_classification")
   isTaxable           Boolean                    @default(true) @map("is_taxable")
   classificationId    String?                    @map("classification_id")
+  dvaOrigin           Boolean                    @default(false) @map("dva_origin")
   invoice             Invoice?
+  walletTx            WalletTransaction?
+  creditPayment       CreditPayment?             @relation("CreditPaymentSale")
+  creditOrigin        CustomerCredit?            @relation("CreditOriginSale")
+  customerId          String?                    @map("customer_id")
+  customer            Customer?                  @relation(fields: [customerId], references: [id], onDelete: SetNull)
   business            Business                   @relation(fields: [businessId], references: [id], onDelete: Cascade)
   classification      TransactionClassification? @relation(fields: [classificationId], references: [id], onDelete: SetNull)
+  items               SaleLineItem[]
 
   @@unique([businessId, source, referenceId], name: "unique_sales_reference")
   @@index([businessId, transactionDate(sort: Desc)])
   @@index([referenceId])
   @@index([source])
+  @@index([customerId])
+  @@index([businessId, dvaOrigin, status])
   @@index([businessId, needsVerification], map: "idx_sales_needs_verification")
+  @@index([needsVerification, transactionDate(sort: Desc)], map: "idx_sales_unverified_queue")
   @@index([classificationId])
-  @@index([businessId, status, isTaxable, transactionDate], map: "idx_sales_tax_calc")
+  @@index([businessId, status, isTaxable, transactionDate, amount], map: "idx_sales_tax_calc")
   @@map("sales_transactions")
 }
 
 /// Expenses - business expenditure tracking
 model Expense {
-  id           String          @id @default(uuid())
-  businessId   String          @map("business_id")
-  category     ExpenseCategory
-  description  String
-  /// Free-text detail captured in the UI when category = 'other'
-  /// (e.g. "Bank charges", "Repairs"). Nullable — only populated for 'other'.
-  categoryDetail String?       @map("category_detail")
-  amount       Decimal         @db.Decimal(15, 2)
-  expenseDate  DateTime        @map("expense_date") @db.Date
-  receiptUrl   String?         @map("receipt_url")
-  isDeductible Boolean         @default(true) @map("is_deductible")
-  createdAt    DateTime        @default(now()) @map("created_at")
-  updatedAt    DateTime        @updatedAt @map("updated_at")
-  createdBy    String?         @map("created_by")
-  business     Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id             String          @id @default(uuid())
+  businessId     String          @map("business_id")
+  category       ExpenseCategory
+  description    String
+  amount         Decimal         @db.Decimal(15, 2)
+  quantity       Decimal         @default(1) @db.Decimal(12, 2)
+  unitPrice      Decimal?        @map("unit_price") @db.Decimal(15, 2)
+  expenseDate    DateTime        @map("expense_date") @db.Date
+  receiptUrl     String?         @map("receipt_url")
+  isDeductible   Boolean         @default(true) @map("is_deductible")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  createdBy      String?         @map("created_by")
+  linkedCreditId String?         @unique @map("linked_credit_id")
+  business       Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  linkedCredit   CustomerCredit? @relation("CreditBadDebtExpense", fields: [linkedCreditId], references: [id], onDelete: SetNull)
 
   @@index([businessId, expenseDate(sort: Desc)])
   @@index([category])
   @@index([businessId, isDeductible])
-  @@index([businessId, isDeductible, expenseDate], map: "idx_expense_tax_calc")
+  @@index([businessId, isDeductible, expenseDate, amount], map: "idx_expense_tax_calc")
   @@map("expenses")
+}
+
+/// Sale Line Items - individual items within a basket sale
+model SaleLineItem {
+  id        String           @id @default(uuid())
+  saleId    String           @map("sale_id")
+  name      String           @db.VarChar(200)
+  quantity  Decimal          @default(1) @db.Decimal(12, 2)
+  unitPrice Decimal          @map("unit_price") @db.Decimal(15, 2)
+  lineTotal Decimal          @map("line_total") @db.Decimal(15, 2)
+  sortOrder Int              @default(0) @map("sort_order")
+  createdAt DateTime         @default(now()) @map("created_at")
+  sale      SalesTransaction @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId, sortOrder])
+  @@map("sale_line_items")
 }
 
 /// Monthly tax reports - calculated tax obligations
@@ -210,6 +279,7 @@ model MonthlyTaxReport {
   isFinalized   Boolean       @default(false) @map("is_finalized")
   isLocked      Boolean       @default(false) @map("is_locked")
   lockedAt      DateTime?     @map("locked_at")
+  isNilReturn   Boolean       @default(false) @map("is_nil_return")
   createdAt     DateTime      @default(now()) @map("created_at")
   updatedAt     DateTime      @updatedAt @map("updated_at")
   business      Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
@@ -222,7 +292,7 @@ model MonthlyTaxReport {
   @@map("monthly_tax_reports")
 }
 
-/// Tax payments - payment transactions to FIRS
+/// Tax payments - payment transactions to NRS
 model TaxPayment {
   id                   String           @id @default(uuid())
   businessId           String           @map("business_id")
@@ -250,8 +320,8 @@ model TaxPayment {
   @@map("tax_payments")
 }
 
-/// FIRS remittance batches - groups collected tax payments forwarded to FIRS as a lump sum.
-/// FIRS has no API yet, so remittance is recorded manually by an admin (transport='manual').
+/// NRS remittance batches - groups collected tax payments forwarded to NRS as a lump sum.
+/// NRS has no API yet, so remittance is recorded manually by an admin (transport='manual').
 model FirsRemittance {
   id             String           @id @default(uuid())
   status         RemittanceStatus @default(remitting)
@@ -312,23 +382,29 @@ model AuditLog {
 
 /// Customers - client master data per business, reused across invoices
 model Customer {
-  id         String    @id @default(uuid())
-  businessId String    @map("business_id")
+  id         String             @id @default(uuid())
+  businessId String             @map("business_id")
   name       String
   email      String?
   phone      String?
   address    String?
   city       String?
   state      String?
-  taxId      String?   @map("tax_id")
+  taxId      String?            @map("tax_id")
   notes      String?
-  isActive   Boolean   @default(true) @map("is_active")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
-  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  isActive   Boolean            @default(true) @map("is_active")
+  // Per-customer voucher bonus % — null = inherit Business.voucherBonusPct, 0 = explicitly no bonus
+  voucherBonusPct Decimal? @map("voucher_bonus_pct") @db.Decimal(5, 2)
+  createdAt  DateTime           @default(now()) @map("created_at")
+  updatedAt  DateTime           @updatedAt @map("updated_at")
+  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   invoices   Invoice[]
+  credits    CustomerCredit[]
+  card       CustomerCard?
+  sales      SalesTransaction[]
 
   @@index([businessId, name])
+  @@index([businessId, phone])
   @@index([businessId, isActive])
   @@map("customers")
 }
@@ -421,6 +497,22 @@ enum UserRole {
   admin
 }
 
+enum BusinessRole {
+  owner
+  manager
+  sales_staff
+  accountant
+  viewer
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  declined
+  expired
+  revoked
+}
+
 enum PaymentMethod {
   wallet
   bank_transfer
@@ -451,6 +543,8 @@ enum SalesSource {
   manual
   cash
   invoice
+  credit
+  store_voucher
 }
 
 enum TransactionStatus {
@@ -462,16 +556,27 @@ enum TransactionStatus {
 }
 
 enum ExpenseCategory {
-  rent
-  inventory
-  salary
-  utility
+  bad_debt
+  bank_charges
+  communication
+  depreciation
   fuel
+  gift
+  insurance
+  interest
+  inventory
   logistics
   marketing
-  gift
-  subscription
+  office_supplies
   other
+  professional_fees
+  rent
+  repairs_maintenance
+  salary
+  subscription
+  tax_permit
+  travel
+  utility
 }
 
 enum InvoiceStatus {
@@ -516,6 +621,99 @@ enum TaxTreatment {
   taxable
   non_taxable
   review_required
+}
+
+/// Credit status lifecycle: unpaid -> partially_paid / overdue -> paid | written_off
+enum CreditStatus {
+  unpaid
+  partially_paid
+  paid
+  written_off
+  overdue
+}
+
+/// Customer credits / trade debt (buy now, pay later)
+/// Revenue is recognized at credit issuance via a linked SalesTransaction (linkedSaleId).
+/// Repayments update the debtor ledger only — no duplicate revenue creation.
+/// This follows IFRS/CITA accrual-basis accounting.
+model CustomerCredit {
+  id                 String       @id @default(uuid())
+  businessId         String       @map("business_id")
+  customerId         String?      @map("customer_id")
+  customerName       String       @map("customer_name")
+  customerPhone      String?      @map("customer_phone")
+  customerEmail      String?      @map("customer_email")
+  description        String
+  totalAmount        Decimal      @map("total_amount") @db.Decimal(15, 2)
+  amountPaid         Decimal      @default(0) @map("amount_paid") @db.Decimal(15, 2)
+  balance            Decimal      @db.Decimal(15, 2)
+  issueDate          DateTime     @map("issue_date") @db.Date
+  dueDate            DateTime     @map("due_date") @db.Date
+  reminderDate       DateTime?    @map("reminder_date") @db.Date
+  lastReminderSentAt DateTime?    @map("last_reminder_sent_at")
+  status             CreditStatus @default(unpaid)
+  guarantorName      String?      @map("guarantor_name")
+  guarantorPhone     String?      @map("guarantor_phone")
+  notes              String?
+  linkedSaleId       String?      @unique @map("linked_sale_id")
+  createdBy          String?      @map("created_by")
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+
+  business       Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer       Customer?         @relation(fields: [customerId], references: [id])
+  linkedSale     SalesTransaction? @relation("CreditOriginSale", fields: [linkedSaleId], references: [id])
+  payments       CreditPayment[]
+  items          CreditLineItem[]
+  badDebtExpense Expense?          @relation("CreditBadDebtExpense")
+
+  @@index([businessId, status])
+  @@index([businessId, dueDate])
+  @@index([dueDate, status])
+  @@index([reminderDate, status])
+  @@index([customerId])
+  @@index([linkedSaleId])
+  @@map("customer_credits")
+}
+
+/// Individual payments against a customer credit / trade debt.
+/// Payments reduce the outstanding balance — no new SalesTransaction is created
+/// (revenue was recognized at credit creation under accrual-basis accounting).
+/// linkedSaleId is populated for legacy payments (cash-basis era) and DVA reconciliations.
+model CreditPayment {
+  id            String      @id @default(uuid())
+  creditId      String      @map("credit_id")
+  amount        Decimal     @db.Decimal(15, 2)
+  paymentDate   DateTime    @map("payment_date") @db.Date
+  paymentType   SalesSource @map("payment_type")
+  isFullPayment Boolean     @default(false) @map("is_full_payment")
+  linkedSaleId  String?     @unique @map("linked_sale_id")
+  notes         String?
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  credit     CustomerCredit    @relation(fields: [creditId], references: [id], onDelete: Cascade)
+  linkedSale SalesTransaction? @relation("CreditPaymentSale", fields: [linkedSaleId], references: [id])
+
+  @@index([creditId])
+  @@index([paymentDate])
+  @@map("credit_payments")
+}
+
+/// Individual line items for a customer credit (mirrors SaleLineItem for sales).
+/// Stores the product/service breakdown when a multi-item basket sale is given on credit.
+model CreditLineItem {
+  id        String         @id @default(uuid())
+  creditId  String         @map("credit_id")
+  name      String         @db.VarChar(200)
+  quantity  Decimal        @default(1) @db.Decimal(12, 2)
+  unitPrice Decimal        @map("unit_price") @db.Decimal(15, 2)
+  lineTotal Decimal        @map("line_total") @db.Decimal(15, 2)
+  sortOrder Int            @default(0) @map("sort_order")
+  createdAt DateTime       @default(now()) @map("created_at")
+  credit    CustomerCredit @relation(fields: [creditId], references: [id], onDelete: Cascade)
+
+  @@index([creditId, sortOrder])
+  @@map("credit_line_items")
 }
 
 /// Audit log of every inbound Paystack webhook. Rows are written BEFORE
@@ -565,16 +763,16 @@ model Bank {
 
 /// User login sessions for multi-device management and revocation
 model Session {
-  id               String    @id @default(uuid())
-  userId           String    @map("user_id")
-  refreshTokenHash String    @map("refresh_token_hash")
-  ipAddress        String?   @map("ip_address")
-  userAgent        String?   @map("user_agent")
-  deviceInfo       String?   @map("device_info")
-  lastActiveAt     DateTime  @default(now()) @map("last_active_at")
-  isRevoked        Boolean   @default(false) @map("is_revoked")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id               String   @id @default(uuid())
+  userId           String   @map("user_id")
+  refreshTokenHash String   @map("refresh_token_hash")
+  ipAddress        String?  @map("ip_address")
+  userAgent        String?  @map("user_agent")
+  deviceInfo       String?  @map("device_info")
+  lastActiveAt     DateTime @default(now()) @map("last_active_at")
+  isRevoked        Boolean  @default(false) @map("is_revoked")
+  createdAt        DateTime @default(now()) @map("created_at")
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([refreshTokenHash])
@@ -583,28 +781,305 @@ model Session {
 
 /// Settlement payouts - on-demand balance withdrawals to commercial bank accounts
 model SettlementPayout {
-  id                    String        @id @default(uuid())
-  businessId            String        @map("business_id")
-  amount                Decimal       @map("amount") @db.Decimal(15, 2)
-  fee                   Decimal       @default(0) @map("fee") @db.Decimal(15, 2)
-  netAmount             Decimal       @map("net_amount") @db.Decimal(15, 2)
-  destinationBankCode   String        @map("destination_bank_code")
-  destinationBankName   String        @map("destination_bank_name")
-  destinationAccountNum String        @map("destination_account_num")
-  destinationAccountName String       @map("destination_account_name")
-  transferReference     String        @unique @map("transfer_reference")
-  paystackTransferCode  String?       @map("paystack_transfer_code")
-  status                PaymentStatus @default(pending) @map("payment_status")
-  initiatedAt           DateTime      @default(now()) @map("initiated_at")
-  completedAt           DateTime?     @map("completed_at")
-  failureReason         String?       @map("failure_reason")
-  narration             String?
-  createdAt             DateTime      @default(now()) @map("created_at")
-  updatedAt             DateTime      @updatedAt @map("updated_at")
-  business              Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id                     String             @id @default(uuid())
+  businessId             String             @map("business_id")
+  amount                 Decimal            @map("amount") @db.Decimal(15, 2)
+  fee                    Decimal            @default(0) @map("fee") @db.Decimal(15, 2)
+  netAmount              Decimal            @map("net_amount") @db.Decimal(15, 2)
+  destinationBankCode    String             @map("destination_bank_code")
+  destinationBankName    String             @map("destination_bank_name")
+  destinationAccountNum  String             @map("destination_account_num")
+  destinationAccountName String             @map("destination_account_name")
+  transferReference      String             @unique @map("transfer_reference")
+  paystackTransferCode   String?            @map("paystack_transfer_code")
+  status                 PaymentStatus      @default(pending) @map("payment_status")
+  initiatedAt            DateTime           @default(now()) @map("initiated_at")
+  completedAt            DateTime?          @map("completed_at")
+  failureReason          String?            @map("failure_reason")
+  narration              String?
+  adminApprovedBy        String?            @map("admin_approved_by")
+  adminApprovedAt        DateTime?          @map("admin_approved_at")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+  business               Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  walletTx               WalletTransaction?
 
   @@index([businessId])
   @@index([transferReference])
   @@index([status])
   @@map("settlement_payouts")
 }
+
+enum WalletTxType {
+  credit
+  debit
+  payout
+  fee
+  reversal
+}
+
+/// Central User Wallet - pooled treasury across all businesses owned by the user
+model WalletBalance {
+  id            String              @id @default(uuid())
+  userId        String              @unique @map("user_id")
+  balance       Decimal             @default(0.00) @db.Decimal(15, 2)
+  lockedBalance Decimal             @default(0.00) @map("locked_balance") @db.Decimal(15, 2)
+  currency      String              @default("NGN")
+  version       Int                 @default(0)
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions  WalletTransaction[]
+
+  @@map("wallet_balances")
+}
+
+/// Wallet transaction ledger - double-entry audit history of cash movements
+model WalletTransaction {
+  id             String            @id @default(uuid())
+  walletId       String            @map("wallet_id")
+  userId         String            @map("user_id")
+  businessId     String?           @map("business_id")
+  type           WalletTxType      @default(credit)
+  amount         Decimal           @db.Decimal(15, 2)
+  fee            Decimal           @default(0.00) @db.Decimal(15, 2)
+  netAmount      Decimal           @map("net_amount") @db.Decimal(15, 2)
+  balanceAfter   Decimal           @map("balance_after") @db.Decimal(15, 2)
+  reference      String            @unique
+  source         String
+  description    String?
+  idempotencyKey String?           @unique @map("idempotency_key")
+  metadata       Json?
+  linkedSaleId   String?           @unique @map("linked_sale_id")
+  linkedPayoutId String?           @unique @map("linked_payout_id")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  wallet         WalletBalance     @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business       Business?         @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  linkedSale     SalesTransaction? @relation(fields: [linkedSaleId], references: [id], onDelete: SetNull)
+  linkedPayout   SettlementPayout? @relation(fields: [linkedPayoutId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([businessId])
+  @@index([walletId])
+  @@index([reference])
+  @@map("wallet_transactions")
+}
+
+/// Global platform fee configuration managed by administrators
+model PlatformFeeConfig {
+  id                  String   @id @default("default")
+  withdrawalFeePct    Decimal  @default(1.00) @map("withdrawal_fee_pct") @db.Decimal(5, 2)
+  withdrawalFeeCap    Decimal  @default(300.00) @map("withdrawal_fee_cap") @db.Decimal(10, 2)
+  minWithdrawalAmount Decimal  @default(1000.00) @map("min_withdrawal_amount") @db.Decimal(10, 2)
+  autoSweepEnabled    Boolean  @default(false) @map("auto_sweep_enabled")
+  autoSweepThreshold  Decimal  @default(1000.00) @map("auto_sweep_threshold") @db.Decimal(10, 2)
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  updatedBy           String?  @map("updated_by")
+
+  @@map("platform_fee_configs")
+}
+
+/// Global platform tax & statutory compliance configuration managed by administrators
+model PlatformTaxConfig {
+  id                  String   @id @default("default")
+  autoFinalizeDay     Int      @default(20) @map("auto_finalize_day")
+  autoFinalizeEnabled Boolean  @default(true) @map("auto_finalize_enabled")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  updatedBy           String?  @map("updated_by")
+
+  @@map("platform_tax_configs")
+}
+
+/// Global dynamic AI provider configuration managed by administrators
+model AiProviderConfig {
+  id              String   @id @default("default")
+  provider        String   @default("groq") // groq, openai, xai, gemini, deepseek, openrouter, custom
+  name            String   @default("Groq Cloud")
+  baseUrl         String   @default("https://api.groq.com/openai/v1") @map("base_url")
+  apiKeyEncrypted String?  @map("api_key_encrypted")
+  model           String   @default("qwen/qwen3.8-27b")
+  temperature     Decimal  @default(0.30) @db.Decimal(3, 2)
+  maxTokens       Int      @default(1024) @map("max_tokens")
+  isActive        Boolean  @default(true) @map("is_active")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  updatedBy       String?  @map("updated_by")
+
+  @@map("ai_provider_configs")
+}
+
+/// Team members - maps users to businesses with specific roles
+model BusinessMember {
+  id          String       @id @default(uuid())
+  businessId  String       @map("business_id")
+  userId      String       @map("user_id")
+  role        BusinessRole @default(viewer)
+  permissions Json?        @db.JsonB
+  isActive    Boolean      @default(true) @map("is_active")
+  joinedAt    DateTime     @default(now()) @map("joined_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@index([userId])
+  @@index([businessId, role])
+  @@map("business_members")
+}
+
+/// Team invitations - pending invitations to join a business
+model Invitation {
+  id          String           @id @default(uuid())
+  businessId  String           @map("business_id")
+  email       String
+  fullName    String?          @map("full_name")
+  role        BusinessRole     @default(viewer)
+  permissions Json?            @db.JsonB
+  tokenHash   String           @unique @map("token_hash")
+  status      InvitationStatus @default(pending)
+  invitedBy   String           @map("invited_by")
+  expiresAt   DateTime         @map("expires_at")
+  respondedAt DateTime?        @map("responded_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([businessId, status])
+  @@index([businessId, email])
+  @@map("invitations")
+}
+
+/// Customer virtual store cards for change vouchers & credit balances
+model CustomerCard {
+  id                             String               @id @default(uuid())
+  businessId                     String               @map("business_id")
+  customerId                     String               @unique @map("customer_id")
+  cardCode                       String               @unique @map("card_code")
+  balance                        Decimal              @default(0.00) @db.Decimal(15, 2)
+  isActive                       Boolean              @default(true) @map("is_active")
+  pendingVerificationId          String?              @map("pending_verification_id")
+  pendingVerificationRequestedAt DateTime?            @map("pending_verification_requested_at")
+  pinHash                        String?              @map("pin_hash")
+  pinAttempts                    Int                  @default(0) @map("pin_attempts")
+  pinLockedUntil                 DateTime?            @map("pin_locked_until")
+  createdAt                      DateTime             @default(now()) @map("created_at")
+  updatedAt                      DateTime             @updatedAt @map("updated_at")
+  business                       Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer                       Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  ledgers                        CustomerCardLedger[]
+
+  @@index([businessId, cardCode])
+  @@map("customer_cards")
+}
+
+/// Ledger entries for customer virtual store card balance mutations
+model CustomerCardLedger {
+  id            String              @id @default(uuid())
+  cardId        String              @map("card_id")
+  type          CardTransactionType
+  amount        Decimal             @db.Decimal(15, 2)
+  balanceBefore Decimal             @map("balance_before") @db.Decimal(15, 2)
+  balanceAfter  Decimal             @map("balance_after") @db.Decimal(15, 2)
+  receiptNumber String?             @map("receipt_number")
+  linkedSaleId  String?             @map("linked_sale_id")
+  performedBy   String?             @map("performed_by")
+  notes         String?
+  // Bonus extra credited on top-ups — e.g. amount 10000, bonusPct 3 => bonusAmount 300, credited 10300
+  bonusAmount   Decimal?            @map("bonus_amount") @db.Decimal(15, 2)
+  bonusPct      Decimal?            @map("bonus_pct") @db.Decimal(5, 2)
+  createdAt     DateTime            @default(now()) @map("created_at")
+  card          CustomerCard        @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@index([cardId, createdAt(sort: Desc)])
+  @@index([receiptNumber])
+  @@map("customer_card_ledgers")
+}
+
+enum CardTransactionType {
+  top_up
+  change_credit
+  sale_debit
+  adjustment
+}
+
+enum SubscriptionPaymentStatus {
+  pending
+  approved
+  rejected
+}
+
+/// In-app manual bank transfer subscription submissions
+model SubscriptionSubmission {
+  id              String                    @id @default(uuid())
+  userId          String?                   @map("user_id")
+  businessId      String?                   @map("business_id")
+  customerName    String                    @map("customer_name")
+  email           String
+  phone           String?
+  businessName    String?                   @map("business_name")
+  plan            String
+  billingCycle    String                    @default("monthly") @map("billing_cycle")
+  amount          Decimal                   @db.Decimal(15, 2)
+  notes           String?
+  receiptUrl      String?                   @map("receipt_url")
+  receiptFileName String?                   @map("receipt_file_name")
+  receiptMime     String?                   @map("receipt_mime")
+  receiptPath     String?                   @map("receipt_path")
+  status          SubscriptionPaymentStatus @default(pending)
+  reviewedBy      String?                   @map("reviewed_by")
+  reviewedAt      DateTime?                 @map("reviewed_at")
+  rejectionReason String?                   @map("rejection_reason")
+  createdAt       DateTime                  @default(now()) @map("created_at")
+  updatedAt       DateTime                  @updatedAt @map("updated_at")
+
+  user            User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  business        Business?                 @relation(fields: [businessId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([userId])
+  @@index([email])
+  @@map("subscription_submissions")
+}
+
+/// In-app user feedback, ratings, and sentiment reviews
+model UserFeedback {
+  id              String    @id @default(uuid())
+  userId          String?   @map("user_id")
+  businessId      String?   @map("business_id")
+  userName        String?   @map("user_name")
+  userEmail       String?   @map("user_email")
+  rating          Int
+  sentiment       String?
+  tags            String[]
+  comment         String?   @db.Text
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  business        Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+
+  @@index([rating])
+  @@index([createdAt(sort: Desc)])
+  @@map("user_feedbacks")
+}
+
+/// Tracks AI Assistant CFO queries per user to enforce monthly plan quotas
+model AiQueryLog {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  businessId     String?   @map("business_id")
+  queryText      String    @map("query_text") @db.Text
+  responseLength Int?      @map("response_length")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("ai_query_logs")
+}
+
+

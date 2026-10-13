@@ -1440,6 +1440,8 @@ export interface DispatchVoucherNotificationInput {
   balance: number;
   actionType?: 'created' | 'top_up' | 'change_credit';
   amount?: number;
+  bonusAmount?: number | null;
+  bonusPct?: number | null;
   notes?: string | null;
   toEmail?: string | null;
   customerName?: string | null;
@@ -1487,6 +1489,7 @@ export async function dispatchVoucherNotificationEmail(
     const businessPhone = business?.user?.phone || null;
     const balanceFormatted = formatNaira(input.balance);
     const amountFormatted = input.amount !== undefined ? formatNaira(input.amount) : undefined;
+    const bonusAmountFormatted = input.bonusAmount !== undefined && input.bonusAmount !== null && input.bonusAmount > 0 ? formatNaira(input.bonusAmount) : null;
 
     const templateData: VoucherNotificationEmailData = {
       customerName: customerName || 'Valued Customer',
@@ -1494,6 +1497,8 @@ export async function dispatchVoucherNotificationEmail(
       balanceFormatted,
       actionType: input.actionType ?? 'created',
       amountFormatted,
+      bonusAmountFormatted,
+      bonusPct: input.bonusPct ?? null,
       customerPhone,
       businessPhone,
       notes: input.notes,

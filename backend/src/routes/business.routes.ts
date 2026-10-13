@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { authenticate } from '@/middleware/auth';
+import { requireActiveSubscription } from '@/middleware/subscription';
 import { AppError } from '@/middleware/errorHandler';
 import { isAllowedLogoFile, MAX_LOGO_BYTES } from '@/lib/cloudinary';
 import * as businessController from '@/controllers/business.controller';
@@ -23,7 +24,7 @@ const logoUpload = multer({
   },
 });
 
-router.post('/', businessController.create);
+router.post('/', requireActiveSubscription, businessController.create);
 router.get('/', businessController.getAll);
 router.get('/:id', businessController.getById);
 router.put('/:id', businessController.update);
@@ -32,6 +33,9 @@ router.delete('/:id', businessController.remove);
 // ── Logo routes ──
 router.post('/:id/logo', logoUpload.single('logo'), businessController.uploadLogo);
 router.delete('/:id/logo', businessController.deleteLogo);
+
+// Voucher bonus — business-wide default extra % on top-ups
+router.put('/:id/settings/voucher-bonus', businessController.updateVoucherBonus);
 
 export default router;
 

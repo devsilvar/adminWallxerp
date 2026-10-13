@@ -16,6 +16,8 @@ export interface VoucherNotificationEmailData {
   balanceFormatted: string;
   actionType?: 'created' | 'top_up' | 'change_credit';
   amountFormatted?: string;
+  bonusAmountFormatted?: string | null;
+  bonusPct?: number | null;
   customerPhone?: string | null;
   businessPhone?: string | null;
   notes?: string | null;
@@ -57,6 +59,10 @@ export function generateVoucherNotificationHtml(data: VoucherNotificationEmailDa
     ? `<li style="margin-bottom: 6px;"><strong>Confirm with PIN:</strong> Enter your 6-digit PIN and the last 4 digits of your phone number. Keep your PIN private.</li>`
     : `<li style="margin-bottom: 6px;">Confirm with your 6-digit PIN and last 4 digits of your phone — the till will verify instantly.</li>`;
 
+  const bonusBanner = data.bonusAmountFormatted && data.bonusPct
+    ? `<div style="margin: 14px auto 0; display: inline-block; background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%); border: 1px solid #a7f3d0; border-radius: 10px; padding: 12px 18px;"><div style="color: #059669; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">🎁 Bonus Added</div><div style="color: #065f46; font-size: 14px; font-weight: 700; margin-top: 4px;">+${escapeHtml(data.bonusAmountFormatted)} extra (${data.bonusPct}% bonus)</div><div style="color: #047857; font-size: 11px; margin-top: 2px;">You received more than you paid — thank you for keeping your balance with ${businessName}!</div></div>`
+    : '';
+
   const bodyIntro =
     actionType === 'created'
       ? `Your store voucher at <strong>${businessName}</strong> is ready. You can shop and save change without needing a code — just give your name at checkout.`
@@ -93,16 +99,19 @@ export function generateVoucherNotificationHtml(data: VoucherNotificationEmailDa
               </div>
               ${pinBlock}
               ${pinBalanceLine}
+              ${bonusBanner}
             </td>
           </tr>
           <tr>
             <td style="padding: 32px;">
               <p style="margin: 0 0 16px; color: #0f172a; font-size: 15px; line-height: 1.5;">Hello <strong>${customerName}</strong>,</p>
               <p style="margin: 0 0 20px; color: #475569; font-size: 14px; line-height: 1.6;">${bodyIntro}</p>
+              ${data.bonusAmountFormatted && data.bonusPct ? `<div style="background-color: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 14px 16px; margin-bottom: 20px;"><p style="margin: 0; color: #065f46; font-size: 13px; font-weight: 600;">🎁 You received ${escapeHtml(data.bonusAmountFormatted)} extra (${data.bonusPct}% bonus) — thank you for keeping your balance with ${businessName}!</p></div>` : ''}
               <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 24px; overflow: hidden;">
                 <tr><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Store Name</td><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 13px; font-weight: 600; text-align: right;">${businessName}</td></tr>
                 <tr><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Customer Name</td><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 13px; font-weight: 600; text-align: right;">${customerName}</td></tr>
                 <tr><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Available Balance</td><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #16a34a; font-size: 14px; font-weight: 700; text-align: right;">${balanceFormatted}</td></tr>
+                ${data.bonusAmountFormatted && data.bonusPct ? `<tr><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Bonus Added</td><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #059669; font-size: 13px; font-weight: 700; text-align: right;">+${escapeHtml(data.bonusAmountFormatted)} (${data.bonusPct}%)</td></tr>` : ''}
                 ${customerPhone ? `<tr><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Linked Phone</td><td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 13px; font-weight: 500; text-align: right;">${customerPhone}</td></tr>` : ''}
                 ${notes ? `<tr><td style="padding: 12px 16px; color: #64748b; font-size: 13px;">Notes</td><td style="padding: 12px 16px; color: #0f172a; font-size: 13px; font-weight: 500; text-align: right;">${notes}</td></tr>` : ''}
               </table>
@@ -160,6 +169,7 @@ VOUCHER DETAILS:
 - Store: ${data.businessName}
 - Customer: ${data.customerName}
 ${data.pinCode ? `- Your 6-Digit PIN: ${data.pinCode}  (keep it private — you will enter this + last 4 of phone at the till)\n` : ''}- Available Balance: ${data.balanceFormatted}
+${data.bonusAmountFormatted && data.bonusPct ? `- Bonus Added: +${data.bonusAmountFormatted} (${data.bonusPct}% extra) — thank you for keeping your balance with us!\n` : ''}
 ${data.customerPhone ? `- Linked Phone: ${data.customerPhone}\n` : ''}${data.notes ? `- Notes: ${data.notes}\n` : ''}
 HOW TO USE:
 Give your name ("${data.customerName}") at checkout at ${data.businessName}.

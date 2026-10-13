@@ -9,15 +9,12 @@
 
 import dotenv from 'dotenv';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables. In tests, never override process.env so that test mocks and runner settings stay isolated.
+const isTest = process.env.NODE_ENV === 'test' || Boolean(process.env.JEST_WORKER_ID);
+dotenv.config({ override: !isTest });
 
 /**
  * Validates that required environment variables are present.
- *
- * SUPABASE_* are NOT in the required set — the app uses Prisma + Postgres
- * for all DB access; Supabase is only needed if you opt into Supabase
- * Storage / Auth helpers (currently unused in this codebase).
  */
 function validateConfig() {
   const required = [
@@ -25,6 +22,10 @@ function validateConfig() {
     'JWT_ACCESS_SECRET',
     'JWT_REFRESH_SECRET',
   ];
+
+  if (process.env.NODE_ENV === 'production') {
+    required.push('ENCRYPTION_KEY', 'BLIND_INDEX_KEY');
+  }
 
   const missing = required.filter((key) => !process.env[key]);
 
@@ -46,10 +47,12 @@ validateConfig();
  * Parse PORT defensively. Render/Heroku inject PORT automatically; if a user
  * also adds it in the dashboard with a bad value (empty string, whitespace,
  * non-numeric), parseInt returns NaN and app.listen throws ERR_SOCKET_BAD_PORT.
- * Fall back to 10000 (Render's default) and log loudly so it's findable.
+/**
+ * Parse PORT defensively. Cloud platforms (Railway, Render, Fly) inject PORT automatically.
+ * Fall back to 3000 (standard Node/Express default) if none is provided.
  */
 const parsePort = (raw: string | undefined): number => {
-  const fallback = 10000;
+  const fallback = 3000;
   if (!raw || !raw.trim()) return fallback;
   const n = Number(raw.trim());
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
@@ -59,6 +62,21 @@ const parsePort = (raw: string | undefined): number => {
     return fallback;
   }
   return n;
+};
+
+/**
+ * ERASE_TEST_ACCOUNTS toggle — one-shot sweep of throwaway test accounts
+ * at server startup (src/scripts/erase-test-accounts.ts).
+ *   unset / false / 0 / no / off  → disabled
+ *   true / 1 / yes / apply        → delete matching accounts on startup
+ *   anything else                 → 'dry' (logs what WOULD be deleted), so a
+ *     typo still produces visible log output instead of silently doing nothing.
+ */
+const parseEraseToggle = (raw: string | undefined): false | 'dry' | 'apply' => {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (!v || v === 'false' || v === '0' || v === 'no' || v === 'off') return false;
+  if (v === 'true' || v === '1' || v === 'yes' || v === 'apply') return 'apply';
+  return 'dry';
 };
 
 export const config = {
@@ -74,12 +92,6 @@ export const config = {
   // Database
   database: {
     url: process.env.DATABASE_URL!,
-  },
-
-  // Supabase (optional — only set if you use Supabase Storage / Auth helpers)
-  supabase: {
-    url: process.env.SUPABASE_URL || '',
-    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
   },
 
   // JWT
@@ -123,6 +135,38 @@ export const config = {
     // CI exercise settlement connect without real bank resolution.
     // NEVER set this in production; see paystack.provider.ts shouldUseBankFixture().
     mockBankResolution: process.env.PAYSTACK_MOCK_BANK_RESOLUTION === 'true',
+    
+    // Paystack's published pricing. Rules, worked examples and the source URL
+    // for every number live in src/lib/paystack-fees.ts — read that first.
+    // These are the defaults as published on paystack.com/pricing and
+    // support.paystack.com on 2026-09-03; override via env if Paystack moves.
+    fees: {
+      // DVA inflow: 1% per transfer, capped at ₦300, deducted from the
+      // merchant's settlement (the sender is NOT charged extra).
+      dvaPct: Number(process.env.PAYSTACK_DVA_FEE_PCT ?? 1),
+      dvaCap: Number(process.env.PAYSTACK_DVA_FEE_CAP ?? 300),
+
+      // Withdrawals: banded FLAT transfer fee, not a percentage.
+      transferLow: Number(process.env.PAYSTACK_TRANSFER_FEE_LOW ?? 10),
+      transferLowMax: Number(process.env.PAYSTACK_TRANSFER_FEE_LOW_MAX ?? 5000),
+      transferMid: Number(process.env.PAYSTACK_TRANSFER_FEE_MID ?? 25),
+      transferMidMax: Number(process.env.PAYSTACK_TRANSFER_FEE_MID_MAX ?? 50000),
+      transferHigh: Number(process.env.PAYSTACK_TRANSFER_FEE_HIGH ?? 50),
+
+      // Nigeria Tax Act 2025 stamp duty, live since 18 Feb 2026: flat ₦50 on
+      // every transfer of ₦10,000+ out of a Paystack balance, on top of the
+      // transfer fee. Set to 0 only if the business is a registered payroll
+      // merchant (the only exemption Paystack documents).
+      stampDuty: Number(process.env.PAYSTACK_STAMP_DUTY ?? 50),
+      stampDutyFrom: Number(process.env.PAYSTACK_STAMP_DUTY_FROM ?? 10000),
+
+      // Who bears the WallX withdrawal fee: 'merchant' (default) adds the fee
+      // on top of the requested amount; 'platform' absorbs it entirely.
+      // Confirm with finance before flipping this.
+      withdrawalFeeBearer: (process.env.WITHDRAWAL_FEE_BEARER === 'platform'
+        ? 'platform'
+        : 'merchant') as 'merchant' | 'platform',
+    },
   },
 
   // DigitalOcean Spaces
@@ -146,13 +190,13 @@ export const config = {
   // Email
   email: {
     apiKey: process.env.RESEND_API_KEY || '',
-    from: process.env.EMAIL_FROM || 'PayMyTax <noreply@paymytax.ng>',
+    from: process.env.EMAIL_FROM || 'WallX ERP <noreply@wallxerp.com>',
   },
 
   // SMS
   sms: {
     apiKey: process.env.TERMII_API_KEY || '',
-    senderId: process.env.TERMII_SENDER_ID || 'PayMyTax',
+    senderId: process.env.TERMII_SENDER_ID || 'WallX ERP',
   },
 
   // Monitoring
@@ -185,13 +229,23 @@ export const config = {
     minRate: parseFloat(process.env.TAX_MIN_RATE || '0'),
     maxRate: parseFloat(process.env.TAX_MAX_RATE || '50'),
     currency: process.env.TAX_CURRENCY || 'NGN',
-    taxAuthority: process.env.TAX_AUTHORITY || 'FIRS',
+    taxAuthority: process.env.TAX_AUTHORITY || 'NRS',
   },
 
   // Rate Limiting
   rateLimit: {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
-    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '10000', 10),
+    maxRequests: parseInt(
+      process.env.RATE_LIMIT_MAX_REQUESTS ||
+        (process.env.NODE_ENV === 'production' ? '1000' : '1000000'),
+      10
+    ),
+    authWindowMs: parseInt(process.env.RATE_LIMIT_AUTH_WINDOW_MS || '900000', 10), // 15 minutes default
+    authMaxRequests: parseInt(
+      process.env.RATE_LIMIT_AUTH_MAX_REQUESTS ||
+        (process.env.NODE_ENV === 'production' ? '10' : '10000'),
+      10
+    ),
   },
 
   // PIN Security
@@ -200,12 +254,16 @@ export const config = {
     attemptWindowHours: Number(process.env.PIN_ATTEMPT_WINDOW_HOURS ?? 24),
   },
 
+  // Voucher bonus — merchant-funded extra % on top-ups (retention incentive)
+  voucher: {
+    maxBonusPct: Number(process.env.VOUCHER_MAX_BONUS_PCT ?? 10),
+  },
+
   // Settlement & Split Payouts
   settlement: {
     minTaxSplitPct: Number(process.env.SETTLEMENT_MIN_TAX_SPLIT_PCT ?? 7.5),
     maxTaxSplitPct: Number(process.env.SETTLEMENT_MAX_TAX_SPLIT_PCT ?? 50),
     platformCommissionPct: Number(process.env.PLATFORM_COMMISSION_PCT ?? 0),
-    payoutStaleHours: Number(process.env.PAYOUT_STALE_HOURS ?? 24),
   },
 
   // Scheduled Jobs (node-cron)
@@ -217,9 +275,87 @@ export const config = {
       process.env.NODE_ENV === 'production',
   },
 
-  // PII Encryption at Rest (AES-256-GCM)
+  // One-shot sweep of throwaway test accounts at startup
+  // (src/scripts/erase-test-accounts.ts). Off unless ERASE_TEST_ACCOUNTS is set:
+  // 'dry' logs what would be deleted, 'apply' deletes. Idempotent either way.
+  cleanup: {
+    eraseTestAccounts: parseEraseToggle(process.env.ERASE_TEST_ACCOUNTS),
+  },
+
+  // Security & KYC Cryptography
+  security: {
+    encryptionKey:
+      process.env.ENCRYPTION_KEY ||
+      'dev-tax-wallx-encryption-key-32b-secret!',
+    blindIndexKey:
+      process.env.BLIND_INDEX_KEY ||
+      'dev-tax-wallx-blind-index-key-32b-secret!',
+  },
+
+  // PII Encryption
   pii: {
-    encryptionKey: process.env.PII_ENCRYPTION_KEY,
+    encryptionKey:
+      process.env.PII_ENCRYPTION_KEY ||
+      process.env.ENCRYPTION_KEY ||
+      'dev-tax-wallx-encryption-key-32b-secret!',
+    blindIndexKey:
+      process.env.BLIND_INDEX_KEY ||
+      'dev-tax-wallx-blind-index-key-32b-secret!',
+  },
+
+  // Supabase
+  supabase: {
+    url: process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
+    serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-service-role-key',
+  },
+
+  // KudiSMS Hosted OTP Integration
+  kudisms: {
+    apiToken: process.env.KUDISMS_API_TOKEN || '',
+    senderId: process.env.KUDISMS_SENDER_ID || 'WallX',
+    appnameCode: process.env.KUDISMS_APPNAME_CODE || '',
+    templateCode: process.env.KUDISMS_TEMPLATE_CODE || '',
+    // KUDISMS=false or kudisms=false or KUDISMS_ENABLED=false or KUDISMS_SILENT_MODE=true activates silent simulation mode.
+    // KUDISMS=true or kudisms=true or KUDISMS_ENABLED=true forces live API token dispatch.
+    silentMode:
+      process.env.kudisms === 'false' ||
+      process.env.KUDISMS === 'false' ||
+      process.env.KUDISMS_ENABLED === 'false' ||
+      process.env.KUDISMS_SILENT_MODE === 'true' ||
+      ((process.env.kudisms !== 'true' &&
+        process.env.KUDISMS !== 'true' &&
+        process.env.KUDISMS_ENABLED !== 'true') &&
+        (!process.env.KUDISMS_API_TOKEN || process.env.KUDISMS_SILENT_MODE !== 'false')),
+  },
+
+  // AI Assistant & Business Intelligence
+  ai: {
+    provider: (process.env.AI_PROVIDER || 'groq') as 'groq' | 'gemini',
+    groqApiKey: process.env.GROQ_API_KEY || '',
+    geminiApiKey: process.env.GEMINI_API_KEY || '',
+    model: process.env.AI_MODEL || 'qwen/qwen3.8-27b',
+  },
+
+  // Regulatory & Non-Custodial Compliance Disclosures
+  // Compliant with CBN NPS Framework & FCCPC Consumer Protection Rules
+  regulatory: {
+    companyLegalName: 'WallX Technology Services Limited',
+    platformRole: 'Financial Technology Software Provider (Non-Bank)',
+    partnerPSP: 'Paystack Payments Limited',
+    partnerPSPLicense: 'CBN-Licensed Payment Solution Service Provider (PSSP)',
+    partnerBanks: 'Titan Trust Bank Limited, Wema Bank Plc',
+    governingLaw: 'Laws of the Federal Republic of Nigeria',
+    nonCustodialNotice:
+      'WallXERP by WallX is a financial technology software platform, not a bank or deposit-taking institution. Dedicated Virtual Accounts, split settlement routing, and interbank transfers are powered exclusively by CBN-licensed financial institutions. Merchant funds are held in trust by partner commercial banks and are never co-mingled with WallX operating capital.',
+    termsVersion: '2026.1-cbn-noncustodial',
+  },
+
+  // Subscription Access Control & Quotas
+  subscription: {
+    trialDays: parseInt(process.env.SUBSCRIPTION_TRIAL_DAYS || '30', 10),
+    graceDays: parseInt(process.env.SUBSCRIPTION_GRACE_DAYS || '2', 10),
+    enforcementEnabled: process.env.SUBSCRIPTION_ENFORCEMENT_ENABLED === 'true',
+    grandfatherCutoff: new Date(process.env.SUBSCRIPTION_BACKFILL_CUTOFF || '2026-10-08T00:00:00.000Z'),
   },
 } as const;
 
