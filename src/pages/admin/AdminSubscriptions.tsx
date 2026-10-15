@@ -13,21 +13,25 @@ import {
   Phone,
   Building2,
   Mail,
+  Loader2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api, { getErrorMessage } from '@/lib/axios.ts';
 import { useAdminStatsStore } from '@/stores/admin.stats.store.ts';
 import type { SubscriptionSubmission } from '@/types/index.ts';
+import { usePaginationTransition } from '@/hooks/usePaginationTransition';
 
 type StatusTab = 'all' | 'pending' | 'approved' | 'rejected';
 
 export default function AdminSubscriptions() {
   const [submissions, setSubmissions] = useState<SubscriptionSubmission[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [activeTab, setActiveTab] = useState<StatusTab>('all');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const { isPageLoading, pendingPage, start, finish } = usePaginationTransition();
   const [counts, setCounts] = useState({
     pending: 0,
     approved: 0,
@@ -45,6 +49,7 @@ export default function AdminSubscriptions() {
 
   const fetchSubmissions = useCallback(async () => {
     setLoading(true);
+    if (hasLoadedOnce) start(page);
     try {
       const params: Record<string, any> = {
         page,
@@ -69,8 +74,16 @@ export default function AdminSubscriptions() {
       toast.error(getErrorMessage(err, 'Failed to load subscription submissions'));
     } finally {
       setLoading(false);
+      finish();
+      setHasLoadedOnce(true);
     }
-  }, [activeTab, page, search]);
+  }, [activeTab, page, search, hasLoadedOnce, start, finish]);
+
+  const handlePageChange = (next: number) => {
+    if (next === page || isPageLoading) return;
+    start(next);
+    setPage(next);
+  };
 
   useEffect(() => {
     fetchSubmissions();
@@ -249,7 +262,7 @@ export default function AdminSubscriptions() {
 
       {/* Submissions Table */}
       <div className='overflow-hidden rounded-xl border border-hairline bg-panel shadow-2xs'>
-        <div className='overflow-x-auto'>
+        <div className={`overflow-x-auto transition-opacity ${isPageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`} aria-busy={isPageLoading}>
           <table className='w-full text-left text-xs'>
             <thead className='border-b border-hairline bg-panel-subtle text-ink-muted uppercase tracking-wider font-semibold text-[10px]'>
               <tr>
@@ -374,18 +387,22 @@ export default function AdminSubscriptions() {
             </span>
             <div className='flex items-center gap-2'>
               <button
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className='rounded border border-hairline bg-panel px-2.5 py-1 text-xs font-semibold disabled:opacity-40'
+                disabled={page <= 1 || isPageLoading}
+                aria-busy={isPageLoading && pendingPage === page - 1}
+                onClick={() => handlePageChange(Math.max(1, page - 1))}
+                className='inline-flex items-center gap-1.5 rounded border border-hairline bg-panel px-2.5 py-1 text-xs font-semibold disabled:opacity-40'
               >
+                {isPageLoading && pendingPage === page - 1 ? <Loader2 className='h-3.5 w-3.5 animate-spin text-primary-600' /> : null}
                 Previous
               </button>
               <button
-                disabled={page >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                className='rounded border border-hairline bg-panel px-2.5 py-1 text-xs font-semibold disabled:opacity-40'
+                disabled={page >= totalPages || isPageLoading}
+                aria-busy={isPageLoading && pendingPage === page + 1}
+                onClick={() => handlePageChange(Math.min(totalPages, page + 1))}
+                className='inline-flex items-center gap-1.5 rounded border border-hairline bg-panel px-2.5 py-1 text-xs font-semibold disabled:opacity-40'
               >
                 Next
+                {isPageLoading && pendingPage === page + 1 ? <Loader2 className='h-3.5 w-3.5 animate-spin text-primary-600' /> : null}
               </button>
             </div>
           </div>

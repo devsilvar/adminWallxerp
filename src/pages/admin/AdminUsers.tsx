@@ -34,8 +34,13 @@ export default function AdminUsers() {
   const [page, setPage] = useState(1);
   const [filterStatus, setFilterStatus] = useState<UserFilter>('all');
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [isPageLoading, setIsPageLoading] = useState(false);
+  const [pendingPage, setPendingPage] = useState<number | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    const isPaging = hasLoadedOnce;
+    if (isPaging) setIsPageLoading(true);
     const params: Record<string, unknown> = { page, limit: 15 };
     if (filterStatus !== 'all') {
       if (filterStatus === 'admin') params.role = 'admin';
@@ -45,16 +50,39 @@ export default function AdminUsers() {
     }
     api.get('/admin/users', { params })
       .then((r) => {
+        if (cancelled) return;
         setUsers(r.data.data);
         setPagination(r.data.pagination);
       })
-      .catch((err: any) => toast.error(err?.response?.data?.error?.message || 'Failed to load users'))
-      .finally(() => setHasLoadedOnce(true));
-  }, [page, pagination?.limit, filterStatus]);
+      .catch((err: any) => {
+        if (cancelled) return;
+        toast.error(err?.response?.data?.error?.message || 'Failed to load users');
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setIsPageLoading(false);
+        setPendingPage(null);
+        setHasLoadedOnce(true);
+      });
+    return () => { cancelled = true; };
+  }, [page, filterStatus]);
 
-  const activeUsers = users.filter(u => u.isActive).length;
-  const verifiedUsers = users.filter(u => u.isVerified).length;
-  const adminUsers = users.filter(u => u.role === 'admin').length;
+  const handleFilterChange = (next: UserFilter) => {
+    if (next === filterStatus) return;
+    setFilterStatus(next);
+    setPage(1);
+    setPendingPage(null);
+  };
+
+  const handlePageChange = (next: number) => {
+    if (next === page || isPageLoading) return;
+    setPendingPage(next);
+    setIsPageLoading(true);
+    setPage(next);
+  };
+
+  const activeOnPage = users.filter(u => u.isActive).length;
+  const verifiedOnPage = users.filter(u => u.isVerified).length;
 
   return (
     <div className='space-y-6'>
@@ -65,29 +93,31 @@ export default function AdminUsers() {
             <span className='font-medium'>Total Users</span>
             <Users className='h-4 w-4 text-primary-600' />
           </div>
-          <div className='mt-2 text-2xl font-bold tabular-nums text-ink'>{users.length}</div>
-          <div className='text-xs text-ink-subtle mt-1'>Platform accounts</div>
+          <div className='mt-2 text-2xl font-bold tabular-nums text-ink'>{pagination?.total ?? (hasLoadedOnce ? users.length : '—')}</div>
+          <div className='text-xs text-ink-subtle mt-1'>
+            {pagination ? `Page ${pagination.page} of ${pagination.totalPages} · ${pagination.total} total` : 'Platform accounts'}
+          </div>
         </Panel>
 
         <Panel className='p-4'>
           <div className='flex items-center justify-between text-ink-muted text-xs'>
-            <span className='font-medium'>Active Users</span>
+            <span className='font-medium'>Active (this page)</span>
             <CheckCircle2 className='h-4 w-4 text-emerald-600' />
           </div>
-          <div className='mt-2 text-2xl font-bold tabular-nums text-emerald-600'>{activeUsers}</div>
+          <div className='mt-2 text-2xl font-bold tabular-nums text-emerald-600'>{hasLoadedOnce ? activeOnPage : '—'}</div>
           <div className='text-xs text-ink-subtle mt-1'>
-            {users.length > 0 ? Math.round((activeUsers / users.length) * 100) : 0}% active
+            {users.length > 0 ? `${activeOnPage}/${users.length} on this page` : 'No rows on this page'}
           </div>
         </Panel>
 
         <Panel className='p-4'>
           <div className='flex items-center justify-between text-ink-muted text-xs'>
-            <span className='font-medium'>Verified Emails</span>
+            <span className='font-medium'>Verified (this page)</span>
             <Shield className='h-4 w-4 text-emerald-600' />
           </div>
-          <div className='mt-2 text-2xl font-bold tabular-nums text-ink'>{verifiedUsers}</div>
+          <div className='mt-2 text-2xl font-bold tabular-nums text-ink'>{hasLoadedOnce ? verifiedOnPage : '—'}</div>
           <div className='text-xs text-ink-subtle mt-1'>
-            {users.length > 0 ? Math.round((verifiedUsers / users.length) * 100) : 0}% verified
+            {users.length > 0 ? `${verifiedOnPage}/${users.length} on this page` : 'No rows on this page'}
           </div>
         </Panel>
       </div>
@@ -107,28 +137,28 @@ export default function AdminUsers() {
       {/* Filter Tabs */}
       <div className='flex items-center gap-2 border-b border-hairline pb-4'>
         <button
-          onClick={() => setFilterStatus('all')}
+          onClick={() => handleFilterChange('all')}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
             filterStatus === 'all' ? 'bg-primary-600 text-white' : 'text-ink-muted hover:bg-panel-subtle hover:text-ink border border-hairline'
           }`}
         >
-          All Users
+          All Users{pagination && filterStatus === 'all' ? ` (${pagination.total})` : ''}
         </button>
         <button
-          onClick={() => setFilterStatus('active')}
+          onClick={() => handleFilterChange('active')}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
             filterStatus === 'active' ? 'bg-emerald-600 text-white' : 'text-ink-muted hover:bg-panel-subtle hover:text-ink border border-hairline'
           }`}
         >
-          Active ({users.filter(u => u.isActive).length})
+          Active{pagination && filterStatus === 'active' ? ` (${pagination.total})` : ''}
         </button>
         <button
-          onClick={() => setFilterStatus('admin')}
+          onClick={() => handleFilterChange('admin')}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
             filterStatus === 'admin' ? 'bg-amber-600 text-white' : 'text-ink-muted hover:bg-panel-subtle hover:text-ink border border-hairline'
           }`}
         >
-          Admins ({adminUsers})
+          Admins{pagination && filterStatus === 'admin' ? ` (${pagination.total})` : ''}
         </button>
       </div>
 
@@ -140,7 +170,7 @@ export default function AdminUsers() {
         </Panel>
       ) : (
         <Panel className='overflow-hidden'>
-          <div className='overflow-x-auto'>
+          <div className={`overflow-x-auto transition-opacity ${isPageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`} aria-busy={isPageLoading}>
             <table className='w-full min-w-[720px] text-left text-xs'>
               <thead className='border-b border-hairline-strong bg-panel-subtle text-[10px] font-semibold uppercase tracking-wider text-ink-muted'>
                 <tr>
@@ -207,7 +237,7 @@ export default function AdminUsers() {
             </table>
           </div>
 
-          {pagination && <PaginationBar pagination={pagination} onPageChange={setPage} noun='users' />}
+          {pagination && <PaginationBar pagination={pagination} onPageChange={handlePageChange} noun='users' isLoading={isPageLoading} pendingPage={pendingPage} />}
         </Panel>
       )}
     </div>

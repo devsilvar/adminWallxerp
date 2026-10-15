@@ -10,6 +10,7 @@ import SegmentedControl from './shared/SegmentedControl';
 import StatusPill from './shared/StatusPill';
 import { formatStamp } from './shared/format';
 import type { Pagination } from '@/types/index.ts';
+import { usePaginationTransition } from '@/hooks/usePaginationTransition';
 
 type SentimentFilter = 'all' | 'positive' | 'neutral' | 'negative';
 type RatingFilter = 'all' | '1' | '2' | '3' | '4' | '5';
@@ -80,6 +81,7 @@ export default function AdminReviews() {
   const [sentiment, setSentiment] = useState<SentimentFilter>('all');
   const [rating, setRating] = useState<RatingFilter>('all');
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const { isPageLoading, pendingPage, start, finish } = usePaginationTransition();
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -90,6 +92,8 @@ export default function AdminReviews() {
   }, [searchInput]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (hasLoadedOnce) start(page);
     const params: Record<string, unknown> = { page, limit: 20 };
     if (search) params.search = search;
     if (sentiment !== 'all') params.sentiment = sentiment;
@@ -97,13 +101,28 @@ export default function AdminReviews() {
     api
       .get('/admin/reviews', { params })
       .then((r) => {
+        if (cancelled) return;
         setReviews(r.data.data ?? []);
         setPagination(r.data.pagination ?? null);
         if (r.data.analytics) setAnalytics(r.data.analytics);
       })
-      .catch((err: any) => toast.error(err?.response?.data?.error?.message || 'Failed to load reviews'))
-      .finally(() => setHasLoadedOnce(true));
+      .catch((err: any) => {
+        if (cancelled) return;
+        toast.error(err?.response?.data?.error?.message || 'Failed to load reviews');
+      })
+      .finally(() => {
+        if (cancelled) return;
+        finish();
+        setHasLoadedOnce(true);
+      });
+    return () => { cancelled = true; };
   }, [page, search, sentiment, rating]);
+
+  const handlePageChange = (next: number) => {
+    if (next === page || isPageLoading) return;
+    start(next);
+    setPage(next);
+  };
 
   const distribution = useMemo(() => {
     if (!analytics) return null;
@@ -222,7 +241,7 @@ export default function AdminReviews() {
         </Panel>
       ) : (
         <Panel className="overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className={`overflow-x-auto transition-opacity ${isPageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`} aria-busy={isPageLoading}>
             <table className="w-full min-w-[760px] text-left text-xs">
               <thead className="border-b border-hairline-strong bg-panel-subtle text-[10px] font-semibold uppercase tracking-wider text-ink-muted">
                 <tr>
@@ -271,7 +290,7 @@ export default function AdminReviews() {
               </tbody>
             </table>
           </div>
-          {pagination && <PaginationBar pagination={pagination} onPageChange={setPage} noun="reviews" />}
+          {pagination && <PaginationBar pagination={pagination} onPageChange={handlePageChange} noun="reviews" isLoading={isPageLoading} pendingPage={pendingPage} />}
         </Panel>
       )}
     </div>

@@ -9,6 +9,7 @@ import PaginationBar from './shared/Pagination';
 import { Panel, PanelEmpty } from './shared/Panel';
 import StatusPill, { type Tone } from './shared/StatusPill';
 import { formatStamp } from './shared/format';
+import { usePaginationTransition } from '@/hooks/usePaginationTransition';
 
 const TONE_BY_PREFIX: Record<string, Tone> = {
   create: 'success',
@@ -44,6 +45,7 @@ export default function AdminAuditLogs() {
   const [actionInput, setActionInput] = useState('');
   const [filterAction, setFilterAction] = useState('');
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const { isPageLoading, pendingPage, start, finish } = usePaginationTransition();
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -54,13 +56,32 @@ export default function AdminAuditLogs() {
   }, [actionInput]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (hasLoadedOnce) start(page);
     const params: Record<string, unknown> = { page, limit: 20 };
     if (filterAction) params.action = filterAction;
     api.get('/admin/audit-logs', { params })
-      .then((r) => { setLogs(r.data.data); setPagination(r.data.pagination); })
-      .catch((err: any) => toast.error(err?.response?.data?.error?.message || 'Failed to load audit logs'))
-      .finally(() => setHasLoadedOnce(true));
+      .then((r) => {
+        if (cancelled) return;
+        setLogs(r.data.data); setPagination(r.data.pagination);
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        toast.error(err?.response?.data?.error?.message || 'Failed to load audit logs');
+      })
+      .finally(() => {
+        if (cancelled) return;
+        finish();
+        setHasLoadedOnce(true);
+      });
+    return () => { cancelled = true; };
   }, [page, filterAction]);
+
+  const handlePageChange = (next: number) => {
+    if (next === page || isPageLoading) return;
+    start(next);
+    setPage(next);
+  };
 
   const rows = useMemo(
     () =>
@@ -213,7 +234,7 @@ export default function AdminAuditLogs() {
         </Panel>
       ) : (
         <Panel className='overflow-hidden'>
-          <div className='overflow-x-auto'>
+          <div className={`overflow-x-auto transition-opacity ${isPageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`} aria-busy={isPageLoading}>
             <table className='w-full min-w-[720px] text-left text-xs'>
               <thead className='border-b border-hairline-strong bg-panel-subtle text-[10px] font-semibold uppercase tracking-wider text-ink-muted'>
                 <tr>
@@ -244,7 +265,7 @@ export default function AdminAuditLogs() {
             </table>
           </div>
 
-          {pagination && <PaginationBar pagination={pagination} onPageChange={setPage} noun='logs' />}
+          {pagination && <PaginationBar pagination={pagination} onPageChange={handlePageChange} noun='logs' isLoading={isPageLoading} pendingPage={pendingPage} />}
         </Panel>
       )}
     </div>

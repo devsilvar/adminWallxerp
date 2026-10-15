@@ -140,6 +140,8 @@ export default function AdminDashboard() {
           <TreasuryTab
             data={treasury.data}
             isLoading={treasury.isLoading}
+            isPageLoading={treasury.isPageLoading}
+            pendingPage={treasury.pendingPage}
             filters={treasury.pagination}
             onInspect={handleOpenDetail}
           />

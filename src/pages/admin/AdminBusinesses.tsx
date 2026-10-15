@@ -9,6 +9,7 @@ import PaginationBar from './shared/Pagination';
 import { Panel, PanelEmpty } from './shared/Panel';
 import { formatDate } from './shared/format';
 import StatusPill from './shared/StatusPill';
+import { usePaginationTransition } from '@/hooks/usePaginationTransition';
 
 type BusinessFilter = 'all' | 'active' | 'inactive';
 
@@ -24,20 +25,44 @@ export default function AdminBusinesses() {
   const [page, setPage] = useState(1);
   const [filterStatus, setFilterStatus] = useState<BusinessFilter>('all');
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const { isPageLoading, pendingPage, start, finish } = usePaginationTransition();
 
   useEffect(() => {
+    let cancelled = false;
+    if (hasLoadedOnce) start(page);
     const params: Record<string, unknown> = { page, limit: 15 };
     if (filterStatus !== 'all') {
       params.isActive = filterStatus === 'active';
     }
     api.get('/admin/businesses', { params })
       .then((r) => {
+        if (cancelled) return;
         setBusinesses(r.data.data as ExtendedBusiness[]);
         setPagination(r.data.pagination);
       })
-      .catch((err: any) => toast.error(err?.response?.data?.error?.message || 'Failed to load businesses'))
-      .finally(() => setHasLoadedOnce(true));
-  }, [page, pagination?.limit, filterStatus]);
+      .catch((err: any) => {
+        if (cancelled) return;
+        toast.error(err?.response?.data?.error?.message || 'Failed to load businesses');
+      })
+      .finally(() => {
+        if (cancelled) return;
+        finish();
+        setHasLoadedOnce(true);
+      });
+    return () => { cancelled = true; };
+  }, [page, filterStatus]);
+
+  const handleFilterChange = (next: BusinessFilter) => {
+    if (next === filterStatus) return;
+    setFilterStatus(next);
+    setPage(1);
+  };
+
+  const handlePageChange = (next: number) => {
+    if (next === page || isPageLoading) return;
+    start(next);
+    setPage(next);
+  };
 
   const activeCount = businesses.filter(b => b.isActive !== false).length;
   const totalSales = businesses.reduce((sum, b) => sum + (b._count?.sales ?? 0), 0);
@@ -101,7 +126,7 @@ export default function AdminBusinesses() {
       {/* Filter Tabs */}
       <div className='flex items-center gap-2 border-b border-hairline pb-4'>
         <button
-          onClick={() => setFilterStatus('all')}
+          onClick={() => handleFilterChange('all')}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
             filterStatus === 'all' ? 'bg-primary-600 text-white' : 'text-ink-muted hover:bg-panel-subtle hover:text-ink border border-hairline'
           }`}
@@ -109,7 +134,7 @@ export default function AdminBusinesses() {
           All
         </button>
         <button
-          onClick={() => setFilterStatus('active')}
+          onClick={() => handleFilterChange('active')}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
             filterStatus === 'active' ? 'bg-emerald-600 text-white' : 'text-ink-muted hover:bg-panel-subtle hover:text-ink border border-hairline'
           }`}
@@ -117,7 +142,7 @@ export default function AdminBusinesses() {
           Active
         </button>
         <button
-          onClick={() => setFilterStatus('inactive')}
+          onClick={() => handleFilterChange('inactive')}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
             filterStatus === 'inactive' ? 'bg-rose-600 text-white' : 'text-ink-muted hover:bg-panel-subtle hover:text-ink border border-hairline'
           }`}
@@ -134,7 +159,7 @@ export default function AdminBusinesses() {
         </Panel>
       ) : (
         <Panel className='overflow-hidden'>
-          <div className='overflow-x-auto'>
+          <div className={`overflow-x-auto transition-opacity ${isPageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`} aria-busy={isPageLoading}>
             <table className='w-full min-w-[720px] text-left text-xs'>
               <thead className='border-b border-hairline-strong bg-panel-subtle text-[10px] font-semibold uppercase tracking-wider text-ink-muted'>
                 <tr>
@@ -174,7 +199,7 @@ export default function AdminBusinesses() {
             </table>
           </div>
 
-          {pagination && <PaginationBar pagination={pagination} onPageChange={setPage} noun='businesses' />}
+          {pagination && <PaginationBar pagination={pagination} onPageChange={handlePageChange} noun='businesses' isLoading={isPageLoading} pendingPage={pendingPage} />}
         </Panel>
       )}
     </div>

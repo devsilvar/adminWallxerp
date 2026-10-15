@@ -23,6 +23,7 @@ import { Panel, PanelEmpty } from './shared/Panel';
 import StatusPill, { type Tone } from './shared/StatusPill';
 import { formatNaira, formatStamp, formatTransferStamp } from './shared/format';
 import { useAdminStatsStore } from '@/stores/admin.stats.store.ts';
+import { usePaginationTransition } from '@/hooks/usePaginationTransition';
 
 interface WithdrawalRequest {
   id: string;
@@ -86,6 +87,7 @@ export default function AdminWithdrawals() {
     hasNext: false,
     hasPrev: false,
   });
+  const { isPageLoading, pendingPage, start, finish } = usePaginationTransition();
 
   // Modal states
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<WithdrawalRequest | null>(null);
@@ -118,6 +120,8 @@ export default function AdminWithdrawals() {
   }, [searchInput]);
 
   const fetchWithdrawals = useCallback(async () => {
+    const isPaging = hasLoadedOnce;
+    if (isPaging) start(pagination.page);
     const params = new URLSearchParams({
       page: String(pagination.page),
       limit: String(pagination.limit),
@@ -135,17 +139,24 @@ export default function AdminWithdrawals() {
       toast.error(err?.response?.data?.error?.message || 'Failed to load withdrawal requests');
       setWithdrawals([]);
     } finally {
+      finish();
       setHasLoadedOnce(true);
     }
 
     // The SLA banner lives on this page but its counts come from
     // /admin/dashboard — shared with the sidebar so only one fires.
     useAdminStatsStore.getState().fetchStats();
-  }, [pagination.page, pagination.limit, statusFilter, search]);
+  }, [pagination.page, pagination.limit, statusFilter, search, hasLoadedOnce, start, finish]);
 
   useEffect(() => {
     fetchWithdrawals();
   }, [fetchWithdrawals]);
+
+  const handlePageChange = (next: number) => {
+    if (next === pagination.page || isPageLoading) return;
+    start(next);
+    setPagination((prev) => ({ ...prev, page: next }));
+  };
 
   /**
    * Approving, rejecting or settling moves a withdrawal out of `pending`, which
@@ -529,7 +540,7 @@ export default function AdminWithdrawals() {
         </Panel>
       ) : (
         <div className='overflow-hidden rounded-xl border border-hairline bg-panel shadow-2xs'>
-          <div className='overflow-x-auto'>
+          <div className={`overflow-x-auto transition-opacity ${isPageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`} aria-busy={isPageLoading}>
             <table className='w-full text-left text-xs'>
               <thead className='border-b border-hairline bg-panel-subtle text-[10px] font-semibold uppercase tracking-wider text-ink-muted'>
                 <tr>
@@ -639,8 +650,10 @@ export default function AdminWithdrawals() {
 
           <PaginationBar
             pagination={pagination}
-            onPageChange={(page) => setPagination((prev) => ({ ...prev, page }))}
+            onPageChange={handlePageChange}
             noun='requests'
+            isLoading={isPageLoading}
+            pendingPage={pendingPage}
           />
         </div>
       )}

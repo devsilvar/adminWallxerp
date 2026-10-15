@@ -20,6 +20,7 @@ import { PanelEmpty } from './shared/Panel';
 import StatusPill from './shared/StatusPill';
 import { formatNaira, formatStamp } from './shared/format';
 import { useAdminStatsStore } from '@/stores/admin.stats.store.ts';
+import { usePaginationTransition } from '@/hooks/usePaginationTransition';
 import type { AdminUnverifiedInflowRow } from '@/types/index.ts';
 
 export default function AdminUnverifiedInflows() {
@@ -40,6 +41,7 @@ export default function AdminUnverifiedInflows() {
     hasNext: false,
     hasPrev: false,
   });
+  const { isPageLoading, pendingPage, start, finish } = usePaginationTransition();
 
   // Debounce search input by 300ms
   useEffect(() => {
@@ -53,6 +55,7 @@ export default function AdminUnverifiedInflows() {
   const fetchInflows = useCallback(async () => {
     try {
       setLoading(true);
+      if (hasLoadedOnce) start(pagination.page);
       const params = new URLSearchParams({
         page: String(pagination.page),
         limit: String(pagination.limit),
@@ -72,9 +75,10 @@ export default function AdminUnverifiedInflows() {
       toast.error(getErrorMessage(err, 'Failed to load unverified inflows queue'));
     } finally {
       setLoading(false);
+      finish();
       setHasLoadedOnce(true);
     }
-  }, [pagination.page, pagination.limit, search]);
+  }, [pagination.page, pagination.limit, search, hasLoadedOnce, start, finish]);
 
   useEffect(() => {
     fetchInflows();
@@ -84,6 +88,12 @@ export default function AdminUnverifiedInflows() {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  const handlePageChange = (next: number) => {
+    if (next === pagination.page || isPageLoading) return;
+    start(next);
+    setPagination((p) => ({ ...p, page: next }));
   };
 
   const handleRefresh = () => {
@@ -231,7 +241,7 @@ export default function AdminUnverifiedInflows() {
             )}
           </div>
         ) : (
-          <div className='overflow-x-auto'>
+          <div className={`overflow-x-auto transition-opacity ${isPageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`} aria-busy={isPageLoading}>
             <table className='w-full text-left text-xs'>
               <thead className='border-b border-hairline bg-panel-subtle text-[10px] font-semibold uppercase tracking-wider text-ink-muted'>
                 <tr>
@@ -323,8 +333,10 @@ export default function AdminUnverifiedInflows() {
           <div className='border-t border-hairline bg-panel-subtle'>
             <PaginationBar
               pagination={pagination}
-              onPageChange={(page) => setPagination((p) => ({ ...p, page }))}
+              onPageChange={handlePageChange}
               noun='inflows'
+              isLoading={isPageLoading}
+              pendingPage={pendingPage}
             />
           </div>
         )}

@@ -21,6 +21,7 @@ import { Panel, PanelEmpty } from './shared/Panel';
 import StatusPill from './shared/StatusPill';
 import { formatNaira, formatStamp, formatTransferStamp } from './shared/format';
 import type { AdminTransactionRow, AdminTransactionsSummary } from '@/types/index.ts';
+import { usePaginationTransition } from '@/hooks/usePaginationTransition';
 
 type SourceFilter = 'all' | 'inflow' | 'withdrawal' | 'tax';
 
@@ -108,6 +109,7 @@ export default function AdminTransactions() {
     hasNext: false,
     hasPrev: false,
   });
+  const { isPageLoading, pendingPage, start, finish } = usePaginationTransition();
 
   // Debounced search — mirrors the Withdrawals list (no request per keystroke).
   useEffect(() => {
@@ -119,6 +121,8 @@ export default function AdminTransactions() {
   }, [searchInput]);
 
   const fetchTransactions = useCallback(async () => {
+    const isPaging = hasLoadedOnce;
+    if (isPaging) start(pagination.page);
     const params = new URLSearchParams({
       page: String(pagination.page),
       limit: String(pagination.limit),
@@ -137,13 +141,20 @@ export default function AdminTransactions() {
       toast.error(getErrorMessage(err, 'Failed to load transactions'));
       setTransactions([]);
     } finally {
+      finish();
       setHasLoadedOnce(true);
     }
-  }, [pagination.page, pagination.limit, sourceFilter, search, fromDate, toDate]);
+  }, [pagination.page, pagination.limit, sourceFilter, search, fromDate, toDate, hasLoadedOnce, start, finish]);
 
   useEffect(() => {
     fetchTransactions();
   }, [fetchTransactions]);
+
+  const handlePageChange = (next: number) => {
+    if (next === pagination.page || isPageLoading) return;
+    start(next);
+    setPagination((prev) => ({ ...prev, page: next }));
+  };
 
   const applySourceFilter = (source: SourceFilter) => {
     setSourceFilter(source);
@@ -312,7 +323,7 @@ export default function AdminTransactions() {
         </Panel>
       ) : (
         <div className='overflow-hidden rounded-xl border border-hairline bg-panel shadow-2xs'>
-          <div className='overflow-x-auto'>
+          <div className={`overflow-x-auto transition-opacity ${isPageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`} aria-busy={isPageLoading}>
             <table className='w-full text-left text-xs'>
               <thead className='border-b border-hairline bg-panel-subtle text-[10px] font-semibold uppercase tracking-wider text-ink-muted'>
                 <tr>
@@ -406,8 +417,10 @@ export default function AdminTransactions() {
 
           <PaginationBar
             pagination={pagination}
-            onPageChange={(page) => setPagination((prev) => ({ ...prev, page }))}
+            onPageChange={handlePageChange}
             noun='transactions'
+            isLoading={isPageLoading}
+            pendingPage={pendingPage}
           />
         </div>
       )}

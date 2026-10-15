@@ -22,6 +22,7 @@ import { Panel, PanelEmpty } from './shared/Panel';
 import StatusPill from './shared/StatusPill';
 import { formatStamp } from './shared/format';
 import type { Broadcast, BroadcastStats, User as UserModel } from '@/types/index.ts';
+import { usePaginationTransition } from '@/hooks/usePaginationTransition';
 
 type AudienceFilterTab = 'all' | 'bulk' | 'direct';
 
@@ -35,6 +36,7 @@ interface SearchedUser {
 export default function AdminBroadcasts() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [activeTab, setActiveTab] = useState<AudienceFilterTab>('all');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -46,6 +48,7 @@ export default function AdminBroadcasts() {
     hasPrev: false,
     hasNext: false,
   });
+  const { isPageLoading, pendingPage, start, finish } = usePaginationTransition();
 
   const [stats, setStats] = useState<BroadcastStats>({
     totalBroadcasts: 0,
@@ -114,6 +117,7 @@ export default function AdminBroadcasts() {
   // Fetch broadcasts list
   const fetchBroadcasts = useCallback(async () => {
     setLoading(true);
+    if (hasLoadedOnce) start(page);
     try {
       const params: Record<string, unknown> = {
         page,
@@ -144,12 +148,20 @@ export default function AdminBroadcasts() {
       toast.error(getErrorMessage(err, 'Failed to load broadcasts'));
     } finally {
       setLoading(false);
+      finish();
+      setHasLoadedOnce(true);
     }
-  }, [page, debouncedSearch]);
+  }, [page, debouncedSearch, hasLoadedOnce, start, finish]);
 
   useEffect(() => {
     fetchBroadcasts();
   }, [fetchBroadcasts]);
+
+  const handlePageChange = (next: number) => {
+    if (next === page || isPageLoading) return;
+    start(next);
+    setPage(next);
+  };
 
   // Handle compose submit
   const handleSendBroadcast = async (e: React.FormEvent) => {
@@ -195,13 +207,12 @@ export default function AdminBroadcasts() {
     }
   };
 
-  // View details modal
-  const handleInspect = async (broadcast: Broadcast) => {
-    setInspectingBroadcast(broadcast);
-    setDetailModalOpen(true);
+  const [detailPage, setDetailPage] = useState(1);
+
+  const fetchDetail = async (broadcastId: string, page: number) => {
     setLoadingDetail(true);
     try {
-      const res = await api.get(`/admin/broadcasts/${broadcast.id}`);
+      const res = await api.get(`/admin/broadcasts/${broadcastId}`, { params: { page, limit: 50 } });
       if (res.data?.success) {
         setInspectingBroadcast(res.data.data);
       }
@@ -210,6 +221,19 @@ export default function AdminBroadcasts() {
     } finally {
       setLoadingDetail(false);
     }
+  };
+
+  const handleInspect = async (broadcast: Broadcast) => {
+    setInspectingBroadcast(broadcast as any);
+    setDetailModalOpen(true);
+    setDetailPage(1);
+    await fetchDetail(broadcast.id, 1);
+  };
+
+  const handleDetailPageChange = (next: number) => {
+    if (!inspectingBroadcast) return;
+    setDetailPage(next);
+    fetchDetail(inspectingBroadcast.id, next);
   };
 
   // Filter broadcasts locally by audience tab
@@ -512,7 +536,7 @@ export default function AdminBroadcasts() {
 
       {/* Broadcasts History Table */}
       <Panel className='overflow-hidden shadow-2xs'>
-        {loading ? (
+        {loading && !hasLoadedOnce ? (
           <div className='p-8 text-center text-xs text-ink-muted'>Loading broadcasts...</div>
         ) : displayedBroadcasts.length === 0 ? (
           <PanelEmpty
@@ -521,7 +545,7 @@ export default function AdminBroadcasts() {
             hint='Compose your first message above to announce news, updates, or contact individual users.'
           />
         ) : (
-          <div className='overflow-x-auto'>
+          <div className={`overflow-x-auto transition-opacity ${isPageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`} aria-busy={isPageLoading}>
             <table className='w-full text-left border-collapse text-xs'>
               <thead>
                 <tr className='border-b border-hairline bg-panel-subtle text-[11px] font-semibold text-ink-muted uppercase tracking-wider'>
@@ -586,8 +610,10 @@ export default function AdminBroadcasts() {
 
         <PaginationBar
           pagination={pagination}
-          onPageChange={(p) => setPage(p)}
+          onPageChange={handlePageChange}
           noun='broadcasts'
+          isLoading={isPageLoading}
+          pendingPage={pendingPage}
         />
       </Panel>
 
@@ -632,38 +658,91 @@ export default function AdminBroadcasts() {
                 </div>
               </div>
 
-              {/* Delivery logs preview */}
+              {/* Delivery logs — senior fix: shows ALL recipients with email + inbox status */}
               <div>
-                <p className='text-[11px] font-semibold text-ink-muted uppercase tracking-wider mb-2'>
-                  Sample Recipient Deliveries ({inspectingBroadcast.messages?.length || 0})
-                </p>
+                <div className='flex items-center justify-between mb-2'>
+                  <p className='text-[11px] font-semibold text-ink-muted uppercase tracking-wider'>
+                    Recipient Deliveries ({(inspectingBroadcast as any).deliveryStats?.total ?? inspectingBroadcast.messages?.length ?? 0}
+                    {(inspectingBroadcast as any).messagesPagination ? ` · page ${(inspectingBroadcast as any).messagesPagination.page} of ${(inspectingBroadcast as any).messagesPagination.totalPages}` : ''})
+                  </p>
+                  {(inspectingBroadcast as any).deliveryStats && (
+                    <span className='text-[10px] text-ink-subtle'>
+                      {(inspectingBroadcast as any).deliveryStats.read} read · {(inspectingBroadcast as any).deliveryStats.unread} unread
+                    </span>
+                  )}
+                </div>
+
+                {(inspectingBroadcast as any).deliveryStats && (
+                  <div className='mb-2 flex flex-wrap gap-1.5'>
+                    <span className='rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-semibold text-emerald-700'>Sent {(inspectingBroadcast as any).deliveryStats.sent}</span>
+                    <span className='rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700'>Skipped {(inspectingBroadcast as any).deliveryStats.skipped}</span>
+                    <span className='rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-semibold text-rose-700'>Failed {(inspectingBroadcast as any).deliveryStats.failed}</span>
+                    {(inspectingBroadcast as any).deliveryStats.pending > 0 && (
+                      <span className='rounded-full bg-gray-50 border border-hairline px-2 py-0.5 text-[10px] font-semibold text-ink-muted'>Pending {(inspectingBroadcast as any).deliveryStats.pending}</span>
+                    )}
+                  </div>
+                )}
 
                 {loadingDetail ? (
                   <p className='text-ink-muted'>Loading recipient deliveries...</p>
                 ) : inspectingBroadcast.messages && inspectingBroadcast.messages.length > 0 ? (
-                  <div className='max-h-48 overflow-y-auto rounded-lg border border-hairline divide-y divide-hairline'>
-                    {inspectingBroadcast.messages.map((m) => (
-                      <div key={m.id} className='px-3 py-2 flex items-center justify-between'>
-                        <div className='flex items-center gap-2'>
-                          <Mail className='h-3.5 w-3.5 text-ink-subtle' />
-                          <span className='font-medium text-ink'>{m.user?.email || m.userId}</span>
+                  <>
+                    <div className='max-h-64 overflow-y-auto rounded-lg border border-hairline divide-y divide-hairline'>
+                      {inspectingBroadcast.messages.map((m: any) => (
+                        <div key={m.id} className='px-3 py-2 flex flex-col gap-0.5'>
+                          <div className='flex items-center justify-between gap-2'>
+                            <div className='flex items-center gap-2 min-w-0'>
+                              <Mail className='h-3.5 w-3.5 shrink-0 text-ink-subtle' />
+                              <span className='font-medium text-ink truncate text-xs'>{m.user?.email || m.userId}</span>
+                            </div>
+                            <div className='flex items-center gap-2 shrink-0'>
+                              <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border ${
+                                m.emailStatus === 'sent' ? 'text-emerald-700 bg-emerald-50 border-emerald-200' :
+                                m.emailStatus === 'failed' ? 'text-rose-700 bg-rose-50 border-rose-200' :
+                                m.emailStatus === 'skipped' ? 'text-amber-700 bg-amber-50 border-amber-200' :
+                                'text-ink-muted bg-gray-50 border-hairline'
+                              }`}>
+                                {m.emailStatus}
+                              </span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${m.isRead ? 'bg-primary-50 text-primary-700 border border-primary-200' : 'bg-gray-50 text-ink-subtle border border-hairline'}`}>
+                                {m.isRead ? 'Read' : 'Unread'}
+                              </span>
+                            </div>
+                          </div>
+                          {m.emailError && (
+                            <p className='text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-0.5 ml-5 truncate' title={m.emailError}>{m.emailError}</p>
+                          )}
                         </div>
-                        <div className='flex items-center gap-2'>
-                          <span className={`text-[10px] font-semibold uppercase ${
-                            m.emailStatus === 'sent' ? 'text-emerald-600' :
-                            m.emailStatus === 'failed' ? 'text-rose-600' : 'text-amber-600'
-                          }`}>
-                            {m.emailStatus}
-                          </span>
-                          <span className='text-[10px] text-ink-subtle'>
-                            {m.isRead ? 'Read' : 'Unread'}
-                          </span>
+                      ))}
+                    </div>
+                    {(inspectingBroadcast as any).messagesPagination && (inspectingBroadcast as any).messagesPagination.totalPages > 1 && (
+                      <div className='mt-3 flex items-center justify-between'>
+                        <span className='text-[11px] text-ink-subtle'>
+                          Page {detailPage} of {(inspectingBroadcast as any).messagesPagination.totalPages} · {(inspectingBroadcast as any).messagesPagination.total} recipients
+                        </span>
+                        <div className='flex gap-1.5'>
+                          <button
+                            type='button'
+                            disabled={detailPage <= 1 || loadingDetail}
+                            onClick={() => handleDetailPageChange(detailPage - 1)}
+                            className='rounded border border-hairline bg-panel px-2.5 py-1 text-xs font-semibold disabled:opacity-40'
+                          >
+                            Previous
+                          </button>
+                          <button
+                            type='button'
+                            disabled={(inspectingBroadcast as any).messagesPagination && detailPage >= (inspectingBroadcast as any).messagesPagination.totalPages || loadingDetail}
+                            onClick={() => handleDetailPageChange(detailPage + 1)}
+                            className='rounded border border-hairline bg-panel px-2.5 py-1 text-xs font-semibold disabled:opacity-40'
+                          >
+                            Next
+                          </button>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    )}
+                  </>
                 ) : (
-                  <p className='text-ink-subtle'>No sample delivery rows available.</p>
+                  <p className='text-ink-subtle'>No delivery rows available.</p>
                 )}
               </div>
             </div>
