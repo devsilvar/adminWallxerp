@@ -18,7 +18,6 @@ import toast from 'react-hot-toast';
 import PageHeader from './shared/PageHeader';
 import PaginationBar from './shared/Pagination';
 import { Panel, PanelEmpty } from './shared/Panel';
-import SegmentedControl from './shared/SegmentedControl';
 import StatusPill from './shared/StatusPill';
 import { formatNaira, formatStamp, formatTransferStamp } from './shared/format';
 import type { AdminTransactionRow, AdminTransactionsSummary } from '@/types/index.ts';
@@ -171,48 +170,76 @@ export default function AdminTransactions() {
         }
       />
 
-      {/* Summary strip */}
-      <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
-        <div className='rounded-lg border border-hairline bg-panel p-4'>
-          <p className='text-[10px] font-semibold uppercase tracking-wider text-ink-subtle'>
-            Money In
-          </p>
-          <p className='mt-1 font-mono text-xl font-bold tabular-nums text-success-600'>
+      {/* Summary KPI Cards — Subscriptions desk pattern
+          Money Out = successful (completed) only; Failed is isolated so ledger stays accurate. */}
+      <div className='grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4'>
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Money In</span>
+            <ArrowDownLeft className='h-4 w-4 text-emerald-500' />
+          </div>
+          <p className='mt-2 font-mono text-2xl font-bold tabular-nums text-emerald-600'>
             {formatNaira(summary?.totalIn ?? 0)}
           </p>
-          <p className='mt-0.5 text-[10px] text-ink-muted'>DVA bank-transfer inflows</p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>DVA bank-transfer inflows</p>
         </div>
-        <div className='rounded-lg border border-hairline bg-panel p-4'>
-          <p className='text-[10px] font-semibold uppercase tracking-wider text-ink-subtle'>
-            Money Out
-          </p>
-          <p className='mt-1 font-mono text-xl font-bold tabular-nums text-danger-600'>
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Money Out</span>
+            <ArrowUpRight className='h-4 w-4 text-emerald-600' />
+          </div>
+          <p className='mt-2 font-mono text-2xl font-bold tabular-nums text-ink'>
             {formatNaira(summary?.totalOut ?? 0)}
           </p>
-          <p className='mt-0.5 text-[10px] text-ink-muted'>Withdrawals & tax payments</p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>Successful payouts only (completed)</p>
         </div>
-        <div className='rounded-lg border border-hairline bg-ink p-4 text-panel'>
-          <p className='text-[10px] font-semibold uppercase tracking-wider text-panel/60'>Net</p>
+        <div className='rounded-xl border border-danger-200 bg-danger-50/40 p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Failed</span>
+            <XCircle className='h-4 w-4 text-rose-500' />
+          </div>
+          <p className='mt-2 font-mono text-2xl font-bold tabular-nums text-rose-600'>
+            {formatNaira(summary?.totalFailed ?? 0)}
+          </p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>
+            {summary?.failedCount ?? 0} failed · excluded from Money Out & Net
+          </p>
+        </div>
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Net</span>
+            <Wallet className='h-4 w-4 text-primary-500' />
+          </div>
           <p
-            className={`mt-1 font-mono text-xl font-bold tabular-nums ${
-              (summary?.net ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+            className={`mt-2 font-mono text-2xl font-bold tabular-nums ${
+              (summary?.net ?? 0) >= 0 ? 'text-primary-700' : 'text-rose-600'
             }`}
           >
             {formatNaira(summary?.net ?? 0)}
           </p>
-          <p className='mt-0.5 text-[10px] text-panel/60'>Filtered net movement</p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>Money In − Money Out (successful only)</p>
         </div>
       </div>
 
-      {/* Toolbar */}
-      <Panel className='px-3 py-2'>
-        <div className='flex flex-col items-start gap-2 lg:flex-row lg:items-center lg:justify-between'>
-          <SegmentedControl
-            label='Source'
-            options={SOURCE_OPTIONS}
-            value={sourceFilter}
-            onChange={applySourceFilter}
-          />
+      {/* Filter Tabs & Search — Subscriptions desk pattern */}
+      <div className='flex flex-col justify-between gap-3 border-b border-hairline pb-4 lg:flex-row lg:items-center'>
+        <div className='flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0'>
+          {SOURCE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type='button'
+              onClick={() => applySourceFilter(opt.value)}
+              className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                sourceFilter === opt.value
+                  ? 'bg-primary-600 text-white shadow-2xs'
+                  : 'text-ink-muted hover:bg-panel-subtle hover:text-ink'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
           <div className='flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end'>
             <label className='flex items-center gap-1.5 text-[11px] text-ink-muted'>
               From
@@ -266,9 +293,9 @@ export default function AdminTransactions() {
             </div>
           </div>
         </div>
-      </Panel>
+      </div>
 
-      {/* Table */}
+      {/* Submissions Table — Subscriptions desk pattern */}
       {!hasLoadedOnce ? (
         <TableSkeleton rows={6} columns={5} />
       ) : transactions.length === 0 ? (
@@ -284,17 +311,17 @@ export default function AdminTransactions() {
           />
         </Panel>
       ) : (
-        <Panel className='overflow-hidden'>
+        <div className='overflow-hidden rounded-xl border border-hairline bg-panel shadow-2xs'>
           <div className='overflow-x-auto'>
             <table className='w-full text-left text-xs'>
-              <thead>
-                <tr className='border-b border-hairline bg-panel-subtle/50 text-[11px] font-medium text-ink-subtle'>
-                  <th className='py-2.5 pl-4 pr-3 whitespace-nowrap'>Date</th>
-                  <th className='px-3 py-2.5'>Business</th>
-                  <th className='px-3 py-2.5 whitespace-nowrap'>Type</th>
-                  <th className='px-3 py-2.5 whitespace-nowrap'>Status</th>
-                  <th className='px-3 py-2.5 text-right whitespace-nowrap'>Amount</th>
-                  <th className='py-2.5 pl-3 pr-4 text-right whitespace-nowrap'>Actions</th>
+              <thead className='border-b border-hairline bg-panel-subtle text-[10px] font-semibold uppercase tracking-wider text-ink-muted'>
+                <tr>
+                  <th className='px-4 py-3'>Business</th>
+                  <th className='px-4 py-3'>Type</th>
+                  <th className='px-4 py-3'>Status</th>
+                  <th className='px-4 py-3 text-right'>Amount</th>
+                  <th className='px-4 py-3'>Date</th>
+                  <th className='px-4 py-3 text-right'>Action</th>
                 </tr>
               </thead>
               <tbody className='divide-y divide-hairline'>
@@ -302,20 +329,27 @@ export default function AdminTransactions() {
                   const meta = SOURCE_META[row.sourceType];
                   const TypeIcon = meta.icon;
                   return (
-                    <tr key={`${row.sourceType}-${row.id}`} className='group transition-colors hover:bg-panel-subtle/70'>
-                      <td className='py-3 pl-4 pr-3 whitespace-nowrap tabular-nums text-ink-muted'>
-                        {formatTransferStamp(row.date)}
-                      </td>
-
-                      <td className='px-3 py-3'>
-                        <div className='font-semibold text-ink'>{row.businessName}</div>
-                        <div className='mt-0.5 font-mono text-[10px] text-ink-subtle'>
-                          {row.merchantId}
-                          {row.reference && <span className='ml-2'>{row.reference}</span>}
+                    <tr
+                      key={`${row.sourceType}-${row.id}`}
+                      className='cursor-pointer transition-colors hover:bg-panel-subtle/50'
+                      onClick={() => setDetailRow(row)}
+                    >
+                      <td className='px-4 py-3.5'>
+                        <div className='flex items-center gap-2.5'>
+                          <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 font-bold text-primary-700'>
+                            {row.businessName.charAt(0).toUpperCase()}
+                          </div>
+                          <div className='min-w-0'>
+                            <p className='truncate font-bold text-ink'>{row.businessName}</p>
+                            <p className='truncate font-mono text-[11px] text-ink-muted'>
+                              {row.merchantId}
+                              {row.reference && <span> · {row.reference.slice(0, 12)}</span>}
+                            </p>
+                          </div>
                         </div>
                       </td>
 
-                      <td className='px-3 py-3 whitespace-nowrap'>
+                      <td className='px-4 py-3.5 whitespace-nowrap'>
                         <span className='inline-flex items-center gap-1.5 text-[11px] font-medium text-ink-muted'>
                           <TypeIcon
                             className={`h-3.5 w-3.5 ${
@@ -327,17 +361,19 @@ export default function AdminTransactions() {
                         </span>
                       </td>
 
-                      <td className='px-3 py-3 whitespace-nowrap'>
+                      <td className='px-4 py-3.5 whitespace-nowrap'>
                         <RowStatus row={row} />
                       </td>
 
-                      <td
-                        className={`px-3 py-3 text-right font-mono text-[13px] font-semibold tabular-nums whitespace-nowrap ${
-                          row.direction === 'in' ? 'text-success-600' : 'text-danger-600'
-                        }`}
-                      >
-                        {row.direction === 'in' ? '+' : '−'}
-                        {formatNaira(row.amount)}
+                      <td className='px-4 py-3.5 text-right'>
+                        <span
+                          className={`font-bold tabular-nums text-sm ${
+                            row.direction === 'in' ? 'text-success-600' : 'text-ink'
+                          }`}
+                        >
+                          {row.direction === 'in' ? '+' : '−'}
+                          {formatNaira(row.amount)}
+                        </span>
                         {row.sourceType === 'withdrawal' && row.fee > 0 && (
                           <div className='text-[10px] font-normal text-ink-subtle'>
                             fee {formatNaira(row.fee)} · net {formatNaira(row.netAmount)}
@@ -345,10 +381,21 @@ export default function AdminTransactions() {
                         )}
                       </td>
 
-                      <td className='py-3 pl-3 pr-4 text-right whitespace-nowrap'>
-                        <Button variant='ghost' size='sm' onClick={() => setDetailRow(row)}>
+                      <td className='px-4 py-3.5 whitespace-nowrap text-ink-muted'>
+                        {formatTransferStamp(row.date)}
+                      </td>
+
+                      <td className='px-4 py-3.5 text-right'>
+                        <button
+                          type='button'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDetailRow(row);
+                          }}
+                          className='inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-panel px-3 py-1.5 text-xs font-semibold text-primary-700 shadow-2xs transition-colors hover:bg-primary-50'
+                        >
                           Details
-                        </Button>
+                        </button>
                       </td>
                     </tr>
                   );
@@ -362,7 +409,7 @@ export default function AdminTransactions() {
             onPageChange={(page) => setPagination((prev) => ({ ...prev, page }))}
             noun='transactions'
           />
-        </Panel>
+        </div>
       )}
 
       {/* Detail */}

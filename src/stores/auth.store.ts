@@ -21,6 +21,8 @@ interface AuthState {
   setLoading: (loading: boolean) => void;
 }
 
+let fetchMeInProgress: Promise<void> | null = null;
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isAuthenticated: !!localStorage.getItem('accessToken'),
@@ -124,27 +126,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   fetchMe: async () => {
+    if (fetchMeInProgress) return fetchMeInProgress;
+
     const tokenAtStart = localStorage.getItem('accessToken');
     if (!tokenAtStart) return;
-    try {
-      const { data } = await api.get('/auth/me');
-      // Guard: don't resurrect a session that was explicitly logged out
-      // while this request was in-flight (the classic "have to click
-      // logout 3 times" race). Token cleared/rotated mid-flight means
-      // the caller already invalidated the session — ignore the stale
-      // 200 and let the logout stand.
-      const currentToken = localStorage.getItem('accessToken');
-      if (currentToken !== tokenAtStart || !currentToken) return;
-      if (!get().isAuthenticated && !currentToken) return;
-      set({ user: data.data, isAuthenticated: true });
-    } catch {
-      // Only run the full wipe if this fetchMe was still the active
-      // session. If an explicit logout already cleared the token,
-      // the 401 is expected — don't double-fire logout/redirect.
-      if (localStorage.getItem('accessToken') === tokenAtStart) {
-        get().logout();
+
+    fetchMeInProgress = (async () => {
+      try {
+        const { data } = await api.get('/auth/me');
+        // Guard: don't resurrect a session that was explicitly logged out
+        // while this request was in-flight (the classic "have to click
+        // logout 3 times" race). Token cleared/rotated mid-flight means
+        // the caller already invalidated the session — ignore the stale
+        // 200 and let the logout stand.
+        const currentToken = localStorage.getItem('accessToken');
+        if (currentToken !== tokenAtStart || !currentToken) return;
+        if (!get().isAuthenticated && !currentToken) return;
+        set({ user: data.data, isAuthenticated: true });
+      } catch {
+        // Only run the full wipe if this fetchMe was still the active
+        // session. If an explicit logout already cleared the token,
+        // the 401 is expected — don't double-fire logout/redirect.
+        if (localStorage.getItem('accessToken') === tokenAtStart) {
+          get().logout();
+        }
+      } finally {
+        fetchMeInProgress = null;
       }
-    }
+    })().catch((e) => {
+      fetchMeInProgress = null;
+      throw e;
+    });
+
+    return fetchMeInProgress;
   },
 
   setLoading: (isLoading) => set({ isLoading }),

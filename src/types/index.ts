@@ -1026,6 +1026,8 @@ export interface AdminTransactionsSummary {
   totalIn: number;
   totalOut: number;
   net: number;
+  totalFailed?: number;
+  failedCount?: number;
 }
 
 export interface PlatformFeeConfig {
@@ -1260,4 +1262,48 @@ export interface PlatformTaxConfig {
   updatedAt: string;
   updatedBy?: string | null;
 }
+
+export interface Broadcast {
+  id: string;
+  title: string;
+  body: string;
+  audienceType: 'all' | 'user';
+  audienceUserId?: string | null;
+  createdById: string;
+  status: string;
+  totalRecipients: number;
+  sentEmailCount: number;
+  failedEmailCount: number;
+  createdAt: string;
+  createdBy?: {
+    id: string;
+    email: string;
+  };
+  messages?: UserMessage[];
+}
+
+export interface UserMessage {
+  id: string;
+  userId: string;
+  broadcastId?: string | null;
+  title: string;
+  body: string;
+  isRead: boolean;
+  readAt?: string | null;
+  emailStatus: 'pending' | 'sent' | 'skipped' | 'failed';
+  emailError?: string | null;
+  createdAt: string;
+  user?: {
+    id: string;
+    email: string;
+  };
+}
+
+export interface BroadcastStats {
+  totalBroadcasts: number;
+  totalRecipients: number;
+  sentEmailCount: number;
+  failedEmailCount: number;
+}
+
 

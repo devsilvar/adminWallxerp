@@ -13,7 +13,6 @@ import Button from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton.tsx';
 import api from '@/lib/axios.ts';
 import toast from 'react-hot-toast';
-import PageHeader from './shared/PageHeader';
 import { Panel } from './shared/Panel';
 import StatusPill from './shared/StatusPill';
 import { formatStamp } from './shared/format';
@@ -366,24 +365,100 @@ export default function AdminAISettings() {
   }
 
   return (
-    <div className='max-w-3xl space-y-4 pb-12'>
-      <PageHeader
-        title='AI Settings'
-        hint='Configure the AI provider, model, and credentials powering the SME assistant.'
-        actions={
-          <button
-            type='button'
-            onClick={() => setIsActive(!isActive)}
-            aria-pressed={isActive}
-            className='rounded focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none'
-            title='Toggles whether the assistant is enabled once you save'
-          >
-            <StatusPill tone={isActive ? 'success' : 'danger'}>
-              {isActive ? 'Active (Live)' : 'Disabled'}
-            </StatusPill>
-          </button>
-        }
-      />
+    <div className='max-w-3xl space-y-6 pb-12'>
+      {/* Header — Subscriptions desk pattern */}
+      <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+        <div>
+          <div className='flex items-center gap-2'>
+            <h1 className='text-xl font-bold tracking-tight text-ink sm:text-2xl'>
+              AI Settings
+            </h1>
+            <span className='rounded-full bg-primary-100 px-2.5 py-0.5 text-xs font-semibold text-primary-800'>
+              SME Assistant
+            </span>
+          </div>
+          <p className='mt-1 text-xs text-ink-muted sm:text-sm'>
+            Configure the AI provider, model, and credentials powering the SME assistant.
+          </p>
+        </div>
+
+        <button
+          type='button'
+          onClick={() => setIsActive(!isActive)}
+          aria-pressed={isActive}
+          className='self-start rounded-lg focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:outline-none sm:self-auto'
+          title='Toggles whether the assistant is enabled once you save'
+        >
+          <StatusPill tone={isActive ? 'success' : 'danger'}>
+            {isActive ? 'Active (Live)' : 'Disabled'}
+          </StatusPill>
+        </button>
+      </div>
+
+      {/* Status KPI Cards — Subscriptions desk pattern */}
+      <div className='grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4'>
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Status</span>
+            <Bot className='h-4 w-4 text-primary-500' />
+          </div>
+          <p className={`mt-2 text-2xl font-bold tabular-nums ${isActive ? 'text-emerald-600' : 'text-ink-subtle'}`}>
+            {isActive ? 'Live' : 'Off'}
+          </p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>
+            {hasApiKey ? 'Key stored securely' : 'No key saved yet'}
+          </p>
+        </div>
+
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Provider</span>
+            <CheckCircle2 className='h-4 w-4 text-emerald-500' />
+          </div>
+          <p className='mt-2 truncate text-2xl font-bold text-ink'>
+            {name || provider}
+          </p>
+          <p className='mt-0.5 truncate font-mono text-[11px] text-ink-subtle'>{provider}</p>
+        </div>
+
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Model</span>
+            <Bot className='h-4 w-4 text-primary-500' />
+          </div>
+          <p className='mt-2 truncate font-mono text-sm font-bold text-ink' title={model}>
+            {model}
+          </p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>
+            {maxTokens} tokens · temp {temperature}
+          </p>
+        </div>
+
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Last Check</span>
+            <RefreshCw className='h-4 w-4 text-primary-500' />
+          </div>
+          <p className='mt-2 text-2xl font-bold tabular-nums text-ink'>
+            {testResult?.tested
+              ? testResult.success
+                ? `${testResult.latencyMs ?? '—'}ms`
+                : 'Failed'
+              : updatedAt
+                ? 'Saved'
+                : '—'}
+          </p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>
+            {testResult?.tested
+              ? testResult.success
+                ? 'Endpoint verified'
+                : 'Test returned an error'
+              : updatedAt
+                ? `Updated ${formatStamp(updatedAt)}`
+                : 'Not tested yet'}
+          </p>
+        </div>
+      </div>
 
       <Panel className='px-3 py-2.5'>
         <p className='mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-muted'>

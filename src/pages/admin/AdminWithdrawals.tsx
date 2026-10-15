@@ -18,10 +18,8 @@ import Modal from '@/components/ui/Modal';
 import { TableSkeleton } from '@/components/ui/Skeleton.tsx';
 import api from '@/lib/axios';
 import toast from 'react-hot-toast';
-import PageHeader from './shared/PageHeader';
 import PaginationBar from './shared/Pagination';
 import { Panel, PanelEmpty } from './shared/Panel';
-import SegmentedControl from './shared/SegmentedControl';
 import StatusPill, { type Tone } from './shared/StatusPill';
 import { formatNaira, formatStamp, formatTransferStamp } from './shared/format';
 import { useAdminStatsStore } from '@/stores/admin.stats.store.ts';
@@ -353,28 +351,32 @@ export default function AdminWithdrawals() {
   const isFiltered = Boolean(search) || statusFilter !== 'all';
   const net = (w: WithdrawalRequest) => w.netAmount || w.amount;
 
+  const pendingValue = withdrawals
+    .filter((w) => w.status === 'pending')
+    .reduce((sum, w) => sum + Number(w.amount ?? 0), 0);
+  const processingCount = withdrawals.filter((w) => w.status === 'processing').length;
+  const completedCount = withdrawals.filter((w) => w.status === 'completed').length;
+
   return (
-    <div className='space-y-4'>
-      {slaStats && slaStats.breachedCount > 0 && (
-        <div
-          role='status'
-          aria-live='polite'
-          className='flex flex-wrap items-center gap-2.5 rounded-panel border border-warning-200 bg-warning-50 px-3 py-2'
-        >
-          <AlertTriangle className='h-4 w-4 shrink-0 text-warning-600' aria-hidden='true' />
-          <p className='text-[11px] text-warning-900'>
-            <span className='font-semibold'>{slaStats.breachedCount}</span> withdrawal
-            {slaStats.breachedCount === 1 ? ' has' : 's have'} been pending over 24 hours — oldest at{' '}
-            {slaStats.oldestPendingHours}h.
+    <div className='space-y-6'>
+      {/* Header — Subscriptions desk pattern */}
+      <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+        <div>
+          <div className='flex items-center gap-2'>
+            <h1 className='text-xl font-bold tracking-tight text-ink sm:text-2xl'>
+              Withdrawals Desk
+            </h1>
+            <span className='rounded-full bg-primary-100 px-2.5 py-0.5 text-xs font-semibold text-primary-800'>
+              Bank Payouts
+            </span>
+          </div>
+          <p className='mt-1 text-xs text-ink-muted sm:text-sm'>
+            Review SME withdrawal requests, approve Paystack transfers, and settle offline payouts.
           </p>
         </div>
-      )}
 
-      <PageHeader
-        title='Withdrawal Requests'
-        hint='Review and approve SME withdrawal requests.'
-        actions={
-          pendingCount > 0 && statusFilter === 'all' ? (
+        <div className='flex items-center gap-2 self-start sm:self-auto'>
+          {pendingCount > 0 && statusFilter === 'all' ? (
             <Button size='sm' onClick={() => applyStatusFilter('pending')}>
               <Clock className='h-3.5 w-3.5' />
               {pendingCount} Pending Review
@@ -383,19 +385,108 @@ export default function AdminWithdrawals() {
             <span className='text-[11px] text-ink-muted'>
               {pagination.total} {pagination.total === 1 ? 'request' : 'requests'}
             </span>
-          )
-        }
-      />
+          )}
+          <button
+            onClick={() => refreshAfterMutation()}
+            className='inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-panel px-3.5 py-2 text-xs font-semibold text-ink shadow-2xs transition-colors hover:bg-panel-subtle'
+          >
+            <Clock className='h-3.5 w-3.5' />
+            <span>Refresh</span>
+          </button>
+        </div>
+      </div>
 
-      <Panel className='px-3 py-2'>
-        <div className='flex flex-col items-start gap-2 lg:flex-row lg:items-center lg:justify-between'>
-          <SegmentedControl
-            label='Status'
-            options={STATUS_OPTIONS}
-            value={statusFilter}
-            onChange={applyStatusFilter}
-          />
-          <div className='relative w-full lg:w-72'>
+      {/* SLA Alert Banner */}
+      {slaStats && slaStats.breachedCount > 0 && (
+        <div
+          role='status'
+          aria-live='polite'
+          className='flex flex-col items-start justify-between gap-2 rounded-xl border border-danger-300 bg-danger-50 px-4 py-3 sm:flex-row sm:items-center'
+        >
+          <div className='flex items-center gap-2.5'>
+            <AlertTriangle className='h-5 w-5 shrink-0 text-danger-600' aria-hidden='true' />
+            <div>
+              <p className='text-xs font-semibold text-ink'>
+                <span>{slaStats.breachedCount}</span> withdrawal
+                {slaStats.breachedCount === 1 ? ' has' : 's have'} been pending over 24 hours — oldest at{' '}
+                {slaStats.oldestPendingHours}h.
+              </p>
+              <p className='mt-0.5 text-[11px] text-ink-muted'>
+                Immediate review required. Approve, reject, or re-query the transfer status.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Summary KPI Cards — Subscriptions desk pattern */}
+      <div className='grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4'>
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Pending Approval</span>
+            <Clock className='h-4 w-4 text-amber-500' />
+          </div>
+          <p className='mt-2 text-2xl font-bold tabular-nums text-amber-600'>
+            {slaStats?.pendingCount ?? pendingCount}
+          </p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>Awaiting admin decision</p>
+        </div>
+
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Pending Value</span>
+            <Wallet className='h-4 w-4 text-primary-500' />
+          </div>
+          <p className='mt-2 font-mono text-2xl font-bold tabular-nums text-ink'>
+            {formatNaira(pendingValue)}
+          </p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>Gross amount in queue</p>
+        </div>
+
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>In Flight</span>
+            <Loader2 className='h-4 w-4 text-primary-500' />
+          </div>
+          <p className='mt-2 text-2xl font-bold tabular-nums text-ink'>
+            {processingCount}
+          </p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>Transfers processing</p>
+        </div>
+
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Completed</span>
+            <CheckCircle2 className='h-4 w-4 text-emerald-500' />
+          </div>
+          <p className='mt-2 text-2xl font-bold tabular-nums text-emerald-600'>
+            {completedCount}
+          </p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>Settled to banks</p>
+        </div>
+      </div>
+
+      {/* Filter Tabs & Search — Subscriptions desk pattern */}
+      <div className='flex flex-col justify-between gap-3 border-b border-hairline pb-4 sm:flex-row sm:items-center'>
+        <div className='flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0'>
+          {STATUS_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type='button'
+              onClick={() => applyStatusFilter(opt.value)}
+              className={`whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+                statusFilter === opt.value
+                  ? 'bg-primary-600 text-white shadow-2xs'
+                  : 'text-ink-muted hover:bg-panel-subtle hover:text-ink'
+              }`}
+            >
+              {opt.label}
+              {opt.value === 'pending' && pendingCount > 0 ? ` (${pendingCount})` : ''}
+            </button>
+          ))}
+        </div>
+        <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+          <div className='relative w-full sm:w-72'>
             <Search
               className='absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-subtle'
               aria-hidden='true'
@@ -420,7 +511,7 @@ export default function AdminWithdrawals() {
             )}
           </div>
         </div>
-      </Panel>
+      </div>
 
       {!hasLoadedOnce ? (
         <TableSkeleton rows={6} columns={4} />
@@ -437,54 +528,64 @@ export default function AdminWithdrawals() {
           />
         </Panel>
       ) : (
-        <Panel className='overflow-hidden'>
+        <div className='overflow-hidden rounded-xl border border-hairline bg-panel shadow-2xs'>
           <div className='overflow-x-auto'>
             <table className='w-full text-left text-xs'>
-              <thead>
-                <tr className='border-b border-hairline bg-panel-subtle/50 text-[11px] font-medium text-ink-subtle'>
-                  <th className='py-2.5 pl-4 pr-3 whitespace-nowrap'>Requested</th>
-                  <th className='px-3 py-2.5'>Business</th>
-                  <th className='px-3 py-2.5'>Destination</th>
-                  <th className='px-3 py-2.5 text-right whitespace-nowrap'>Amount</th>
-                  <th className='px-3 py-2.5 whitespace-nowrap'>Status</th>
-                  <th className='py-2.5 pl-3 pr-4 text-right whitespace-nowrap'>Actions</th>
+              <thead className='border-b border-hairline bg-panel-subtle text-[10px] font-semibold uppercase tracking-wider text-ink-muted'>
+                <tr>
+                  <th className='px-4 py-3'>Customer / Business</th>
+                  <th className='px-4 py-3'>Destination</th>
+                  <th className='px-4 py-3 text-right'>Amount</th>
+                  <th className='px-4 py-3'>Status</th>
+                  <th className='px-4 py-3'>Requested</th>
+                  <th className='px-4 py-3 text-right'>Action</th>
                 </tr>
               </thead>
               <tbody className='divide-y divide-hairline'>
                 {withdrawals.map((w) => (
-                  <tr key={w.id} className='group transition-colors hover:bg-panel-subtle/70'>
-                    <td className='py-3 pl-4 pr-3 whitespace-nowrap tabular-nums text-ink-muted'>
-                      {formatTransferStamp(w.initiatedAt)}
+                  <tr
+                    key={w.id}
+                    className='group cursor-pointer transition-colors hover:bg-panel-subtle/50'
+                    onClick={() => goToDetail(w)}
+                  >
+                    <td className='px-4 py-3.5'>
+                      <div className='flex items-center gap-2.5'>
+                        <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-100 font-bold text-primary-700'>
+                          {w.businessName.charAt(0).toUpperCase()}
+                        </div>
+                        <div className='min-w-0'>
+                          <p className='truncate font-bold text-ink'>{w.businessName}</p>
+                          <button
+                            type='button'
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCopy(w.transferReference, 'Transfer reference');
+                            }}
+                            title='Copy transfer reference'
+                            className='mt-0.5 flex items-center gap-1.5 font-mono text-[10px] text-ink-subtle transition-colors hover:text-primary-500 focus-visible:text-primary-500 focus-visible:outline-none'
+                          >
+                            {w.transferReference}
+                            {copiedField === 'Transfer reference' ? (
+                              <Check className='h-3 w-3 text-success-600' />
+                            ) : (
+                              <Copy className='h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100' />
+                            )}
+                          </button>
+                        </div>
+                      </div>
                     </td>
 
-                    <td className='px-3 py-3'>
-                      <div className='font-semibold text-ink'>{w.businessName}</div>
-                      <button
-                        type='button'
-                        onClick={() => handleCopy(w.transferReference, 'Transfer reference')}
-                        title='Copy transfer reference'
-                        className='mt-0.5 flex items-center gap-1.5 font-mono text-[10px] text-ink-subtle transition-colors hover:text-primary-500 focus-visible:text-primary-500 focus-visible:outline-none'
-                      >
-                        {w.transferReference}
-                        {copiedField === 'Transfer reference' ? (
-                          <Check className='h-3 w-3 text-success-600' />
-                        ) : (
-                          <Copy className='h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100' />
-                        )}
-                      </button>
-                    </td>
-
-                    <td className='px-3 py-3 whitespace-nowrap'>
-                      <span className='text-ink'>{w.destinationBankName}</span>
+                    <td className='whitespace-nowrap px-4 py-3.5'>
+                      <span className='font-medium text-ink'>{w.destinationBankName}</span>
                       <span className='ml-2 font-mono text-[10px] text-ink-subtle'>
                         •••• {w.destinationAccountNum.slice(-4)}
                       </span>
                     </td>
 
-                    <td className='px-3 py-3 text-right whitespace-nowrap'>
-                      <div className='font-mono text-[13px] font-semibold tabular-nums text-ink'>
+                    <td className='whitespace-nowrap px-4 py-3.5 text-right'>
+                      <span className='font-bold tabular-nums text-sm text-ink'>
                         {formatNaira(w.amount)}
-                      </div>
+                      </span>
                       {w.fee > 0 && (
                         <div className='text-[10px] text-ink-subtle'>
                           less {formatNaira(w.fee)} fee
@@ -492,11 +593,15 @@ export default function AdminWithdrawals() {
                       )}
                     </td>
 
-                    <td className='px-3 py-3 whitespace-nowrap'>
+                    <td className='whitespace-nowrap px-4 py-3.5'>
                       <WithdrawalStatus withdrawal={w} />
                     </td>
 
-                    <td className='py-3 pl-3 pr-4 text-right whitespace-nowrap'>
+                    <td className='whitespace-nowrap px-4 py-3.5 text-[11px] text-ink-muted'>
+                      {formatTransferStamp(w.initiatedAt)}
+                    </td>
+
+                    <td className='whitespace-nowrap px-4 py-3.5 text-right' onClick={(e) => e.stopPropagation()}>
                       <div className='flex items-center justify-end gap-2'>
                         <Button variant='ghost' size='sm' onClick={() => goToDetail(w)}>
                           Details
@@ -537,7 +642,7 @@ export default function AdminWithdrawals() {
             onPageChange={(page) => setPagination((prev) => ({ ...prev, page }))}
             noun='requests'
           />
-        </Panel>
+        </div>
       )}
 
       {/* Approve */}

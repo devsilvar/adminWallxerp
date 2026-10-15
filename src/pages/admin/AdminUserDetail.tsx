@@ -231,8 +231,8 @@ export default function AdminUserDetail() {
         </div>
       </div>
 
-      {/* Top Action Command Bar */}
-      <Panel className='p-3 bg-panel-subtle border-hairline-strong'>
+      {/* Top Action Command Bar — Subscriptions desk pattern */}
+      <Panel className='p-3 bg-panel-subtle border-hairline-strong shadow-2xs rounded-xl'>
         <div className='flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3'>
           <div className='flex items-center gap-2 text-xs text-ink-muted'>
             <Shield className='h-4 w-4 text-primary-600 shrink-0' />
@@ -304,10 +304,10 @@ export default function AdminUserDetail() {
         </div>
       </Panel>
 
-      {/* KPI Overview Grid */}
-      <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+      {/* KPI Overview Grid — Subscriptions desk pattern */}
+      <div className='grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4'>
         {/* Wallet Balance Card */}
-        <Panel className='p-4 space-y-2'>
+        <Panel className='p-4 space-y-2 shadow-2xs rounded-xl'>
           <div className='flex items-center justify-between text-ink-muted text-xs'>
             <span className='font-medium'>Wallet Balance</span>
             <Wallet className='h-4 w-4 text-primary-600' />

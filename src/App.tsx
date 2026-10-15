@@ -29,6 +29,8 @@ const AdminAISettings = lazy(() => import('@/pages/admin/AdminAISettings.tsx'));
 const AdminSubscriptions = lazy(
   () => import('@/pages/admin/AdminSubscriptions.tsx'),
 );
+const AdminReviews = lazy(() => import('@/pages/admin/AdminReviews.tsx'));
+const AdminBroadcasts = lazy(() => import('@/pages/admin/AdminBroadcasts.tsx'));
 const NotFound = lazy(() => import('@/pages/NotFound.tsx'));
 
 function AppShell() {
@@ -53,7 +55,7 @@ function AppShell() {
     boot();
     const t = setTimeout(() => {
       if (!cancelled) setBootReady(true);
-    }, 6000);
+    }, 2800);
     return () => {
       cancelled = true;
       clearTimeout(t);
@@ -96,7 +98,8 @@ function AppShell() {
                 <Route path='/admin/audit-logs' element={<AdminAuditLogs />} />
                 <Route path='/admin/ai-settings' element={<AdminAISettings />} />
                 <Route path='/admin/subscriptions' element={<AdminSubscriptions />} />
-                <Route path='/admin/reviews' element={<Navigate to='/admin' replace />} />
+                <Route path='/admin/reviews' element={<AdminReviews />} />
+                <Route path='/admin/broadcasts' element={<AdminBroadcasts />} />
               </Route>
             </Route>
             <Route path='*' element={<NotFound />} />
