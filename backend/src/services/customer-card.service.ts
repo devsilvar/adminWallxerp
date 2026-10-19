@@ -27,16 +27,21 @@ import {
   checkPinLock,
   nextLockDuration,
 } from '@/services/voucher-pin.service';
+import { findOrCreateCustomerByIdentity } from '@/services/customer-resolver.service';
 import type {
   ListCustomersQuery,
   QuickCreateCustomerInput,
+  QuickCreateCustomerWithVoucherInput,
   TopUpCardInput,
   ChangeCreditInput,
   AdjustCardInput,
   ListCardActivityQuery,
 } from '@/validators/customer-card.validator';
 
-const TX_OPTIONS = { maxWait: 15000, timeout: 30000 };
+const TX_OPTIONS = {
+  maxWait: 30000,
+  timeout: process.env.NODE_ENV === 'test' ? 60000 : 30000,
+};
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
@@ -121,10 +126,16 @@ export async function searchCustomers(
 
   if (query.search && query.search.trim()) {
     const term = query.search.trim();
-    where.OR = [
+    const phoneDigits = term.replace(/\D/g, '');
+    const orConditions: any[] = [
       { name: { contains: term, mode: 'insensitive' } },
+      { email: { contains: term, mode: 'insensitive' } },
       { phone: { contains: term } },
     ];
+    if (phoneDigits.length >= 4 && phoneDigits !== term) {
+      orConditions.push({ phone: { contains: phoneDigits } });
+    }
+    where.OR = orConditions;
   }
 
   const offset = (query.page - 1) * query.limit;
@@ -322,6 +333,209 @@ export async function quickCreateCustomer(
   }
 
   return result;
+}
+
+/**
+ * Quick-create a customer with a virtual card, and optional initial funded voucher request.
+ * Dedicated to sales-inline creation ("＋ New Customer & Voucher") for any payment type.
+ */
+export async function quickCreateCustomerWithVoucher(
+  userId: string,
+  businessId: string,
+  input: QuickCreateCustomerWithVoucherInput
+) {
+  await verifyBusinessAccess(userId, businessId, 'customers.manage');
+
+  // Phone validation: extract local digits and verify length >= 10
+  const rawDigits = (input.phone || '').replace(/\D/g, '');
+  let localDigits = rawDigits;
+  if (localDigits.startsWith('234') && localDigits.length === 13) {
+    localDigits = localDigits.slice(3);
+  } else if (localDigits.startsWith('0') && localDigits.length === 11) {
+    localDigits = localDigits.slice(1);
+  }
+
+  if (localDigits.length < 10) {
+    throw new AppError(
+      400,
+      'Phone number must contain at least 10 digits for customer registration',
+      'INVALID_PHONE_LENGTH'
+    );
+  }
+
+  const initialTopUpAmount = input.initialTopUpAmount ? Number(input.initialTopUpAmount) : 0;
+  if (initialTopUpAmount > 10_000_000) {
+    throw new AppError(
+      400,
+      'Initial top-up amount cannot exceed ₦10,000,000',
+      'TOP_UP_LIMIT_EXCEEDED'
+    );
+  }
+
+  // Pre-generate PIN and cardCode outside transaction (CPU work & lookup outside DB tx)
+  const plainPin = generateVoucherPin();
+  const pinHash = await hashVoucherPin(plainPin);
+  const pregeneratedCardCode = await generateUniqueCardCode(businessId);
+
+  const result = await prisma.$transaction(
+    async (tx) => {
+      // 1. Resolve or create customer with identity deduplication
+      const identity = {
+        name: input.name.trim(),
+        phone: input.phone.trim(),
+        email: input.email ? input.email.trim() : null,
+        address: input.address?.trim() || null,
+      };
+
+      const resolved = await findOrCreateCustomerByIdentity(businessId, identity, tx);
+      if (!resolved) {
+        throw new AppError(400, 'Unable to create or identify customer', 'CUSTOMER_CREATION_FAILED');
+      }
+
+      let customer = resolved.customer;
+
+      // Enrich notes or personal bonus if provided and missing
+      const customerUpdateData: any = {};
+      if (input.notes && input.notes.trim() && !customer.notes) {
+        customerUpdateData.notes = input.notes.trim();
+      }
+      if (input.bonusPct !== undefined && customer.voucherBonusPct === null) {
+        customerUpdateData.voucherBonusPct = input.bonusPct;
+      }
+      if (Object.keys(customerUpdateData).length > 0) {
+        customer = await tx.customer.update({
+          where: { id: customer.id },
+          data: customerUpdateData,
+        });
+      }
+
+      // 2. Ensure customer has an active virtual card
+      let card = await tx.customerCard.findUnique({
+        where: { customerId: customer.id },
+      });
+
+      let cardWasCreated = false;
+      let createdCardCode = '';
+
+      if (!card) {
+        const cardCode = pregeneratedCardCode;
+        card = await tx.customerCard.create({
+          data: {
+            businessId,
+            customerId: customer.id,
+            cardCode,
+            balance: 0,
+            pinHash,
+            pinAttempts: 0,
+          },
+        });
+        cardWasCreated = true;
+        createdCardCode = cardCode;
+
+        await logAudit(
+          {
+            userId,
+            businessId,
+            action: 'customer.card_created',
+            resourceType: 'customer_card',
+            resourceId: card.id,
+            newData: { customerId: customer.id, cardCode },
+          },
+          tx
+        );
+      }
+
+      // 3. If initial top-up amount > 0, create VoucherLedgerRequest in pending status
+      let voucherRequest: any = null;
+      if (initialTopUpAmount > 0) {
+        const effectivePct = await resolveBonusPct(tx, businessId, customer.id, input.bonusPct);
+        const bonusAmount = round2((initialTopUpAmount * effectivePct) / 100);
+
+        voucherRequest = await tx.voucherLedgerRequest.create({
+          data: {
+            businessId,
+            customerId: customer.id,
+            cardId: card.id,
+            kind: 'top_up',
+            amount: initialTopUpAmount,
+            bonusPct: effectivePct,
+            bonusAmount,
+            status: 'pending',
+            source: 'sales_inline',
+            createdBy: userId,
+            customerName: customer.name,
+            customerPhone: customer.phone,
+            customerEmail: customer.email,
+            notes: input.notes?.trim() || null,
+          },
+        });
+
+        await logAudit(
+          {
+            userId,
+            businessId,
+            action: 'card.topup_requested',
+            resourceType: 'voucher_ledger_request',
+            resourceId: voucherRequest.id,
+            newData: {
+              amount: initialTopUpAmount,
+              bonusPct: effectivePct,
+              bonusAmount,
+              status: 'pending',
+              customerId: customer.id,
+            },
+          },
+          tx
+        );
+      }
+
+      return {
+        customer,
+        card: {
+          ...card,
+          balance: toNumber(card.balance),
+        },
+        voucherRequest: voucherRequest
+          ? {
+              ...voucherRequest,
+              amount: toNumber(voucherRequest.amount),
+              bonusPct:
+                voucherRequest.bonusPct !== null && voucherRequest.bonusPct !== undefined
+                  ? toNumber(voucherRequest.bonusPct)
+                  : null,
+              bonusAmount:
+                voucherRequest.bonusAmount !== null && voucherRequest.bonusAmount !== undefined
+                  ? toNumber(voucherRequest.bonusAmount)
+                  : null,
+            }
+          : null,
+        cardWasCreated,
+        createdCardCode,
+      };
+    },
+    TX_OPTIONS
+  );
+
+  // 4. Post-commit: send card creation notification with PIN if email exists and card was newly created
+  if (result.cardWasCreated && result.customer.email) {
+    void dispatchVoucherNotificationEmail({
+      businessId,
+      customerId: result.customer.id,
+      cardCode: result.createdCardCode,
+      balance: 0,
+      actionType: 'created',
+      toEmail: result.customer.email,
+      customerName: result.customer.name,
+      notes: result.customer.notes,
+      pinCode: plainPin,
+    });
+  }
+
+  return {
+    customer: result.customer,
+    card: result.card,
+    voucherRequest: result.voucherRequest,
+  };
 }
 
 /**
@@ -711,9 +925,19 @@ export async function topUpCard(
   userId: string,
   businessId: string,
   customerId: string,
-  input: TopUpCardInput
+  input: TopUpCardInput,
+  opts?: { direct?: boolean }
 ) {
-  await verifyBusinessAccess(userId, businessId, 'customers.manage');
+  const { role } = await verifyBusinessAccess(userId, businessId, 'customers.manage');
+
+  if (role === 'sales_staff') {
+    const { createTopUpRequest } = await import('@/services/voucher-ledger-request.service');
+    const request = await createTopUpRequest(userId, businessId, customerId, input);
+    return {
+      request,
+      status: 'pending',
+    };
+  }
 
   const date = input.receiptDate ?? new Date();
   await assertMonthNotLocked(businessId, date);
@@ -1633,6 +1857,7 @@ export async function updateCustomerVoucherBonus(
 export const customerCardService = {
   searchCustomers,
   quickCreateCustomer,
+  quickCreateCustomerWithVoucher,
   getCustomerCard,
   lookupVoucherByPin,
   resendVoucherPin,

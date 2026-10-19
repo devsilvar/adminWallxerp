@@ -206,6 +206,11 @@ export async function listBusinesses(userId: string, page: number, limit: number
       const overrides = isOwner ? null : (memberInfo?.permissions ?? null);
       return {
         ...b,
+        voucherBonusPct: toNumber(b.voucherBonusPct as any),
+        voucherAdjustmentThreshold:
+          b.voucherAdjustmentThreshold !== null && b.voucherAdjustmentThreshold !== undefined
+            ? toNumber(b.voucherAdjustmentThreshold as any)
+            : 50000,
         _count: undefined,
         myRole,
         myPermissions: resolvePermissions(myRole, overrides),
@@ -232,6 +237,12 @@ export async function getBusinessById(userId: string, businessId: string) {
 
   return {
     ...access.business,
+    voucherBonusPct: toNumber(access.business.voucherBonusPct as any),
+    voucherAdjustmentThreshold:
+      access.business.voucherAdjustmentThreshold !== null &&
+      access.business.voucherAdjustmentThreshold !== undefined
+        ? toNumber(access.business.voucherAdjustmentThreshold as any)
+        : 50000,
     myRole: access.role,
     myPermissions: access.permissions,
     memberCount,
@@ -389,4 +400,52 @@ export async function updateBusinessVoucherBonus(userId: string, businessId: str
   });
   invalidateOwnershipCache(businessId, userId);
   return { ...business, voucherBonusPct: toNumber(business.voucherBonusPct as any) };
+}
+
+export async function updateBusinessVoucherAdjustmentThreshold(
+  userId: string,
+  businessId: string,
+  threshold: number
+) {
+  // Explicit verifyBusinessAccess without 'settings.update' permission so managers are not blocked by FINANCIAL_OWNER_ONLY
+  const { role } = await verifyBusinessAccess(userId, businessId);
+  if (role !== 'owner' && role !== 'manager') {
+    throw new AppError(403, 'Only managers and owners can change the voucher threshold', 'PERMISSION_DENIED');
+  }
+
+  if (typeof threshold !== 'number' || isNaN(threshold) || threshold < 0 || threshold > 10_000_000) {
+    throw new AppError(400, 'Threshold must be between ₦0 and ₦10,000,000', 'INVALID_THRESHOLD');
+  }
+
+  const existing = await prisma.business.findUnique({
+    where: { id: businessId },
+    select: { voucherAdjustmentThreshold: true },
+  });
+
+  const previousThreshold =
+    existing?.voucherAdjustmentThreshold !== null && existing?.voucherAdjustmentThreshold !== undefined
+      ? toNumber(existing.voucherAdjustmentThreshold as any)
+      : 50000;
+
+  const business = await prisma.business.update({
+    where: { id: businessId },
+    data: { voucherAdjustmentThreshold: threshold },
+    select: { id: true, businessName: true, voucherAdjustmentThreshold: true },
+  });
+
+  await logAudit({
+    userId,
+    businessId,
+    action: 'business.voucher_adjustment_threshold_updated',
+    resourceType: 'business',
+    resourceId: businessId,
+    oldData: { voucherAdjustmentThreshold: previousThreshold },
+    newData: { voucherAdjustmentThreshold: threshold },
+  });
+
+  invalidateOwnershipCache(businessId, userId);
+  return {
+    ...business,
+    voucherAdjustmentThreshold: toNumber(business.voucherAdjustmentThreshold as any),
+  };
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '@/lib/axios.ts';
 import type { TreasuryAnalyticsData } from '@/types/index.ts';
+import { usePaginationTransition } from '@/hooks/usePaginationTransition';
 
 export type TreasuryType = 'all' | 'inflow' | 'outflow';
 export type TreasuryOutcome = 'all' | 'profit' | 'loss';
@@ -18,6 +19,8 @@ export type TreasuryOutcome = 'all' | 'profit' | 'loss';
 export default function useTreasuryAnalytics(enabled: boolean) {
   const [data, setData] = useState<TreasuryAnalyticsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const { isPageLoading, pendingPage, start, finish } = usePaginationTransition();
   const [page, setPage] = useState(1);
   const [type, setType] = useState<TreasuryType>('all');
   const [outcome, setOutcome] = useState<TreasuryOutcome>('all');
@@ -26,6 +29,7 @@ export default function useTreasuryAnalytics(enabled: boolean) {
 
   const fetchTreasury = useCallback(async () => {
     setIsLoading(true);
+    if (hasLoadedOnce) start(page);
     const params = new URLSearchParams({
       page: String(page),
       limit: '20',
@@ -42,8 +46,10 @@ export default function useTreasuryAnalytics(enabled: boolean) {
       toast.error(err.response?.data?.error?.message || 'Failed to fetch treasury data');
     } finally {
       setIsLoading(false);
+      finish();
+      setHasLoadedOnce(true);
     }
-  }, [page, type, outcome, search]);
+  }, [page, type, outcome, search, hasLoadedOnce, start, finish]);
 
   useEffect(() => {
     if (enabled) fetchTreasury();
@@ -60,13 +66,22 @@ export default function useTreasuryAnalytics(enabled: boolean) {
     setPage(1);
   }
 
+  const handlePageChange = (next: number) => {
+    if (next === page || isPageLoading) return;
+    start(next);
+    setPage(next);
+  };
+
   return {
     data,
     isLoading,
+    isPageLoading,
+    pendingPage,
+    handlePageChange,
     refresh: fetchTreasury,
     pagination: {
       page,
-      setPage,
+      setPage: handlePageChange,
       type,
       setType: (t: TreasuryType) => {
         setType(t);

@@ -12,10 +12,11 @@
 // "Generate Reminders" button on /reminders can reuse it for one
 // business. This file is just the scheduler + concurrency guard.
 //
-// Concurrency: the whole sweep is wrapped in a Postgres advisory lock
-// (LOCK_KEY = 947362). Future multi-instance deploys will not double-run.
-// Lock release sits in `finally`; Postgres also releases on session close
-// if the Node process crashes mid-sweep.
+// Concurrency: the whole sweep is wrapped in a Postgres transaction-scoped
+// advisory lock (LOCK_KEY = 947362). Future multi-instance deploys will not
+// double-run. Uses pg_try_advisory_xact_lock inside a transaction fence so
+// PostgreSQL automatically releases the lock upon commit or rollback without
+// leaking session locks across connection poolers (PgBouncer/Neon/Supabase).
 //
 // Gating: registerReminderCron() is a no-op unless config.cron.enabled.
 // Default: true in production, false in dev (set ENABLE_CRON=true to
@@ -29,8 +30,11 @@ import config from '@/config';
 import {
   generateRemindersForAllBusinesses,
   sweepOverdueInvoicesForBusiness,
+  sweepCreditReminders,
+  autoFinalizeConcludedMonthForAllBusinesses,
+  sweepMonthEndConcludedReminders,
 } from '@/services/reminder.service';
-import { sweepStalePayouts } from '@/services/settlement.service';
+import { PlatformTaxConfigService } from '@/services/platform-tax-config.service';
 
 // Arbitrary 32-bit int. Document new lock keys here so they don't collide.
 //   947362 — daily reminder sweep
@@ -48,56 +52,92 @@ export function registerReminderCron(): void {
     return;
   }
 
-  cron.schedule(SCHEDULE, runDailySweep, { timezone: TIMEZONE });
+  cron.schedule(
+    SCHEDULE,
+    () => {
+      void runDailySweep().catch((err) => {
+        logger.error('Unhandled failure in reminder cron sweep', {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      });
+    },
+    { timezone: TIMEZONE }
+  );
   logger.info('Reminder cron registered', { schedule: SCHEDULE, timezone: TIMEZONE });
 }
 
 // Exported so a one-off `tsx` script or future test can run the sweep
 // directly without waiting for the scheduler.
-export async function runDailySweep(): Promise<void> {
-  const lockResult = await prisma.$queryRaw<Array<{ locked: boolean }>>`
-    SELECT pg_try_advisory_lock(${LOCK_KEY}) AS locked
-  `;
-  const locked = lockResult[0]?.locked === true;
-
-  if (!locked) {
-    logger.info('Reminder cron sweep: lock held, skipping');
+export async function runDailySweep(opts?: { bypassLock?: boolean }): Promise<void> {
+  if (opts?.bypassLock) {
+    await executeReminderSweep();
     return;
   }
 
+  await prisma.$transaction(
+    async (tx) => {
+      const lockResult = await tx.$queryRaw<Array<{ locked: boolean }>>`
+        SELECT pg_try_advisory_xact_lock(${LOCK_KEY}) AS locked
+      `;
+      const locked = lockResult[0]?.locked === true;
+
+      if (!locked) {
+        logger.info('Reminder cron sweep: lock held, skipping');
+        return;
+      }
+
+      await executeReminderSweep();
+    },
+    { maxWait: 10000, timeout: 60000 }
+  );
+}
+
+async function executeReminderSweep(): Promise<void> {
   logger.info('Reminder cron sweep: start');
 
   try {
+    let autoFinalizedCount = 0;
+    let monthEndRemindersCreated = 0;
+    const now = new Date();
+    const todayDate = now.getDate();
+
+    // Query active admin tax & statutory compliance settings (default Day 20)
+    const taxConfig = await PlatformTaxConfigService.getTaxConfig();
+
+    // Day 1: Trading has concluded, dispatch reconciliation notification
+    if (todayDate === 1) {
+      const monthEnd = await sweepMonthEndConcludedReminders();
+      monthEndRemindersCreated = monthEnd.created;
+    }
+
+    // Admin-Configured Day (e.g. 20th or 21st): Safety-net auto-finalization for unfinalized accounts
+    if (taxConfig.autoFinalizeEnabled && todayDate === taxConfig.autoFinalizeDay) {
+      const autoRes = await autoFinalizeConcludedMonthForAllBusinesses();
+      autoFinalizedCount = autoRes.finalized;
+    }
+
     const tax = await generateRemindersForAllBusinesses();
     const invoice = await sweepOverdueInvoicesForBusiness();
-    const stalePayouts = await sweepStalePayouts();
+    const credit = await sweepCreditReminders();
 
     logger.info('Reminder cron sweep: done', {
+      autoFinalized: autoFinalizedCount,
+      monthEndRemindersCreated,
       businessesProcessed: tax.processed,
       taxRemindersCreated: tax.created,
       deadlinesCreated: tax.deadlinesCreated,
       invoiceRemindersCreated: invoice.remindersCreated,
       invoicesFlippedToOverdue: invoice.statusFlipped,
-      stalePayouts: {
-        checked: stalePayouts.checked,
-        completed: stalePayouts.completed,
-        failed: stalePayouts.failed,
-        stillPending: stalePayouts.stillPending,
-      },
+      creditRemindersCreated: credit.remindersCreated,
+      creditStatusFlipped: credit.statusFlipped,
+      creditEmailsSent: credit.emailsSent,
     });
   } catch (err) {
     logger.error('Reminder cron sweep: failed', {
       error: err instanceof Error ? err.message : String(err),
       stack: err instanceof Error ? err.stack : undefined,
     });
-  } finally {
-    try {
-      await prisma.$queryRaw`SELECT pg_advisory_unlock(${LOCK_KEY})`;
-    } catch (unlockErr) {
-      // Postgres releases the lock on session close anyway; just log.
-      logger.warn('Reminder cron sweep: advisory unlock failed', {
-        error: unlockErr instanceof Error ? unlockErr.message : String(unlockErr),
-      });
-    }
   }
 }
+

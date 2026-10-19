@@ -122,3 +122,19 @@ export const updateVoucherBonus = asyncHandler(async (req: AuthenticatedRequest,
   res.status(200).json({ success: true, data: result, message: 'Voucher bonus updated' });
 });
 
+export const updateVoucherAdjustmentThreshold = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { threshold } = req.body as { threshold: number };
+  if (threshold === undefined || threshold === null) {
+    throw new AppError(400, 'threshold is required', 'VALIDATION_ERROR');
+  }
+  if (typeof threshold !== 'number' || isNaN(threshold) || threshold < 0 || threshold > 10_000_000) {
+    throw new AppError(400, 'Threshold must be between ₦0 and ₦10,000,000', 'VALIDATION_ERROR');
+  }
+  const result = await businessService.updateBusinessVoucherAdjustmentThreshold(
+    req.user!.userId,
+    req.params.id,
+    threshold
+  );
+  res.status(200).json({ success: true, data: result, message: 'Voucher adjustment threshold updated' });
+});
+

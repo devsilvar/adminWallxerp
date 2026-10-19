@@ -12,12 +12,21 @@ import config from './config';
 import logger from './lib/logger';
 import prisma from './lib/prisma';
 import { registerReminderCron } from './jobs/reminders.cron';
+import { registerWalletReconciliationCron } from './jobs/wallet-reconciliation.cron';
+import { registerPayoutReconciliationCron } from './jobs/payout-reconciliation.cron';
+import { registerSubscriptionExpiryCron } from './jobs/subscription-expiry.cron';
+import { registerVoucherCron } from './jobs/voucher-cron';
+import { registerDomainEventListeners } from './core/events/register-listeners';
+import { runEraseTestAccounts } from './scripts/erase-test-accounts';
 
 /**
  * Start the server
  */
 const startServer = async () => {
   try {
+    // Register domain event listeners
+    registerDomainEventListeners();
+
     // Create Express app
     const app = createApp();
 
@@ -26,7 +35,7 @@ const startServer = async () => {
     // localhost on some Node configs makes the port invisible externally.
     const server = app.listen(config.app.port, '0.0.0.0', () => {
       logger.info('=================================');
-      logger.info('🚀 PayMyTax API Server Started');
+      logger.info('🚀 WallXERP API Server Started');
       logger.info('=================================');
       logger.info(`Environment: ${config.app.env}`);
       logger.info(`Port: ${config.app.port}`);
@@ -38,9 +47,24 @@ const startServer = async () => {
       // cron registration failure cannot crash the API.
       try {
         registerReminderCron();
+        registerWalletReconciliationCron();
+        registerPayoutReconciliationCron();
+        registerSubscriptionExpiryCron();
+        registerVoucherCron();
       } catch (cronErr) {
-        logger.error('❌ Failed to register reminder cron', {
+        logger.error('❌ Failed to register scheduled cron jobs', {
           error: cronErr instanceof Error ? cronErr.message : String(cronErr),
+        });
+      }
+
+      // One-shot test-account sweep gated by ERASE_TEST_ACCOUNTS
+      // (config.cleanup.eraseTestAccounts). Fire-and-forget: a sweep failure
+      // must not crash the API. Set the var back to unset after one boot.
+      if (config.cleanup.eraseTestAccounts) {
+        runEraseTestAccounts(config.cleanup.eraseTestAccounts).catch((sweepErr) => {
+          logger.error('❌ ERASE_TEST_ACCOUNTS sweep failed', {
+            error: sweepErr instanceof Error ? sweepErr.message : String(sweepErr),
+          });
         });
       }
     });

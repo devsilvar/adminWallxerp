@@ -1,14 +1,22 @@
 import { Router } from 'express';
 import { authenticate } from '@/middleware/auth';
+import { requireActiveSubscription } from '@/middleware/subscription';
 import * as expenseController from '@/controllers/expense.controller';
 
 const router = Router({ mergeParams: true });
 
 router.use(authenticate);
+router.use(requireActiveSubscription);
 
 router.post('/', expenseController.create);
 router.get('/', expenseController.getAll);
 router.get('/summary', expenseController.summary);
+router.get('/daily', expenseController.daily);
+
+// ─── Expense PDF Report ─────────────────────────────────────
+import * as reportController from '@/controllers/report.controller';
+router.get('/report/pdf', reportController.downloadExpenseReport);
+
 router.get('/:id', expenseController.getById);
 router.put('/:id', expenseController.update);
 router.delete('/:id', expenseController.remove);

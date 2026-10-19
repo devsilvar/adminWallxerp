@@ -37,6 +37,8 @@ export const calculateTaxSchema = z.object({
   taxRate: z.coerce.number().min(0).max(50).optional(), // override per-business if needed
 });
 
+export const finalizeReportSchema = z.object({});
+
 export const taxReportsQuerySchema = z.object({
   page: queryNumber({ min: 1 }).default(1),
   limit: queryNumber({ min: 1, max: 100 }).default(12),

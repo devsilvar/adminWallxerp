@@ -71,18 +71,14 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   });
 
   if (error) {
-    // Special handling for domain verification errors
-    if (error.message?.includes('domain is not verified')) {
-      logger.warn('Resend domain not verified - email logged for dev', {
+    // In dev/test, treat Resend errors (domain not verified, invalid test API keys) as non-critical
+    if (config.app.isDevelopment || config.app.env === 'test') {
+      logger.warn('Resend email dispatch skipped in development mode - non-critical', {
         to: input.to,
         subject: input.subject,
-        htmlPreview: input.html.slice(0, 200),
-        note: 'Add and verify your domain at https://resend.com/domains',
+        error: error.message,
       });
-      // In dev/test, treat domain verification errors as non-critical (log but continue)
-      if (config.app.isDevelopment || config.app.env === 'test') {
-        return { delivered: false };
-      }
+      return { delivered: false };
     }
     
     logger.error('Resend send failed', { to: input.to, subject: input.subject, error });

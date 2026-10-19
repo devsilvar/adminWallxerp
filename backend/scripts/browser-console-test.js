@@ -117,7 +117,7 @@ async function testDVA() {
     console.log(`   await verifyTransaction('${unverified.data[0].id}')\n`);
     
     // Store first sale ID globally for easy verification
-    window.FIRST_SALE_ID = unverified.data[0].id;
+    window.NRST_SALE_ID = unverified.data[0].id;
   } else {
     console.log('\n✅ No unverified transactions (all clean!)\n');
   }
@@ -179,9 +179,9 @@ async function testDVA() {
   console.log('   await getSummary(month, year)      - Get monthly summary');
   console.log('   await createTestSale(amount)       - Create a test manual sale\n');
   
-  if (window.FIRST_SALE_ID) {
+  if (window.NRST_SALE_ID) {
     console.log('💡 Quick verify first unverified transaction:');
-    console.log(`   await verifyTransaction('${window.FIRST_SALE_ID}')\n`);
+    console.log(`   await verifyTransaction('${window.NRST_SALE_ID}')\n`);
   }
 }
 

@@ -23,6 +23,7 @@ import {
   InitiateTransferParams,
   InitiateTransferResult,
   VerifyTransferResult,
+  GatewayBalanceItem,
 } from './types';
 
 const BASE_URL = 'https://api.paystack.co';
@@ -75,21 +76,57 @@ export class PaystackProvider implements PaymentProvider {
     };
   }
 
+  /**
+   * Default timeout for standard read/verify requests (15 seconds).
+   * Transfer initiation uses 25s via explicit override.
+   */
+  private static readonly DEFAULT_TIMEOUT_MS = 15_000;
+  private static readonly TRANSFER_TIMEOUT_MS = 25_000;
+
   private async request<T = any>(
     method: string,
     path: string,
     body?: Record<string, any>,
+    timeoutMs: number = PaystackProvider.DEFAULT_TIMEOUT_MS,
   ): Promise<T> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.secretKey}`,
     };
     if (body) headers['Content-Type'] = 'application/json';
 
-    const response = await fetch(`${BASE_URL}${path}`, {
-      method,
-      headers,
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${BASE_URL}${path}`, {
+        method,
+        headers,
+        signal: AbortSignal.timeout(timeoutMs),
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    } catch (fetchErr: any) {
+      // AbortSignal.timeout() throws TimeoutError (Node 18+), some environments throw AbortError
+      if (fetchErr.name === 'TimeoutError' || fetchErr.name === 'AbortError') {
+        logger.error('[PAYSTACK_TIMEOUT] Gateway request timed out', {
+          method, path, timeoutMs,
+        });
+        throw new AppError(
+          504,
+          `Paystack gateway timed out after ${timeoutMs}ms on ${method} ${path}`,
+          'PAYSTACK_TIMEOUT',
+          { timeoutMs, path, method },
+        );
+      }
+
+      // Network-level errors: ECONNRESET, ETIMEDOUT, ENOTFOUND, fetch failed, etc.
+      logger.error('[PAYSTACK_TRANSPORT_ERROR] Gateway network transport failure', {
+        method, path, errorName: fetchErr.name, errorMessage: fetchErr.message,
+      });
+      throw new AppError(
+        502,
+        `Paystack network transport error on ${method} ${path}: ${fetchErr.message}`,
+        'PAYSTACK_TRANSPORT_ERROR',
+        { path, method, originalError: fetchErr.message },
+      );
+    }
 
     const responseData = await response.json() as PaystackResponse<T>;
 
@@ -100,7 +137,7 @@ export class PaystackProvider implements PaymentProvider {
         response.status >= 400 && response.status < 500 ? 400 : 502,
         `${message}${meta}`,
         'PAYSTACK_ERROR',
-        { paystackCode: responseData.code, type: responseData.type },
+        { paystackCode: responseData.code, type: responseData.type, httpStatus: response.status },
       );
     }
 
@@ -498,7 +535,7 @@ export class PaystackProvider implements PaymentProvider {
       recipient: params.recipient,
       reason: params.reason,
       reference: params.reference,
-    });
+    }, PaystackProvider.TRANSFER_TIMEOUT_MS);
 
     return {
       transferCode: data.transfer_code,
@@ -509,38 +546,62 @@ export class PaystackProvider implements PaymentProvider {
   }
 
   /**
-   * Verify transfer status by reference
+   * Verify status of a transfer by reference, with optional fallback to transfer code
    */
-  async verifyTransfer(reference: string): Promise<VerifyTransferResult> {
+  async verifyTransfer(reference: string, transferCode?: string): Promise<VerifyTransferResult> {
     try {
       const data = await this.request('GET', `/transfer/verify/${encodeURIComponent(reference)}`);
-      const statusRaw = (data?.status || '').toLowerCase();
-      let status: VerifyTransferResult['status'];
-      if (statusRaw === 'success') {
-        status = 'success';
-      } else if (statusRaw === 'failed') {
-        status = 'failed';
-      } else if (statusRaw === 'reversed') {
-        status = 'reversed';
-      } else if (statusRaw === 'otp') {
-        status = 'otp';
-      } else {
-        status = 'pending';
-      }
-
       return {
-        status,
-        failureReason: data?.reason || data?.complete_message || undefined,
+        reference: data.reference,
+        status: data.status,
+        transferCode: data.transfer_code,
+        amount: data.amount ? data.amount / 100 : undefined,
+        gatewayResponse: data.gateway_response,
       };
-    } catch (err: unknown) {
-      if (this.shouldUseBankFixture()) {
-        logger.warn('Paystack bank fixture used — returning simulated pending transfer verification', {
-          op: 'verifyTransfer',
-          reference,
-        });
-        return { status: 'pending' };
+    } catch (err: any) {
+      if (
+        transferCode &&
+        err instanceof AppError &&
+        (err.statusCode === 400 || err.statusCode === 404 || err.details?.httpStatus === 404 || err.message?.toLowerCase().includes('not found'))
+      ) {
+        try {
+          const codeData = await this.request('GET', `/transfer/${encodeURIComponent(transferCode)}`);
+          return {
+            reference: codeData.reference || reference,
+            status: codeData.status,
+            transferCode: codeData.transfer_code || transferCode,
+            amount: codeData.amount ? codeData.amount / 100 : undefined,
+            gatewayResponse: codeData.gateway_response,
+          };
+        } catch {
+          // If code lookup also fails, throw original reference error
+          throw err;
+        }
       }
       throw err;
     }
   }
-}
+
+  /**
+   * Query the live Paystack account balance.
+   *
+   * In test mode (sk_test_* prefix) or when mockBankResolution is enabled,
+   * returns a large synthetic balance to prevent false solvency alarms.
+   * This mirrors the bypass in WalletService.checkLivePaystackBalance.
+   *
+   * Paystack returns balances in kobo; this method converts to Naira.
+   */
+  async getBalance(): Promise<GatewayBalanceItem[]> {
+    if (this.shouldUseBankFixture() || !this.secretKey || this.secretKey.startsWith('sk_test_')) {
+      logger.info('Paystack balance query bypassed for test/mock environment');
+      return [{ currency: 'NGN', balanceNaira: 10_000_000 }];
+    }
+
+    const data = await this.request<any[]>('GET', '/balance');
+    if (!Array.isArray(data)) return [];
+    return data.map((item: any) => ({
+      currency: item.currency ?? 'NGN',
+      balanceNaira: Number(item.balance || 0) / 100,
+    }));
+  }
+}

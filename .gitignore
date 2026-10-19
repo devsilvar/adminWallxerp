@@ -78,3 +78,6 @@ run-dva-test.bat
 /*.txt
 !/CLAUDE.md
 !/README.md
+
+.kudi_tmp/
+

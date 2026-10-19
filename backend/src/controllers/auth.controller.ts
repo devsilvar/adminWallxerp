@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '@/middleware/errorHandler';
 import { AuthenticatedRequest } from '@/types';
+import { config } from '@/config';
+import prisma from '@/lib/prisma';
+import { logAudit } from '@/lib/audit';
+import { acceptRegulatoryTermsSchema } from '@/validators/regulatory.validator';
 import {
   registerSchema,
   loginSchema,
@@ -9,8 +13,12 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   updateMeSchema,
-  revealBvnSchema,
+  updatePrimaryBusinessSchema,
+  updateBvnSchema,
+  verifyEmailSchema,
+  resendVerificationSchema,
 } from '@/validators/auth.validator';
+
 import * as authService from '@/services/auth.service';
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
@@ -66,6 +74,17 @@ export const updateMe = asyncHandler(async (req: AuthenticatedRequest, res: Resp
   });
 });
 
+export const updatePrimaryBusiness = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { primaryBusinessId } = updatePrimaryBusinessSchema.parse(req.body);
+  const user = await authService.updatePrimaryBusiness(req.user!.userId, primaryBusinessId);
+
+  res.status(200).json({
+    success: true,
+    data: user,
+    message: 'Primary business preference updated successfully',
+  });
+});
+
 export const changePassword = asyncHandler(
   async (req: AuthenticatedRequest, res: Response) => {
     const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
@@ -105,18 +124,94 @@ export const resetPassword = asyncHandler(async (req: Request, res: Response) =>
   });
 });
 
+export const verifyEmail = asyncHandler(async (req: Request, res: Response) => {
+  const { token } = verifyEmailSchema.parse(req.body);
+  const result = await authService.verifyEmail(token);
+
+  res.status(200).json({
+    success: true,
+    data: result,
+    message: result.message,
+  });
+});
+
+export const resendVerification = asyncHandler(async (req: Request, res: Response) => {
+  const { email } = resendVerificationSchema.parse(req.body);
+  const result = await authService.resendVerification(email);
+
+  res.status(200).json({
+    success: true,
+    data: result,
+    message: result.message,
+  });
+});
+
 export const revealBvn = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const input = revealBvnSchema.parse(req.body);
-  const bvn = await authService.revealBvn(
+
+  const { stepUpToken } = req.body;
+  if (!stepUpToken || typeof stepUpToken !== 'string') {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'MISSING_STEP_UP_TOKEN', message: 'stepUpToken is required' },
+    });
+  }
+
+  const result = await authService.revealBvn(req.user!.userId, stepUpToken);
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+export const updateBvn = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const input = updateBvnSchema.parse(req.body);
+  const result = await authService.updateBvn(
     req.user!.userId,
     input,
     req.ip,
     req.get('user-agent')
   );
 
-  res.status(200).json({
-    success: true,
-    data: { bvn },
-    message: 'BVN retrieved successfully',
-  });
+  res.status(200).json(result);
 });
+
+export const acceptRegulatoryTerms = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { version } = acceptRegulatoryTermsSchema.parse(req.body);
+    const userId = req.user!.userId;
+    const termsVersion = version || config.regulatory.termsVersion;
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        regulatoryTermsAcceptedAt: new Date(),
+        regulatoryTermsVersion: termsVersion,
+      },
+      select: {
+        id: true,
+        email: true,
+        regulatoryTermsAcceptedAt: true,
+        regulatoryTermsVersion: true,
+      },
+    });
+
+    logAudit({
+      userId,
+      action: 'auth.regulatory_terms_accepted',
+      resourceType: 'User',
+      resourceId: userId,
+      newData: { version: termsVersion, timestamp: updatedUser.regulatoryTermsAcceptedAt },
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'] as string | undefined,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: updatedUser,
+      message: 'Non-custodial regulatory terms acknowledgment recorded successfully.',
+    });
+  }
+);
+
+

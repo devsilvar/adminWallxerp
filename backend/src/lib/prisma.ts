@@ -25,9 +25,14 @@ export type TxClient = Prisma.TransactionClient;
  */
 const prismaClientSingleton = () => {
   return new PrismaClient({
-    log: process.env.NODE_ENV === 'development' 
+    log: process.env.NODE_ENV === 'development'
       ? ['query', 'error', 'warn']
       : ['error'],
+    // The test and development databases connect to a remote Supabase pooler where queries
+    // have network latency. Setting maxWait and timeout to 30s prevents timeouts during multi-query operations.
+    ...(process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development'
+      ? { transactionOptions: { maxWait: 30_000, timeout: 30_000 } }
+      : {}),
   });
 };
 
@@ -62,4 +67,5 @@ if (process.env.NODE_ENV !== 'test') {
     });
 }
 
+export { prisma };
 export default prisma;

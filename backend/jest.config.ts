@@ -15,6 +15,7 @@ const config: Config = {
   },
   testMatch: ['**/*.test.ts'],
   setupFiles: ['<rootDir>/tests/helpers/loadEnv.ts'],
+  testTimeout: 60000,
 };
 
 export default config;

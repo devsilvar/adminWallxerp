@@ -12,6 +12,8 @@ import {
   dispatchSubscriptionApprovedEmail,
   dispatchSubscriptionRejectedEmail,
 } from '@/services/email-dispatch.service';
+import logger from '@/lib/logger';
+import { emitToAdmins } from './realtime-admin.helper';
 
 export async function getDashboardStats() {
   const [totalUsers, totalBusinesses, totalTaxReports, recentSignups] =
@@ -79,15 +81,22 @@ export async function getDashboardStats() {
   };
 }
 
-export async function listUsers(page: number, limit: number, search?: string) {
-  const where = search
-    ? {
-        OR: [
-          { email: { contains: search, mode: 'insensitive' as const } },
-          { phone: { contains: search } },
-        ],
-      }
-    : {};
+export async function listUsers(
+  page: number,
+  limit: number,
+  search?: string,
+  filters?: { role?: 'user' | 'admin'; isActive?: boolean; isVerified?: boolean }
+) {
+  const where: Record<string, unknown> = {};
+  if (search) {
+    (where as Record<string, unknown>).OR = [
+      { email: { contains: search, mode: 'insensitive' as const } },
+      { phone: { contains: search } },
+    ];
+  }
+  if (filters?.role) where.role = filters.role;
+  if (typeof filters?.isActive === 'boolean') where.isActive = filters.isActive;
+  if (typeof filters?.isVerified === 'boolean') where.isVerified = filters.isVerified;
 
   const [users, total] = await Promise.all([
     prisma.user.findMany({
@@ -954,9 +963,15 @@ export async function getAdminTransactions(filters: AdminTransactionsQueryInput)
 
   let totalIn = 0;
   let totalOut = 0;
+  let totalFailed = 0;
+  let failedCount = 0;
   for (const r of filtered) {
     if (r.direction === 'in') totalIn += r.amount;
     else if (r.status === 'completed') totalOut += r.amount;
+    else if (r.status === 'failed') {
+      totalFailed += r.amount;
+      failedCount += 1;
+    }
   }
 
   const total = filtered.length;
@@ -968,6 +983,8 @@ export async function getAdminTransactions(filters: AdminTransactionsQueryInput)
       totalIn: round2(totalIn),
       totalOut: round2(totalOut),
       net: round2(totalIn - totalOut),
+      totalFailed: round2(totalFailed),
+      failedCount,
     },
     transfers: filtered.slice(startIndex, startIndex + limit),
     pagination: {
@@ -1348,6 +1365,16 @@ export async function approveSubscription(
     return updated;
   });
 
+  void emitToAdmins({
+    type: 'subscription_status_changed',
+    submissionId: id,
+    status: 'approved',
+    plan: submission.plan,
+    timestamp: new Date().toISOString(),
+  }).catch((err) =>
+    logger.warn('Failed to emit subscription_status_changed (approved) to admins', { id, err })
+  );
+
   // Post-commit email dispatch
   void dispatchSubscriptionApprovedEmail({
     toEmail: submission.email,
@@ -1410,6 +1437,16 @@ export async function rejectSubscription(
 
     return updated;
   });
+
+  void emitToAdmins({
+    type: 'subscription_status_changed',
+    submissionId: id,
+    status: 'rejected',
+    plan: submission.plan,
+    timestamp: new Date().toISOString(),
+  }).catch((err) =>
+    logger.warn('Failed to emit subscription_status_changed (rejected) to admins', { id, err })
+  );
 
   // Post-commit email dispatch
   void dispatchSubscriptionRejectedEmail({

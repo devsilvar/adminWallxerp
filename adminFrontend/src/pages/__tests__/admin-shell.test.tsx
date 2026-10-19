@@ -50,7 +50,7 @@ describe('Admin App Shell Smoke Test', () => {
     window.history.pushState({}, '', '/admin/login');
     render(<App />);
 
-    const heading = await screen.findByRole('heading', { name: /admin portal/i }, { timeout: 10000 });
+    const heading = await screen.findByRole('heading', { name: /operations/i }, { timeout: 10000 });
     expect(heading).toBeInTheDocument();
   });
 

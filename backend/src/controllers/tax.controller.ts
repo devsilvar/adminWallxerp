@@ -3,6 +3,7 @@ import { asyncHandler } from '@/middleware/errorHandler';
 import { AuthenticatedRequest } from '@/types';
 import {
   calculateTaxSchema,
+  finalizeReportSchema,
   taxReportsQuerySchema,
   dashboardQuerySchema,
   taxAnalyticsQuerySchema,
@@ -55,10 +56,12 @@ export const getReport = asyncHandler(async (req: AuthenticatedRequest, res: Res
 });
 
 export const finalize = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const options = finalizeReportSchema.parse(req.body || {});
   const report = await taxService.finalizeReport(
     req.user!.userId,
     req.params.businessId,
-    req.params.id
+    req.params.id,
+    options
   );
 
   res.status(200).json({
@@ -82,9 +85,37 @@ export const unfinalize = asyncHandler(async (req: AuthenticatedRequest, res: Re
   });
 });
 
+export const reset = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const report = await taxService.resetReport(
+    req.user!.userId,
+    req.params.businessId,
+    req.params.id
+  );
+
+  res.status(200).json({
+    success: true,
+    data: report,
+    message: 'Report reset to draft successfully',
+  });
+});
+
 export const dashboard = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { months } = dashboardQuerySchema.parse(req.query);
   const result = await taxService.getDashboard(
+    req.user!.userId,
+    req.params.businessId,
+    months
+  );
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
+export const dashboardBundle = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { months } = dashboardQuerySchema.parse(req.query);
+  const result = await taxService.getDashboardBundle(
     req.user!.userId,
     req.params.businessId,
     months
@@ -109,3 +140,19 @@ export const analytics = asyncHandler(async (req: AuthenticatedRequest, res: Res
     data: result,
   });
 });
+
+export const downloadTaxSlip = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { buffer, filename } = await taxService.downloadTaxSlip(
+    req.user!.userId,
+    req.params.businessId,
+    req.params.id
+  );
+
+  res.set({
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Content-Length': buffer.length.toString(),
+  });
+  res.send(buffer);
+});
+

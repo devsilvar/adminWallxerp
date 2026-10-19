@@ -73,6 +73,8 @@ model User {
   subscriptionSubmissions SubscriptionSubmission[]
   feedbacks               UserFeedback[]
   aiQueryLogs             AiQueryLog[]
+  broadcasts              Broadcast[]
+  userMessages            UserMessage[]
 
   @@index([email])
   @@index([phone])
@@ -122,31 +124,34 @@ model Business {
   payoutChangePermittedBy String?   @map("payout_change_permitted_by")
   payoutChangeUsedAt      DateTime? @map("payout_change_used_at")
   // Voucher bonus — store-wide default extra % credited on top-ups (0–10). 0 = off.
-  voucherBonusPct         Decimal   @default(0.00) @map("voucher_bonus_pct") @db.Decimal(5, 2)
-  createdAt               DateTime  @default(now()) @map("created_at")
-  updatedAt               DateTime  @updatedAt @map("updated_at")
-  merchantId              String    @unique @map("merchant_id")
+  voucherBonusPct            Decimal                 @default(0.00) @map("voucher_bonus_pct") @db.Decimal(5, 2)
+  // Per-business editable threshold for negative voucher deductions (manager <= threshold, owner > threshold)
+  voucherAdjustmentThreshold Decimal                 @default(50000.00) @map("voucher_adjustment_threshold") @db.Decimal(15, 2)
+  createdAt                  DateTime                @default(now()) @map("created_at")
+  updatedAt                  DateTime                @updatedAt @map("updated_at")
+  merchantId                 String                  @unique @map("merchant_id")
 
-  auditLogs          AuditLog[]
-  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  primaryForUsers    User[]              @relation("PrimaryBusiness")
-  customers          Customer[]
-  expenses           Expense[]
-  invoices           Invoice[]
-  taxReports         MonthlyTaxReport[]
-  reminders          Reminder[]
-  sales              SalesTransaction[]
-  payments           TaxPayment[]
-  statements         TaxStatement[]
-  settlementPayouts  SettlementPayout[]
-  walletTransactions WalletTransaction[]
-  credits            CustomerCredit[]
-  members            BusinessMember[]
+  auditLogs               AuditLog[]
+  user                    User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  primaryForUsers         User[]                   @relation("PrimaryBusiness")
+  customers               Customer[]
+  expenses                Expense[]
+  invoices                Invoice[]
+  taxReports              MonthlyTaxReport[]
+  reminders               Reminder[]
+  sales                   SalesTransaction[]
+  payments                TaxPayment[]
+  statements              TaxStatement[]
+  settlementPayouts       SettlementPayout[]
+  walletTransactions      WalletTransaction[]
+  credits                 CustomerCredit[]
+  members                 BusinessMember[]
   invitations             Invitation[]
   customerCards           CustomerCard[]
   subscriptionSubmissions SubscriptionSubmission[]
   feedbacks               UserFeedback[]
   aiQueryLogs             AiQueryLog[]
+  voucherLedgerRequests   VoucherLedgerRequest[]
 
   @@index([userId])
   @@index([taxId])
@@ -400,8 +405,9 @@ model Customer {
   business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   invoices   Invoice[]
   credits    CustomerCredit[]
-  card       CustomerCard?
-  sales      SalesTransaction[]
+  card                  CustomerCard?
+  sales                 SalesTransaction[]
+  voucherLedgerRequests VoucherLedgerRequest[]
 
   @@index([businessId, name])
   @@index([businessId, phone])
@@ -968,9 +974,10 @@ model CustomerCard {
   pinLockedUntil                 DateTime?            @map("pin_locked_until")
   createdAt                      DateTime             @default(now()) @map("created_at")
   updatedAt                      DateTime             @updatedAt @map("updated_at")
-  business                       Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer                       Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  business                       Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer                       Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
   ledgers                        CustomerCardLedger[]
+  voucherLedgerRequests          VoucherLedgerRequest[]
 
   @@index([businessId, cardCode])
   @@map("customer_cards")
@@ -978,25 +985,80 @@ model CustomerCard {
 
 /// Ledger entries for customer virtual store card balance mutations
 model CustomerCardLedger {
-  id            String              @id @default(uuid())
-  cardId        String              @map("card_id")
-  type          CardTransactionType
-  amount        Decimal             @db.Decimal(15, 2)
-  balanceBefore Decimal             @map("balance_before") @db.Decimal(15, 2)
-  balanceAfter  Decimal             @map("balance_after") @db.Decimal(15, 2)
-  receiptNumber String?             @map("receipt_number")
-  linkedSaleId  String?             @map("linked_sale_id")
-  performedBy   String?             @map("performed_by")
-  notes         String?
+  id                   String                @id @default(uuid())
+  cardId               String                @map("card_id")
+  type                 CardTransactionType
+  amount               Decimal               @db.Decimal(15, 2)
+  balanceBefore        Decimal               @map("balance_before") @db.Decimal(15, 2)
+  balanceAfter         Decimal               @map("balance_after") @db.Decimal(15, 2)
+  receiptNumber        String?               @map("receipt_number")
+  linkedSaleId         String?               @map("linked_sale_id")
+  performedBy          String?               @map("performed_by")
+  notes                String?
   // Bonus extra credited on top-ups — e.g. amount 10000, bonusPct 3 => bonusAmount 300, credited 10300
-  bonusAmount   Decimal?            @map("bonus_amount") @db.Decimal(15, 2)
-  bonusPct      Decimal?            @map("bonus_pct") @db.Decimal(5, 2)
-  createdAt     DateTime            @default(now()) @map("created_at")
-  card          CustomerCard        @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  bonusAmount          Decimal?              @map("bonus_amount") @db.Decimal(15, 2)
+  bonusPct             Decimal?              @map("bonus_pct") @db.Decimal(5, 2)
+  createdAt            DateTime              @default(now()) @map("created_at")
+  card                 CustomerCard          @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  voucherLedgerRequest VoucherLedgerRequest?
 
   @@index([cardId, createdAt(sort: Desc)])
   @@index([receiptNumber])
   @@map("customer_card_ledgers")
+}
+
+enum VoucherRequestStatus {
+  pending
+  awaiting_customer
+  verified
+  rejected
+  expired
+  applied
+}
+
+enum VoucherRequestKind {
+  top_up
+  adjustment
+}
+
+model VoucherLedgerRequest {
+  id                    String               @id @default(uuid())
+  businessId            String               @map("business_id")
+  customerId            String               @map("customer_id")
+  cardId                String?              @map("card_id")
+  kind                  VoucherRequestKind
+  amount                Decimal              @db.Decimal(15, 2)
+  bonusPct              Decimal?             @map("bonus_pct") @db.Decimal(5, 2)
+  bonusAmount           Decimal?             @map("bonus_amount") @db.Decimal(15, 2)
+  status                VoucherRequestStatus @default(pending)
+  source                String               @default("crm")
+  createdBy             String               @map("created_by")
+  authorizedBy          String?              @map("authorized_by")
+  authorizedAt          DateTime?            @map("authorized_at")
+  rejectedBy            String?              @map("rejected_by")
+  rejectedAt            DateTime?            @map("rejected_at")
+  rejectReason          String?              @map("reject_reason")
+  verificationTokenHash String?              @map("verification_token_hash")
+  verificationExpiresAt DateTime?            @map("verification_expires_at")
+  verifiedAt            DateTime?            @map("verified_at")
+  customerPhone         String?              @map("customer_phone")
+  customerEmail         String?              @map("customer_email")
+  customerName          String               @map("customer_name")
+  notes                 String?
+  ledgerId              String?              @unique @map("ledger_id")
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+
+  business Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  card     CustomerCard?       @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  ledger   CustomerCardLedger? @relation(fields: [ledgerId], references: [id])
+
+  @@index([businessId, status, createdAt(sort: Desc)])
+  @@index([businessId, kind, status])
+  @@index([customerId])
+  @@index([verificationTokenHash])
+  @@map("voucher_ledger_requests")
 }
 
 enum CardTransactionType {
@@ -1080,6 +1142,46 @@ model AiQueryLog {
 
   @@index([userId, createdAt])
   @@map("ai_query_logs")
+}
+
+model Broadcast {
+  id               String   @id @default(uuid())
+  title            String   @db.VarChar(200)
+  body             String   @db.Text
+  audienceType     String   @map("audience_type") // 'all' | 'user'
+  audienceUserId   String?  @map("audience_user_id") // plain string, NOT a relation
+  createdById      String   @map("created_by")
+  status           String   @default("sent")
+  totalRecipients  Int      @default(0) @map("total_recipients")
+  sentEmailCount   Int      @default(0) @map("sent_email_count")
+  failedEmailCount Int      @default(0) @map("failed_email_count")
+  createdAt        DateTime @default(now()) @map("created_at")
+  createdBy        User     @relation(fields: [createdById], references: [id])
+  messages         UserMessage[]
+
+  @@index([createdById, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("broadcasts")
+}
+
+model UserMessage {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  broadcastId String?   @map("broadcast_id")
+  title       String    @db.VarChar(200)
+  body        String    @db.Text
+  isRead      Boolean   @default(false) @map("is_read")
+  readAt      DateTime? @map("read_at")
+  emailStatus String    @default("pending") @map("email_status") // pending | sent | skipped | failed
+  emailError  String?   @map("email_error") @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  broadcast   Broadcast? @relation(fields: [broadcastId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead, createdAt(sort: Desc)])
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([broadcastId])
+  @@map("user_messages")
 }
 
 

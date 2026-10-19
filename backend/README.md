@@ -1,10 +1,11 @@
-# PayMyTax Backend API
+# WallXERP Backend API
 
 > SME Tax Calculation & Remittance Platform - Backend Service
 
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Node.js 20+
 - PostgreSQL 16+ (or Neon account)
 - npm or yarn
@@ -120,18 +121,21 @@ backend/
 ## 🔌 API Endpoints
 
 ### Health Check
+
 ```
 GET  /api/health          # Basic health check
 GET  /api/health/detailed # Detailed health with DB status
 ```
 
 ### API Info
+
 ```
 GET  /                    # API information
 GET  /api/v1              # API v1 information
 ```
 
 ### Coming Soon (Phase 1+)
+
 - Authentication (`/api/v1/auth`)
 - Business Management (`/api/v1/businesses`)
 - Sales Tracking (`/api/v1/businesses/:id/sales`)
@@ -157,11 +161,13 @@ npm run test:coverage
 See `.env.example` for all available configuration options.
 
 **Required for development:**
+
 - `DATABASE_URL` - PostgreSQL connection string
 - `JWT_ACCESS_SECRET` - JWT signing secret
 - `JWT_REFRESH_SECRET` - JWT refresh token secret
 
 **Optional (for full features):**
+
 - Paystack API keys
 - Resend email API key
 - Termii SMS API key
@@ -172,6 +178,7 @@ See `.env.example` for all available configuration options.
 ## 📊 Database Schema
 
 ### Core Tables
+
 - `users` - User accounts
 - `businesses` - Business profiles
 - `sales_transactions` - Sales records
@@ -183,6 +190,7 @@ See `.env.example` for all available configuration options.
 - `reminders` - Tax deadline notifications
 
 ### Tax Calculation Formula
+
 ```
 Gross Profit = Total Sales - Total Expenses
 Tax Payable = Gross Profit × 7.5%

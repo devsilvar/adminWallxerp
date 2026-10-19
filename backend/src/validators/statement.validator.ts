@@ -13,5 +13,8 @@ export const periodStatementSchema = z.object({
   endYear: asNumber({ min: 2020, max: 2100, int: true }),
 });
 
+export const pnlStatementSchema = monthlyStatementSchema;
+
 export type MonthlyStatementInput = z.infer<typeof monthlyStatementSchema>;
 export type PeriodStatementInput = z.infer<typeof periodStatementSchema>;
+export type PnlStatementInput = z.infer<typeof pnlStatementSchema>;

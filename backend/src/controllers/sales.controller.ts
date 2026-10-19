@@ -6,6 +6,7 @@ import {
   updateSaleSchema,
   salesQuerySchema,
   salesSummaryQuerySchema,
+  salesDailyQuerySchema,
   salesOverviewQuerySchema,
 } from '@/validators/sales.validator';
 import * as salesService from '@/services/sales.service';
@@ -42,6 +43,7 @@ export const create = asyncHandler(async (req: AuthenticatedRequest, res: Respon
   res.status(201).json({
     success: true,
     data: sale,
+    meta: (sale as any).meta,
     message: 'Sale recorded successfully',
   });
 });
@@ -118,6 +120,20 @@ export const summary = asyncHandler(async (req: AuthenticatedRequest, res: Respo
   });
 });
 
+export const daily = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { date } = salesDailyQuerySchema.parse(req.query);
+  const result = await salesService.getDailySummary(
+    req.user!.userId,
+    req.params.businessId,
+    date
+  );
+
+  res.status(200).json({
+    success: true,
+    data: result,
+  });
+});
+
 
 export const getUnverified = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const query = {
@@ -138,13 +154,19 @@ export const getUnverified = asyncHandler(async (req: AuthenticatedRequest, res:
 });
 
 export const verify = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { classification = 'sale' } = req.body;
+  const { classification = 'Product Sale', customerName, description, targetBusinessId } = req.body;
 
   const sale = await salesService.verifySale(
     req.user!.userId,
     req.params.businessId,
     req.params.id,
-    classification
+    classification || 'Product Sale',
+    undefined,
+    {
+      customerName: typeof customerName === 'string' ? customerName : undefined,
+      description: typeof description === 'string' ? description : undefined,
+      targetBusinessId: typeof targetBusinessId === 'string' ? targetBusinessId : undefined,
+    }
   );
 
   res.status(200).json({
@@ -155,20 +177,23 @@ export const verify = asyncHandler(async (req: AuthenticatedRequest, res: Respon
 });
 
 export const reclassify = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-  const { classification } = req.body;
+  const { classification, category, targetBusinessId } = req.body;
 
-  if (!classification || typeof classification !== 'string') {
-    return res.status(400).json({
-      success: false,
-      message: 'Classification is required',
-    });
-  }
+  // Resolve classification: support explicit classification OR category fallback (e.g. 'transfer')
+  const resolvedClassification =
+    classification ||
+    (category === 'transfer' ? 'Transfer Between Accounts' : undefined) ||
+    'Transfer Between Accounts';
 
   const sale = await salesService.reclassifySale(
     req.user!.userId,
     req.params.businessId,
     req.params.id,
-    classification
+    resolvedClassification,
+    undefined,
+    {
+      targetBusinessId: typeof targetBusinessId === 'string' ? targetBusinessId : undefined,
+    }
   );
 
   res.status(200).json({
@@ -177,3 +202,28 @@ export const reclassify = asyncHandler(async (req: AuthenticatedRequest, res: Re
     message: 'Transaction reclassified successfully',
   });
 });
+
+export const reassign = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { targetBusinessId } = req.body;
+
+  if (!targetBusinessId || typeof targetBusinessId !== 'string') {
+    return res.status(400).json({
+      success: false,
+      message: 'targetBusinessId is required',
+    });
+  }
+
+  const sale = await salesService.reassignSaleBusiness(
+    req.user!.userId,
+    req.params.businessId,
+    req.params.id,
+    targetBusinessId
+  );
+
+  res.status(200).json({
+    success: true,
+    data: sale,
+    message: 'Sale successfully reassigned to target business',
+  });
+});
+

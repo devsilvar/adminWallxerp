@@ -150,6 +150,24 @@ export const sendByWhatsApp = asyncHandler(async (req: AuthenticatedRequest, res
   });
 });
 
+export const sendByEmail = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const result = await invoiceService.sendInvoiceByEmail(
+    req.user!.userId,
+    req.params.businessId,
+    req.params.id,
+  );
+
+  res.status(200).json({
+    success: true,
+    data: result.invoice,
+    message: `Invoice sent to ${result.to}`,
+    meta: {
+      delivered: result.delivered,
+      to: result.to,
+    },
+  });
+});
+
 export const cancel = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const input = cancelInvoiceSchema.parse(req.body ?? {});
   const invoice = await invoiceService.cancelInvoice(
@@ -186,4 +204,19 @@ export const downloadPublicPdf = asyncHandler(async (req: AuthenticatedRequest, 
     'Cache-Control': 'private, max-age=300',
   });
   res.send(buffer);
+});
+
+export const reconcileDva = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const invoice = await invoiceService.reconcileDvaTransferToInvoice(
+    req.user!.userId,
+    req.params.businessId,
+    req.params.id,
+    req.params.saleId,
+  );
+
+  res.status(200).json({
+    success: true,
+    data: invoice,
+    message: 'DVA transfer matched to invoice successfully',
+  });
 });

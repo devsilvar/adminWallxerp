@@ -87,6 +87,18 @@ import {
   generateVoucherDeductionText,
   VoucherDeductionEmailData,
 } from '@/lib/email/templates/voucher-deduction';
+import {
+  generateVoucherVerificationHtml,
+  generateVoucherVerificationText,
+} from '@/lib/email/templates/voucher-verification';
+import {
+  generateVoucherAdjustmentNotificationHtml,
+  generateVoucherAdjustmentNotificationText,
+} from '@/lib/email/templates/voucher-adjustment-notification';
+import {
+  generateBroadcastHtml,
+  generateBroadcastText,
+} from '@/lib/email/templates/broadcast';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -1636,6 +1648,185 @@ export async function dispatchVoucherDeductionEmail(
     });
   }
 }
+
+/**
+ * Dispatches an individual broadcast or direct message notification email.
+ * Safe wrapper around sendEmail with WallX branding.
+ */
+export async function dispatchBroadcastEmail(to: string, title: string, body: string): Promise<void> {
+  try {
+    const ctaUrl = `${getFrontendBaseUrl()}/messages`;
+    await sendEmail({
+      to,
+      subject: `[WallX] ${title}`,
+      html: generateBroadcastHtml({ title, body, ctaUrl }),
+      text: generateBroadcastText({ title, body, ctaUrl }),
+    });
+  } catch (error) {
+    logger.warn('Failed to dispatch broadcast email (non-critical)', {
+      to,
+      title,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export interface DispatchVoucherVerificationInput {
+  businessId: string;
+  customerId: string;
+  requestId: string;
+  amount: number;
+  bonusAmount?: number | null;
+  bonusPct?: number | null;
+  verifyUrl: string;
+  toEmail?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+}
+
+export async function dispatchVoucherVerificationEmail(
+  input: DispatchVoucherVerificationInput
+): Promise<{ delivered: boolean; waUrl?: string }> {
+  try {
+    let toEmail = input.toEmail?.trim();
+    let customerName = input.customerName?.trim();
+    let customerPhone = input.customerPhone?.trim();
+
+    if (!toEmail || !customerName) {
+      const customer = await prisma.customer.findUnique({
+        where: { id: input.customerId },
+        select: { email: true, name: true, phone: true },
+      });
+      if (customer) {
+        toEmail = customer.email || undefined;
+        customerName = customer.name || undefined;
+        customerPhone = customer.phone || undefined;
+      }
+    }
+
+    const business = await prisma.business.findUnique({
+      where: { id: input.businessId },
+      select: { businessName: true, user: { select: { phone: true } } },
+    });
+
+    const businessName = business?.businessName || 'Your Store';
+    const amountFormatted = formatNaira(input.amount);
+    const bonusFormatted = input.bonusAmount ? formatNaira(input.bonusAmount) : null;
+    const totalFormatted = formatNaira(input.amount + (input.bonusAmount || 0));
+
+    // Construct WhatsApp share link for staff fallback
+    const waText = encodeURIComponent(
+      `Hello ${customerName || 'Valued Customer'},\n\nA voucher credit of ${amountFormatted} at ${businessName} has been authorized.\nPlease confirm this was requested by visiting: ${input.verifyUrl}`
+    );
+    const waUrl = customerPhone
+      ? `https://wa.me/${customerPhone.replace(/\D/g, '')}?text=${waText}`
+      : `https://wa.me/?text=${waText}`;
+
+    if (!toEmail) {
+      logger.info('No email for voucher verification; generated WhatsApp fallback link', {
+        requestId: input.requestId,
+        waUrl,
+      });
+      return { delivered: false, waUrl };
+    }
+
+    const subject = `Action Required: Confirm your voucher credit of ${amountFormatted} at ${businessName}`;
+    const emailData = {
+      customerName: customerName || 'Valued Customer',
+      businessName,
+      amountFormatted,
+      bonusAmountFormatted: bonusFormatted,
+      bonusPct: input.bonusPct,
+      totalFormatted,
+      verifyUrl: input.verifyUrl,
+      customerPhone,
+      businessPhone: business?.user?.phone || null,
+    };
+    const html = generateVoucherVerificationHtml(emailData);
+    const text = generateVoucherVerificationText(emailData);
+
+    await sendEmail({
+      to: toEmail,
+      subject,
+      html,
+      text,
+    });
+
+    return { delivered: true, waUrl };
+  } catch (error) {
+    logger.warn('Failed to dispatch voucher verification email (non-critical)', {
+      error: error instanceof Error ? error.message : String(error),
+      requestId: input.requestId,
+      customerId: input.customerId,
+    });
+    return { delivered: false };
+  }
+}
+
+export interface DispatchVoucherAdjustmentNotificationInput {
+  businessId: string;
+  customerId: string;
+  amount: number;
+  reason: string;
+  toEmail?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+}
+
+export async function dispatchVoucherAdjustmentNotificationEmail(
+  input: DispatchVoucherAdjustmentNotificationInput
+): Promise<void> {
+  try {
+    let toEmail = input.toEmail?.trim();
+    let customerName = input.customerName?.trim();
+
+    if (!toEmail || !customerName) {
+      const customer = await prisma.customer.findUnique({
+        where: { id: input.customerId },
+        select: { email: true, name: true, phone: true },
+      });
+      if (!customer?.email) return;
+      toEmail = customer.email;
+      customerName = customer.name;
+    }
+
+    const business = await prisma.business.findUnique({
+      where: { id: input.businessId },
+      select: { businessName: true, user: { select: { phone: true } } },
+    });
+
+    const businessName = business?.businessName || 'Your Store';
+    const businessPhone = business?.user?.phone || undefined;
+    const formattedAmount = formatNaira(Math.abs(input.amount));
+
+    const subject = `Voucher Balance Adjustment: ${businessName}`;
+    const adjData = {
+      customerName: customerName || 'Valued Customer',
+      businessName,
+      amount: input.amount,
+      amountFormatted: formattedAmount,
+      reason: input.reason,
+      customerPhone: input.customerPhone,
+      businessPhone,
+    };
+    const html = generateVoucherAdjustmentNotificationHtml(adjData);
+    const text = generateVoucherAdjustmentNotificationText(adjData);
+
+    await sendEmail({
+      to: toEmail,
+      subject,
+      html,
+      text,
+    });
+  } catch (error) {
+    logger.warn('Failed to dispatch voucher adjustment notification email', {
+      error: error instanceof Error ? error.message : String(error),
+      customerId: input.customerId,
+      businessId: input.businessId,
+    });
+  }
+}
+
 
 
 

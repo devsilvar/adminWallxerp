@@ -6,6 +6,7 @@ import {
   listCustomersQuerySchema,
   listCardActivityQuerySchema,
   quickCreateCustomerSchema,
+  quickCreateCustomerWithVoucherSchema,
   topUpCardSchema,
   changeCreditSchema,
   adjustCardSchema,
@@ -86,6 +87,22 @@ export const quickCreate = asyncHandler(
   }
 );
 
+export const quickCreateWithVoucher = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const data = quickCreateCustomerWithVoucherSchema.parse(req.body);
+    const result = await customerCardService.quickCreateCustomerWithVoucher(
+      req.user!.userId,
+      req.params.businessId,
+      data
+    );
+    res.status(201).json({
+      success: true,
+      data: result,
+      message: 'Customer and virtual card created successfully',
+    });
+  }
+);
+
 export const getCard = asyncHandler(
   async (req: AuthenticatedRequest, res: Response) => {
     const result = await customerCardService.getCustomerCard(
@@ -103,12 +120,22 @@ export const getCard = asyncHandler(
 export const topUp = asyncHandler(
   async (req: AuthenticatedRequest, res: Response) => {
     const data = topUpCardSchema.parse(req.body);
+    const direct = req.query.direct === 'true';
     const result = await customerCardService.topUpCard(
       req.user!.userId,
       req.params.businessId,
       req.params.customerId,
-      data
+      data,
+      { direct }
     );
+    if ('status' in result && result.status === 'pending') {
+      res.status(202).json({
+        success: true,
+        ...result,
+        message: 'Top-up request queued for manager authorization',
+      });
+      return;
+    }
     res.status(200).json({
       success: true,
       data: result,

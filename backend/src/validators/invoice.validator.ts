@@ -11,6 +11,7 @@ export const createInvoiceSchema = z
   .object({
     // Customer — inline fields only, no saved customer records
     customerName: z.string().min(1, 'Customer name is required').max(200).trim(),
+    customerId: z.string().uuid().optional(),
     customerEmail: z.string().email().max(200).trim().optional().or(z.literal('')),
     customerPhone: z.string().max(30).trim().optional().or(z.literal('')),
     customerAddress: z.string().max(500).trim().optional().or(z.literal('')),
@@ -20,7 +21,7 @@ export const createInvoiceSchema = z
     issueDate: z.coerce.date(),
     dueDate: z.coerce.date(),
 
-    // Money — VAT exclusive (shown separately per FIRS standard)
+    // Money — VAT exclusive (shown separately per NRS standard)
     vatRate: z.number().min(0).max(100).default(7.5),
     discount: z.number().nonnegative().default(0),
     currency: z.string().length(3).default('NGN'),
@@ -40,6 +41,7 @@ export const createInvoiceSchema = z
 export const updateInvoiceSchema = z
   .object({
     customerName: z.string().min(1).max(200).trim().optional(),
+    customerId: z.string().uuid().optional(),
     customerEmail: z.string().email().max(200).trim().optional().or(z.literal('')),
     customerPhone: z.string().max(30).trim().optional().or(z.literal('')),
     customerAddress: z.string().max(500).trim().optional().or(z.literal('')),

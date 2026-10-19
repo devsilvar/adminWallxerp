@@ -36,6 +36,7 @@ router.delete('/:id/logo', businessController.deleteLogo);
 
 // Voucher bonus — business-wide default extra % on top-ups
 router.put('/:id/settings/voucher-bonus', businessController.updateVoucherBonus);
+router.put('/:id/settings/voucher-adjustment-threshold', businessController.updateVoucherAdjustmentThreshold);
 
 export default router;
 

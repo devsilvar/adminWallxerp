@@ -117,12 +117,7 @@ export interface InitiateTransferResult {
   amount: number;
 }
 
-export interface VerifyTransferResult {
-  status: 'success' | 'failed' | 'reversed' | 'otp' | 'pending';
-  failureReason?: string;
-}
-
-// ─── Customer Validation Types ───────────────────────────────
+// Paystack moved from `type:'bvn'` to `type:'bank_account'` validation —
 // the new shape requires both the customer's BVN *and* a bank account on
 // their name (account_number + bank_code) so Paystack can cross-check.
 // Names are sourced from `business.ownerName`; bank/account come from a
@@ -156,6 +151,23 @@ export interface BankRecord {
   active: boolean;
 }
 
+export interface VerifyTransferResult {
+  reference: string;
+  status: string;
+  transferCode?: string;
+  amount?: number;
+  gatewayResponse?: string;
+}
+
+// ─── Gateway Balance / Solvency Oracle Types ────────────────
+
+/** Balance item returned by the payment gateway. Amounts are in major currency unit (Naira, not kobo). */
+export interface GatewayBalanceItem {
+  currency: string;
+  /** Available balance in major currency unit (e.g. Naira). Kobo→Naira conversion happens inside the provider. */
+  balanceNaira: number;
+}
+
 // ─── Provider Interface ─────────────────────────────────────
 
 export interface PaymentProvider {
@@ -185,5 +197,8 @@ export interface PaymentProvider {
   ): Promise<SplitDedicatedAccountResult>;
   createTransferRecipient(params: CreateTransferRecipientParams): Promise<CreateTransferRecipientResult>;
   initiateTransfer(params: InitiateTransferParams): Promise<InitiateTransferResult>;
-  verifyTransfer(reference: string): Promise<VerifyTransferResult>;
+  verifyTransfer(reference: string, transferCode?: string): Promise<VerifyTransferResult>;
+  /** Query available gateway balance per currency. Used by the solvency oracle. */
+  getBalance(): Promise<GatewayBalanceItem[]>;
 }
+

@@ -1,9 +1,11 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '@/types';
+import { config } from '@/config';
 import * as settlementService from '@/services/settlement.service';
 import {
   withdrawBalanceSchema,
   toggleAutoSplitSchema,
+  toggleAutoPayoutSchema,
   payoutHistoryQuerySchema,
   connectSettlementSchema,
   resolveSettlementSchema,
@@ -14,7 +16,13 @@ export async function getPayoutPreview(req: AuthenticatedRequest, res: Response)
     req.user!.userId,
     req.params.businessId
   );
-  res.json({ success: true, data: result });
+  res.json({
+    success: true,
+    data: result,
+    meta: {
+      regulatory: config.regulatory,
+    },
+  });
 }
 
 export async function resolveAccount(req: AuthenticatedRequest, res: Response) {
@@ -52,6 +60,21 @@ export async function toggleAutoSplit(req: AuthenticatedRequest, res: Response) 
   );
   res.json({ success: true, data: result, message: 'Auto-split settings updated successfully' });
 }
+
+export async function toggleAutoPayout(req: AuthenticatedRequest, res: Response) {
+  const input = toggleAutoPayoutSchema.parse(req.body);
+  const result = await settlementService.userToggleAutoPayout(
+    req.user!.userId,
+    req.params.businessId,
+    input
+  );
+  res.json({
+    success: true,
+    data: result,
+    message: `Automatic payouts ${input.enabled ? 'enabled' : 'disabled'} successfully`,
+  });
+}
+
 
 export async function listPayoutHistory(req: AuthenticatedRequest, res: Response) {
   const query = payoutHistoryQuerySchema.parse(req.query);

@@ -14,6 +14,7 @@ export const registerSchema = z.object({
     .string()
     .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format')
     .optional(),
+  requestedPlan: z.enum(['free', 'starter', 'business', 'scale']).optional(),
 });
 
 export const loginSchema = z.object({
@@ -57,9 +58,19 @@ export const updateMeSchema = z
     phone: z
       .string()
       .trim()
-      .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format'),
+      .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format')
+      .optional(),
+    fullName: z
+      .string()
+      .trim()
+      .min(2, 'Name must be at least 2 characters')
+      .max(100)
+      .optional(),
   })
-  .strict(); // Reject unknown keys — keeps the surface tight.
+  .strict()
+  .refine((data) => data.phone !== undefined || data.fullName !== undefined, {
+    message: 'At least one of phone or fullName must be provided',
+  });
 
 export const resetPasswordSchema = z.object({
   token: z.string().min(1, 'Reset token is required'),
@@ -73,9 +84,24 @@ export const resetPasswordSchema = z.object({
     ),
 });
 
-export const revealBvnSchema = z.object({
-  pin: z.string().regex(/^\d{4}$/, 'Transaction PIN must be exactly 4 digits').optional(),
-  stepUpToken: z.string().min(20, 'Invalid step-up token').optional(),
+export const updateBvnSchema = z.object({
+  bvn: z
+    .string()
+    .trim()
+    .regex(/^\d{11,12}$/, 'BVN must be 11 or 12 digits'),
+  stepUpToken: z.string().min(1, 'Step-up token is required'),
+});
+
+export const verifyEmailSchema = z.object({
+  token: z.string().min(1, 'Verification token is required'),
+});
+
+export const resendVerificationSchema = z.object({
+  email: z.string().email('Invalid email address').toLowerCase().trim(),
+});
+
+export const updatePrimaryBusinessSchema = z.object({
+  primaryBusinessId: z.string().uuid('Invalid business ID format').nullable(),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
@@ -85,4 +111,9 @@ export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
-export type RevealBvnInput = z.infer<typeof revealBvnSchema>;
+export type UpdateBvnInput = z.infer<typeof updateBvnSchema>;
+export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
+export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
+export type UpdatePrimaryBusinessInput = z.infer<typeof updatePrimaryBusinessSchema>;
+
+

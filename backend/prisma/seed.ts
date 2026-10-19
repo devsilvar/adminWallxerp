@@ -38,19 +38,60 @@ async function main() {
   // =================================
   console.log('🔑 Creating admin user...');
 
+  const defaultPinHash = await hashPassword('1234');
+
   const adminUser = await prisma.user.upsert({
     where: { email: 'admin@paymytax.com' },
-    update: {},
+    update: {
+      bvn: '22222222221',
+      bvnVerifiedAt: new Date(),
+      transactionPin: defaultPinHash,
+      pinSetAt: new Date(),
+    },
     create: {
       email: 'admin@paymytax.com',
       passwordHash: await hashPassword('Admin@123456'),
       role: 'admin',
+      bvn: '22222222221',
+      bvnVerifiedAt: new Date(),
+      transactionPin: defaultPinHash,
+      pinSetAt: new Date(),
       isVerified: true,
       isActive: true,
     },
   });
 
   console.log(`✅ Created admin user: ${adminUser.email}\n`);
+
+  // Additional platform admin (owner-requested)
+  const yusufAdmin = await prisma.user.upsert({
+    where: { email: 'yusuf@devrecruit.org' },
+    update: {
+      role: 'admin',
+      isVerified: true,
+      isActive: true,
+      bvn: '22222222221',
+      bvnVerifiedAt: new Date(),
+      transactionPin: defaultPinHash,
+      pinSetAt: new Date(),
+    },
+    create: {
+      email: 'yusuf@devrecruit.org',
+      passwordHash: await hashPassword('Admin@123456'),
+      role: 'admin',
+      bvn: '22222222221',
+      bvnVerifiedAt: new Date(),
+      transactionPin: defaultPinHash,
+      pinSetAt: new Date(),
+      isVerified: true,
+      isActive: true,
+    },
+  });
+
+  console.log(`✅ Ensured admin user: ${yusufAdmin.email} (role=admin)\n`);
+
+  // Clean up earlier typo (devreruit → devrecruit) if it was seeded before
+  await prisma.user.deleteMany({ where: { email: 'yusuf@devreruit.org' } });
 
   // =================================
   // 1. CREATE TEST USERS
@@ -59,11 +100,20 @@ async function main() {
 
   const testUser1 = await prisma.user.upsert({
     where: { email: 'john@example.com' },
-    update: {},
+    update: {
+      bvn: '22222222221',
+      bvnVerifiedAt: new Date(),
+      transactionPin: defaultPinHash,
+      pinSetAt: new Date(),
+    },
     create: {
       email: 'john@example.com',
       passwordHash: await hashPassword('Password123!'),
       phone: '+2348012345678',
+      bvn: '22222222221',
+      bvnVerifiedAt: new Date(),
+      transactionPin: defaultPinHash,
+      pinSetAt: new Date(),
       isVerified: true,
       isActive: true,
     },
@@ -71,11 +121,20 @@ async function main() {
 
   const testUser2 = await prisma.user.upsert({
     where: { email: 'jane@example.com' },
-    update: {},
+    update: {
+      bvn: '22222222222',
+      bvnVerifiedAt: new Date(),
+      transactionPin: defaultPinHash,
+      pinSetAt: new Date(),
+    },
     create: {
       email: 'jane@example.com',
       passwordHash: await hashPassword('Password123!'),
       phone: '+2348087654321',
+      bvn: '22222222222',
+      bvnVerifiedAt: new Date(),
+      transactionPin: defaultPinHash,
+      pinSetAt: new Date(),
       isVerified: true,
       isActive: true,
     },
@@ -126,6 +185,29 @@ async function main() {
 
   console.log(`✅ Created businesses: ${business1.businessName}, ${business2.businessName}\n`);
 
+  // Ensure owner memberships exist for seeded businesses
+  await prisma.businessMember.upsert({
+    where: { businessId_userId: { businessId: business1.id, userId: testUser1.id } },
+    update: {},
+    create: {
+      businessId: business1.id,
+      userId: testUser1.id,
+      role: 'owner',
+      isActive: true,
+    },
+  });
+
+  await prisma.businessMember.upsert({
+    where: { businessId_userId: { businessId: business2.id, userId: testUser2.id } },
+    update: {},
+    create: {
+      businessId: business2.id,
+      userId: testUser2.id,
+      role: 'owner',
+      isActive: true,
+    },
+  });
+
   // =================================
   // 3. CREATE SAMPLE SALES TRANSACTIONS
   // =================================
@@ -136,7 +218,7 @@ async function main() {
     { amount: 200000, source: 'bank_transfer', description: 'Bank transfer payment', date: new Date('2026-03-10') },
     { amount: 75000, source: 'paycode', description: 'PayCode transaction', date: new Date('2026-03-15') },
     { amount: 180000, source: 'pos', description: 'POS sales - Week 3', date: new Date('2026-03-18') },
-    { amount: 95000, source: 'manual', description: 'Cash sales', date: new Date('2026-03-20') },
+    { amount: 95000, source: 'cash', description: 'Cash sales', date: new Date('2026-03-20') },
     { amount: 45000, source: 'cash', description: 'Walk-in cash payment', date: new Date('2026-03-22') },
     { amount: 250000, source: 'invoice', description: 'Invoice INV-2026-042 - settled via bank transfer', date: new Date('2026-03-25') },
   ];
@@ -155,7 +237,29 @@ async function main() {
     });
   }
 
-  console.log(`✅ Created ${salesData.length} sales transactions\n`);
+  // Sample Basket sale with line items
+  await prisma.salesTransaction.create({
+    data: {
+      businessId: business1.id,
+      amount: 12500,
+      source: 'pos',
+      status: 'confirmed',
+      description: 'Counter sale — 3 items',
+      transactionDate: new Date('2026-03-24'),
+      createdBy: testUser1.id,
+      items: {
+        createMany: {
+          data: [
+            { name: 'Rice 5kg bag', quantity: 2, unitPrice: 3500, lineTotal: 7000, sortOrder: 0 },
+            { name: 'Vegetable Oil 1L', quantity: 1, unitPrice: 4000, lineTotal: 4000, sortOrder: 1 },
+            { name: 'Seasoning cubes pack', quantity: 3, unitPrice: 500, lineTotal: 1500, sortOrder: 2 },
+          ],
+        },
+      },
+    },
+  });
+
+  console.log(`✅ Created ${salesData.length + 1} sales transactions (including basket sale)\n`);
 
   // =================================
   // 4. CREATE SAMPLE EXPENSES
@@ -165,10 +269,18 @@ async function main() {
   const expensesData = [
     { category: 'rent', description: 'Shop rent - March', amount: 50000, date: new Date('2026-03-01') },
     { category: 'inventory', description: 'Stock purchase', amount: 200000, date: new Date('2026-03-05') },
+    { category: 'inventory', description: '12 crates of eggs', amount: 42000, quantity: 12, unitPrice: 3500, date: new Date('2026-03-08') },
     { category: 'utility', description: 'Electricity bill', amount: 15000, date: new Date('2026-03-07') },
     { category: 'salary', description: 'Staff salaries', amount: 80000, date: new Date('2026-03-15') },
     { category: 'fuel', description: 'Generator fuel', amount: 10000, date: new Date('2026-03-12') },
     { category: 'marketing', description: 'Facebook ads', amount: 5000, date: new Date('2026-03-10') },
+    // NEW CATEGORIES
+    { category: 'subscription', description: 'Microsoft Office 365 Business Standard', amount: 15000, date: new Date('2026-03-15') },
+    { category: 'insurance', description: 'Business premises insurance premium', amount: 85000, date: new Date('2026-03-05') },
+    { category: 'professional_fees', description: 'Annual tax audit by chartered accountant', amount: 120000, date: new Date('2026-03-20') },
+    { category: 'bank_charges', description: 'GTBank transaction fees (March)', amount: 8500, date: new Date('2026-03-31') },
+    { category: 'tax_permit', description: 'Lagos State business premises permit renewal', amount: 25000, isDeductible: false, date: new Date('2026-03-10') },
+    { category: 'gift', description: 'Corporate calendars for top 20 customers', amount: 45000, date: new Date('2026-03-25') },
   ];
 
   for (const expense of expensesData) {
@@ -178,7 +290,10 @@ async function main() {
         category: expense.category as any,
         description: expense.description,
         amount: expense.amount,
+        quantity: (expense as any).quantity ?? 1,
+        unitPrice: (expense as any).unitPrice ?? expense.amount,
         expenseDate: expense.date,
+        isDeductible: (expense as any).isDeductible ?? true,
         createdBy: testUser1.id,
       },
     });
@@ -222,19 +337,207 @@ async function main() {
   console.log('✅ Created tax report for March 2026\n');
 
   // =================================
+  // 6. CREATE SAMPLE CUSTOMER CREDITS / DEBTORS (Accrual-Basis)
+  // =================================
+  console.log('📖 Creating sample customer credits (Debtors Book — accrual-basis)...');
+
+  const now = new Date();
+  const pastDueDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const dueSoonDate = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+  const dueLaterDate = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
+  const issuedDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+  // Check if credits already exist to avoid duplicate seeding
+  const existingCredits = await prisma.customerCredit.count({ where: { businessId: business1.id } });
+  if (existingCredits === 0) {
+    // 1. Overdue debtor — origin sale created at credit issuance
+    const overdueSale = await prisma.salesTransaction.create({
+      data: {
+        businessId: business1.id,
+        amount: 210000,
+        source: 'credit',
+        status: 'confirmed',
+        isTaxable: true,
+        description: 'Credit sale to Chukwudi Electronics Ltd — Supply of 50 cartons of power inverters on credit',
+        customerName: 'Chukwudi Electronics Ltd',
+        transactionDate: issuedDate,
+        createdBy: testUser1.id,
+        finalClassification: 'Credit Sale',
+        metadata: { creditSale: true },
+      },
+    });
+
+    await prisma.customerCredit.create({
+      data: {
+        businessId: business1.id,
+        customerName: 'Chukwudi Electronics Ltd',
+        customerPhone: '08031234567',
+        customerEmail: 'chukwudi@example.com',
+        description: 'Supply of 50 cartons of power inverters on credit',
+        totalAmount: 210000,
+        amountPaid: 0,
+        balance: 210000,
+        issueDate: issuedDate,
+        dueDate: pastDueDate,
+        status: 'overdue',
+        guarantorName: 'Chief Emeka Okonkwo',
+        guarantorPhone: '08099887766',
+        notes: 'Customer promised payment upon selling goods at Alaba market.',
+        createdBy: testUser1.id,
+        linkedSaleId: overdueSale.id,
+      },
+    });
+
+    // 2. Partially paid debtor — origin sale at credit creation, repayment is debtor-only
+    const partialSale = await prisma.salesTransaction.create({
+      data: {
+        businessId: business1.id,
+        amount: 85000,
+        source: 'credit',
+        status: 'confirmed',
+        isTaxable: true,
+        description: 'Credit sale to Mama Nkechi Provisions Store — Wholesale grains & vegetable oil delivery',
+        customerName: 'Mama Nkechi Provisions Store',
+        transactionDate: issuedDate,
+        createdBy: testUser1.id,
+        finalClassification: 'Credit Sale',
+        metadata: { creditSale: true },
+      },
+    });
+
+    const partialCredit = await prisma.customerCredit.create({
+      data: {
+        businessId: business1.id,
+        customerName: 'Mama Nkechi Provisions Store',
+        customerPhone: '08023456789',
+        description: 'Wholesale grains & vegetable oil delivery',
+        totalAmount: 85000,
+        amountPaid: 35000,
+        balance: 50000,
+        issueDate: issuedDate,
+        dueDate: dueSoonDate,
+        status: 'partially_paid',
+        notes: 'Partially settled ₦35,000 via cash on delivery; remaining ₦50,000 due this week.',
+        createdBy: testUser1.id,
+        linkedSaleId: partialSale.id,
+      },
+    });
+
+    // Repayment — debtor ledger only, NO linked sale (accrual-basis)
+    await prisma.creditPayment.create({
+      data: {
+        creditId: partialCredit.id,
+        amount: 35000,
+        paymentDate: issuedDate,
+        paymentType: 'cash',
+        isFullPayment: false,
+        linkedSaleId: null,
+        notes: 'Initial cash deposit upon delivery',
+      },
+    });
+
+    // 3. Unpaid debtor (due in 10 days) — origin sale at credit creation
+    const unpaidSale = await prisma.salesTransaction.create({
+      data: {
+        businessId: business1.id,
+        amount: 120000,
+        source: 'credit',
+        status: 'confirmed',
+        isTaxable: true,
+        description: 'Credit sale to Alhaji Musa Garba & Sons — Supply of 20 bags of fertilizer and farm tools',
+        customerName: 'Alhaji Musa Garba & Sons',
+        transactionDate: issuedDate,
+        createdBy: testUser1.id,
+        finalClassification: 'Credit Sale',
+        metadata: { creditSale: true },
+      },
+    });
+
+    await prisma.customerCredit.create({
+      data: {
+        businessId: business1.id,
+        customerName: 'Alhaji Musa Garba & Sons',
+        customerPhone: '08145678901',
+        description: 'Supply of 20 bags of fertilizer and farm tools',
+        totalAmount: 120000,
+        amountPaid: 0,
+        balance: 120000,
+        issueDate: issuedDate,
+        dueDate: dueLaterDate,
+        status: 'unpaid',
+        notes: 'Payment scheduled for harvest sales next week.',
+        createdBy: testUser1.id,
+        linkedSaleId: unpaidSale.id,
+      },
+    });
+
+    // 4. Fully settled debtor — origin sale at creation, repayment is debtor-only
+    const paidSale = await prisma.salesTransaction.create({
+      data: {
+        businessId: business1.id,
+        amount: 45000,
+        source: 'credit',
+        status: 'confirmed',
+        isTaxable: true,
+        description: 'Credit sale to Folake Balogun Fashion House — Bulk textile material supply',
+        customerName: 'Folake Balogun Fashion House',
+        transactionDate: issuedDate,
+        createdBy: testUser1.id,
+        finalClassification: 'Credit Sale',
+        metadata: { creditSale: true },
+      },
+    });
+
+    const paidCredit = await prisma.customerCredit.create({
+      data: {
+        businessId: business1.id,
+        customerName: 'Folake Balogun Fashion House',
+        customerPhone: '08055667788',
+        description: 'Bulk textile material supply',
+        totalAmount: 45000,
+        amountPaid: 45000,
+        balance: 0,
+        issueDate: issuedDate,
+        dueDate: now,
+        status: 'paid',
+        notes: 'Paid in full via bank transfer.',
+        createdBy: testUser1.id,
+        linkedSaleId: paidSale.id,
+      },
+    });
+
+    // Full repayment — debtor ledger only, NO linked sale (accrual-basis)
+    await prisma.creditPayment.create({
+      data: {
+        creditId: paidCredit.id,
+        amount: 45000,
+        paymentDate: now,
+        paymentType: 'bank_transfer',
+        isFullPayment: true,
+        linkedSaleId: null,
+        notes: 'Full payment received via bank transfer',
+      },
+    });
+
+    console.log('✅ Created 4 sample customer credits with origin sales (accrual-basis)\n');
+  }
+
+  // =================================
   // SUMMARY
   // =================================
   console.log('=================================');
   console.log('✅ Database seed completed!');
   console.log('=================================');
   console.log('\n📊 Test Data Summary:');
-  console.log(`Users: 2`);
+  console.log(`Users: 3 (including yusuf@devrecruit.org)`);
   console.log(`Businesses: 2`);
   console.log(`Sales Transactions: ${salesData.length}`);
   console.log(`Expenses: ${expensesData.length}`);
   console.log(`Tax Reports: 1`);
+  console.log(`Customer Credits: 4`);
   console.log('\n🔐 Test Login Credentials:');
   console.log('Admin: admin@paymytax.com / Admin@123456');
+  console.log('Admin: yusuf@devrecruit.org / Admin@123456');
   console.log('User:  john@example.com / Password123!');
   console.log('\n');
 }

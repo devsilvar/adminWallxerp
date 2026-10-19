@@ -12,7 +12,7 @@ import { AuthenticatedRequest } from '@/types';
 import * as bankService from '@/services/bank.service';
 
 export const listBanks = asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
-  // Country is hard-coded to "nigeria" — PayMyTax is a Nigeria-only product.
+  // Country is hard-coded to "nigeria" — WallXERP is a Nigeria-only product.
   // If we ever expand we'll lift this to a query param + Zod validator.
   const banks = await bankService.listBanks('nigeria');
 

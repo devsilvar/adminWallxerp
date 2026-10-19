@@ -30,6 +30,11 @@ export const validateCustomerSchema = z.object({
     .string()
     .trim()
     .regex(/^\d{11,12}$/, 'BVN must be 11 or 12 digits'),
+  nin: z
+    .string()
+    .trim()
+    .regex(/^\d{11}$/, 'NIN must be exactly 11 digits')
+    .optional(),
   bankCode: z
     .string()
     .trim()
@@ -41,6 +46,33 @@ export const validateCustomerSchema = z.object({
 });
 
 export type ValidateCustomerInput = z.infer<typeof validateCustomerSchema>;
+
+export const setupVirtualAccountSchema = z
+  .object({
+    bvn: z
+      .string()
+      .trim()
+      .regex(/^\d{11,12}$/, 'BVN must be 11 or 12 digits')
+      .optional(),
+    nin: z
+      .string()
+      .trim()
+      .regex(/^\d{11}$/, 'NIN must be exactly 11 digits')
+      .optional(),
+    bankCode: z
+      .string()
+      .trim()
+      .regex(/^\d{3,6}$/, 'Bank code must be a 3-6 digit NIBSS code')
+      .optional(),
+    accountNumber: z
+      .string()
+      .trim()
+      .regex(/^\d{10}$/, 'Account number must be exactly 10 digits (NUBAN)')
+      .optional(),
+  })
+  .optional();
+
+export type SetupVirtualAccountInput = z.infer<typeof setupVirtualAccountSchema>;
 
 /**
  * Settlement bank connection (Option A subaccount split-settlement).
@@ -64,10 +96,9 @@ export const resolveSettlementSchema = z.object({
 
 export const connectSettlementSchema = resolveSettlementSchema.extend({
   bankName: z.string().trim().min(1, 'Bank name is required'),
-  commissionPct: z
-    .number()
-    .min(0, 'Commission cannot be negative')
-    .max(100, 'Commission cannot exceed 100%')
+  pin: z
+    .string()
+    .regex(/^\d{4}$/, 'Transaction PIN must be exactly 4 digits')
     .optional(),
 });
 

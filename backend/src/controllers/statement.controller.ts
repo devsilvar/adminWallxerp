@@ -1,8 +1,29 @@
 import { Response } from 'express';
 import { asyncHandler } from '@/middleware/errorHandler';
 import { AuthenticatedRequest } from '@/types';
-import { monthlyStatementSchema, periodStatementSchema } from '@/validators/statement.validator';
+import {
+  monthlyStatementSchema,
+  periodStatementSchema,
+  pnlStatementSchema,
+} from '@/validators/statement.validator';
 import * as statementService from '@/services/statement.service';
+
+export const downloadPnl = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const { month, year } = pnlStatementSchema.parse(req.query);
+  const { buffer, filename } = await statementService.downloadPnlStatement(
+    req.user!.userId,
+    req.params.businessId,
+    month,
+    year,
+  );
+
+  res.set({
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `attachment; filename="${filename}"`,
+    'Content-Length': buffer.length.toString(),
+  });
+  res.send(buffer);
+});
 
 export const downloadMonthly = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
   const { month, year } = monthlyStatementSchema.parse(req.query);

@@ -25,11 +25,26 @@ export interface AppParams {
 }
 
 /**
+ * Subscription context attached by subscription guard middleware
+ */
+export interface SubscriptionContext {
+  tier: string;
+  planName: string;
+  hasAccess: boolean;
+  isReadOnlyGrace: boolean;
+  isExpired: boolean;
+  isPaid: boolean;
+  expiresAt: Date | null;
+  reason?: 'ACTIVE' | 'TRIAL_ACTIVE' | 'TRIAL_IN_GRACE_PERIOD' | 'TRIAL_EXPIRED' | 'SUBSCRIPTION_IN_GRACE_PERIOD' | 'SUBSCRIPTION_EXPIRED';
+}
+
+/**
  * Extended Express Request with authenticated user and properly typed params
  */
 export interface AuthenticatedRequest extends Request {
   user?: JWTPayload;
   params: AppParams;
+  subscription?: SubscriptionContext;
 }
 
 /**

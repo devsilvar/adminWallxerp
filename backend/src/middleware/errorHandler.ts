@@ -100,39 +100,38 @@ export const errorHandler = (
     }
   } else if (err instanceof Prisma.PrismaClientKnownRequestError) {
     // Database errors from Prisma
-    statusCode = 400;
-
     switch (err.code) {
-      case 'P1001':
-      case 'P1002':
-      case 'P1008':
-      case 'P1017':
-        errorCode = 'SERVICE_UNAVAILABLE';
-        message = 'Unable to reach the database server. Please check your network connection and try again.';
-        statusCode = 503;
-        break;
       case 'P2002':
+        statusCode = 409;
         errorCode = 'DUPLICATE_ENTRY';
         message = 'A record with this value already exists';
         details = { field: (err.meta?.target as string[])?.[0] };
         break;
       case 'P2025':
+        statusCode = 404;
         errorCode = 'NOT_FOUND';
         message = 'Record not found';
-        statusCode = 404;
         break;
       case 'P2003':
+        statusCode = 400;
         errorCode = 'FOREIGN_KEY_CONSTRAINT';
         message = 'Referenced record does not exist';
         break;
+      // Missing table/column means schema drift, not a network fault — blaming the
+      // network sends users to debug their Wi-Fi instead of running a migration.
+      case 'P2021':
+      case 'P2022':
+        statusCode = 500;
+        errorCode = 'DATABASE_SCHEMA_ERROR';
+        message =
+          'A server error occurred. Please try again in a moment.';
+        details = { prismaCode: err.code };
+        break;
       default:
+        statusCode = 500;
         errorCode = 'DATABASE_ERROR';
-        message = 'A temporary database error occurred. Please try again.';
+        message = 'Connection error. Please check your network and try again';
     }
-  } else if (err instanceof Prisma.PrismaClientInitializationError) {
-    statusCode = 503;
-    errorCode = 'SERVICE_UNAVAILABLE';
-    message = 'Unable to connect to the database. Please check your network connection and try again.';
   }
 
   // Build error response

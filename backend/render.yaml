@@ -1,5 +1,5 @@
 # =================================
-# Render Blueprint — PayMyTax API
+# Render Blueprint — WallXERP API
 # =================================
 # Apply via: Render Dashboard → New → Blueprint → point at this repo,
 # and set the Root Directory to `backend` in the service settings.
@@ -75,13 +75,13 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
-        value: PayMyTax <noreply@paymytax.ng>
+        value: WallXERP <noreply@paymytax.ng>
 
       # ---- SMS (Termii) — optional ----
       - key: TERMII_API_KEY
         sync: false
       - key: TERMII_SENDER_ID
-        value: PayMyTax
+        value: WallXERP
 
       # ---- File storage (DigitalOcean Spaces / S3) — optional ----
       - key: DO_SPACES_ENDPOINT

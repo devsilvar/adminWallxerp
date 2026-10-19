@@ -107,6 +107,12 @@ export const config = {
     url: process.env.REDIS_URL || '',
   },
 
+  // Realtime SSE ticket config
+  realtime: {
+    ticketSecret: process.env.SSE_TICKET_SECRET || process.env.JWT_ACCESS_SECRET!,
+    ticketExpiry: '30s',
+  },
+
   // Payment
   payment: {
     provider: (process.env.PAYMENT_PROVIDER || 'paystack') as 'paystack' | 'wallx',
@@ -254,9 +260,11 @@ export const config = {
     attemptWindowHours: Number(process.env.PIN_ATTEMPT_WINDOW_HOURS ?? 24),
   },
 
-  // Voucher bonus — merchant-funded extra % on top-ups (retention incentive)
+  // Voucher bonus & ledger requests — merchant-funded extra % on top-ups and verification defaults
   voucher: {
     maxBonusPct: Number(process.env.VOUCHER_MAX_BONUS_PCT ?? 10),
+    verificationExpiryHours: Number(process.env.VOUCHER_VERIFICATION_EXPIRY_HOURS ?? 24),
+    adjustmentThreshold: Number(process.env.VOUCHER_ADJUSTMENT_THRESHOLD ?? 50000),
   },
 
   // Settlement & Split Payouts

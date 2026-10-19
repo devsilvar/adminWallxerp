@@ -3,6 +3,7 @@ import { authenticate } from '@/middleware/auth';
 import { requireActiveSubscription } from '@/middleware/subscription';
 import { voucherLookupRateLimiter } from '@/middleware/security';
 import * as customerCardController from '@/controllers/customer-card.controller';
+import * as customerController from '@/controllers/customer.controller';
 
 const router = Router({ mergeParams: true });
 
@@ -19,6 +20,13 @@ router.get('/activity', customerCardController.listActivity);
 // Customer CRM & Autocomplete
 router.get('/', customerCardController.listCustomers);
 router.post('/', customerCardController.quickCreate);
+router.post('/quick-create-with-voucher', customerCardController.quickCreateWithVoucher);
+
+// Customer 360 Detail, Unified History, Updates, and History-Guarded Delete
+router.get('/:customerId/history', customerController.getHistory);
+router.get('/:customerId', customerController.getDetail);
+router.patch('/:customerId', customerController.update);
+router.delete('/:customerId', customerController.remove);
 
 // Virtual Store Card & Ledger
 router.get('/:customerId/card', customerCardController.getCard);

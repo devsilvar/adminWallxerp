@@ -9,6 +9,9 @@ router.use(authenticate);
 // GET /api/v1/businesses/:businessId/tax/statements/monthly?month=3&year=2026
 router.get('/statements/monthly', statementController.downloadMonthly);
 
+// GET /api/v1/businesses/:businessId/tax/statements/pnl?month=3&year=2026
+router.get('/statements/pnl', statementController.downloadPnl);
+
 // GET /api/v1/businesses/:businessId/tax/statements/period?startMonth=1&startYear=2026&endMonth=6&endYear=2026
 router.get('/statements/period', statementController.downloadPeriod);
 
@@ -19,3 +22,4 @@ router.get('/statements/ledger', statementController.downloadLedger);
 router.post('/statements/ledger/email', statementController.emailLedger);
 
 export default router;
+

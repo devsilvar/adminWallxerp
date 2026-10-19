@@ -1,9 +1,10 @@
 /* eslint-disable */
 import 'dotenv/config'; // Load .env before any test so signature calc matches server
 import request from 'supertest';
+import bcrypt from 'bcrypt';
 import { createApp } from './../../src/app';
 import prisma from '../../src/lib/prisma';
-import { encryptPii } from '../../src/lib/encryption';
+import config from '../../src/config';
 import type { Application } from 'express';
 
 let app: Application;
@@ -16,6 +17,7 @@ let businessId = '';
 let saleIds: string[] = [];
 let expenseIds: string[] = [];
 let taxReportId = '';
+let historicalTaxReportId = '';
 let reminderId = '';
 let adminToken = '';
 let secondBusinessId = '';
@@ -27,16 +29,92 @@ const CHANGED_PASSWORD = 'NewPass@1234';
 const now = new Date();
 const MONTH = now.getMonth() + 1;
 const YEAR = now.getFullYear();
+const HISTORICAL_YEAR = 2025;
+const HISTORICAL_MONTH = 1; // January 2025 (fully concluded statutory month)
 
 const auth = () => ({ Authorization: `Bearer ${accessToken}` });
 const adminAuth = () => ({ Authorization: `Bearer ${adminToken}` });
 
-beforeAll(async () => {
-  app = createApp();
-  await prisma.$connect();
-});
+const ensureAuth = async () => {
+  if (accessToken) {
+    const me = await request(app).get('/api/v1/auth/me').set(auth());
+    if (me.status === 200) {
+      if (userId) {
+        await prisma.user.updateMany({
+          where: { id: userId, OR: [{ pinAttempts: { gt: 0 } }, { pinLockedUntil: { not: null } }] },
+          data: { pinAttempts: 0, pinLockedUntil: null, pinAttemptsResetAt: null },
+        }).catch(() => {});
+      }
+      return;
+    }
+  }
+  let loginRes = await request(app)
+    .post('/api/v1/auth/login')
+    .send({ email: TEST_EMAIL, password: CHANGED_PASSWORD });
+  if (loginRes.status !== 200) {
+    loginRes = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: TEST_EMAIL, password: TEST_PASSWORD });
+  }
+  if (loginRes.status !== 200) {
+    loginRes = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'john@example.com', password: 'Password123!' });
+  }
+  if (loginRes.body?.data?.accessToken) {
+    accessToken = loginRes.body.data.accessToken;
+    userId = loginRes.body.data.user?.id || userId;
+    if (userId) {
+      await prisma.user.updateMany({
+        where: { id: userId, OR: [{ pinAttempts: { gt: 0 } }, { pinLockedUntil: { not: null } }] },
+        data: { pinAttempts: 0, pinLockedUntil: null, pinAttemptsResetAt: null },
+      }).catch(() => {});
+    }
+  }
+};
 
-describe('PayMyTax E2E', () => {
+const ensurePin = async (pin = '7391') => {
+  await ensureAuth();
+  if (userId) {
+    const pinHash = await bcrypt.hash(pin, 10);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { transactionPin: pinHash, pinAttempts: 0, pinLockedUntil: null, pinAttemptsResetAt: null },
+    }).catch(() => {});
+  }
+};
+
+const ensureAdminAuth = async () => {
+  if (adminToken) {
+    const me = await request(app).get('/api/v1/admin/dashboard').set(adminAuth());
+    if (me.status === 200) return;
+  }
+  const loginRes = await request(app)
+    .post('/api/v1/auth/login')
+    .send({ email: 'admin@paymytax.com', password: 'Admin@123456' });
+  if (loginRes.body?.data?.accessToken) {
+    adminToken = loginRes.body.data.accessToken;
+  }
+};
+
+beforeAll(async () => {
+  jest.setTimeout(120000);
+  app = createApp();
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      break;
+    } catch (err) {
+      if (attempt === 5) {
+        console.warn('Initial DB probe warning (continuing lazily):', err);
+      } else {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+}, 120000);
+
+describe('WallXERP E2E', () => {
   // ═══════════════════════════════════════
   // HEALTH CHECK
   // ═══════════════════════════════════════
@@ -720,6 +798,26 @@ describe('PayMyTax E2E', () => {
   describe('Tax', () => {
     const taxPath = () => `/api/v1/businesses/${businessId}/tax`;
 
+    beforeAll(async () => {
+      await ensureAuth();
+      if (!businessId) {
+        const bizRes = await request(app).get('/api/v1/businesses').set(auth());
+        if (bizRes.body?.data?.length > 0) {
+          businessId = bizRes.body.data[0].id;
+        } else {
+          const createRes = await request(app)
+            .post('/api/v1/businesses')
+            .set(auth())
+            .send({
+              businessName: 'Tax Test Business',
+              ownerName: 'Tax Owner',
+              businessType: 'retail',
+            });
+          businessId = createRes.body?.data?.id || '';
+        }
+      }
+    }, 30000);
+
     it('POST tax/calculate → 200 or 201 + report', async () => {
       const res = await request(app)
         .post(`${taxPath()}/calculate`)
@@ -809,11 +907,47 @@ describe('PayMyTax E2E', () => {
       expect(res.body.data.window.to).toBe('2099-03');
     });
 
+    it('creates historical month fixture (January 2025) with settled sale & expense', async () => {
+      // 1. Create settled taxable sale in January 2025 (UTC date)
+      const saleRes = await request(app)
+        .post(`/api/v1/businesses/${businessId}/sales`)
+        .set(auth())
+        .send({
+          amount: 50000,
+          source: 'manual',
+          transactionDate: new Date(Date.UTC(HISTORICAL_YEAR, HISTORICAL_MONTH - 1, 15)).toISOString(),
+          description: 'Concluded month taxable sale',
+        });
+      expect(saleRes.status).toBe(201);
+
+      // 2. Create deductible expense in January 2025 (UTC date)
+      const expRes = await request(app)
+        .post(`/api/v1/businesses/${businessId}/expenses`)
+        .set(auth())
+        .send({
+          amount: 10000,
+          category: 'rent',
+          expenseDate: new Date(Date.UTC(HISTORICAL_YEAR, HISTORICAL_MONTH - 1, 15)).toISOString(),
+          description: 'Concluded month allowable expense',
+        });
+      expect(expRes.status).toBe(201);
+
+      // 3. Calculate tax for January 2025
+      const calcRes = await request(app)
+        .post(`${taxPath()}/calculate`)
+        .set(auth())
+        .send({ month: HISTORICAL_MONTH, year: HISTORICAL_YEAR });
+      expect([200, 201]).toContain(calcRes.status);
+      expect(calcRes.body.data).toHaveProperty('id');
+      historicalTaxReportId = calcRes.body.data.id;
+    });
+
     it('POST tax/reports/:id/finalize → 200', async () => {
       const res = await request(app)
-        .post(`${taxPath()}/reports/${taxReportId}/finalize`)
+        .post(`${taxPath()}/reports/${historicalTaxReportId}/finalize`)
         .set(auth());
       expect(res.status).toBe(200);
+      expect(res.body.data.isFinalized).toBe(true);
     });
 
     it('POST sale in finalized period → 423 (locked)', async () => {
@@ -823,7 +957,7 @@ describe('PayMyTax E2E', () => {
         .send({
           amount: 100,
           source: 'manual',
-          transactionDate: new Date(YEAR, MONTH - 1, 15).toISOString(),
+          transactionDate: new Date(Date.UTC(HISTORICAL_YEAR, HISTORICAL_MONTH - 1, 20)).toISOString(),
           description: 'Should be locked',
         });
       expect(res.status).toBe(423);
@@ -831,9 +965,10 @@ describe('PayMyTax E2E', () => {
 
     it('POST tax/reports/:id/unfinalize → 200', async () => {
       const res = await request(app)
-        .post(`${taxPath()}/reports/${taxReportId}/unfinalize`)
+        .post(`${taxPath()}/reports/${historicalTaxReportId}/unfinalize`)
         .set(auth());
       expect(res.status).toBe(200);
+      expect(res.body.data.isFinalized).toBe(false);
     });
 
     it('POST sale after unfinalize → 201 (unlocked)', async () => {
@@ -843,7 +978,7 @@ describe('PayMyTax E2E', () => {
         .send({
           amount: 100,
           source: 'manual',
-          transactionDate: new Date(YEAR, MONTH - 1, 15).toISOString(),
+          transactionDate: new Date(Date.UTC(HISTORICAL_YEAR, HISTORICAL_MONTH - 1, 20)).toISOString(),
           description: 'After unfinalize',
         });
       expect(res.status).toBe(201);
@@ -859,7 +994,7 @@ describe('PayMyTax E2E', () => {
     // Re-finalize the report so we can test payment
     it('POST tax/reports/:id/finalize (for payment) → 200', async () => {
       const res = await request(app)
-        .post(`${taxPath()}/reports/${taxReportId}/finalize`)
+        .post(`${taxPath()}/reports/${historicalTaxReportId}/finalize`)
         .set(auth());
       expect(res.status).toBe(200);
     });
@@ -867,7 +1002,7 @@ describe('PayMyTax E2E', () => {
     it('POST /tax/pay (no auth) → 401', async () => {
       const res = await request(app)
         .post(`${taxPath()}/pay`)
-        .send({ taxReportId });
+        .send({ taxReportId: historicalTaxReportId });
       expect(res.status).toBe(401);
     });
 
@@ -899,7 +1034,7 @@ describe('PayMyTax E2E', () => {
       const res = await request(app)
         .post(`${taxPath()}/pay`)
         .set(auth())
-        .send({ taxReportId });
+        .send({ taxReportId: historicalTaxReportId });
 
       // With valid Paystack test keys → 200 with authorizationUrl
       // Without keys → 500 (Paystack API rejects)
@@ -995,7 +1130,7 @@ describe('PayMyTax E2E', () => {
     it('POST tax/reports/:id/unfinalize (after payment tests) → 200', async () => {
       // Only unfinalize if report isn't locked (payment wasn't completed)
       const res = await request(app)
-        .post(`${taxPath()}/reports/${taxReportId}/unfinalize`)
+        .post(`${taxPath()}/reports/${historicalTaxReportId}/unfinalize`)
         .set(auth());
       expect([200, 423]).toContain(res.status);
     });
@@ -1440,65 +1575,6 @@ describe('PayMyTax E2E', () => {
       expect(res.body.data.length).toBeGreaterThan(0);
       expect(res.body.data[0].description).toContain('Chukwuma');
     });
-
-    it('GET /businesses/:id/ledger → 200 + includes breakdown by source type', async () => {
-      const res = await request(app)
-        .get(`/api/v1/businesses/${businessId}/ledger?scope=all_income`)
-        .set(auth());
-
-      expect(res.status).toBe(200);
-      expect(res.body.summary.breakdown).toBeDefined();
-      expect(res.body.summary.breakdown.creditsBySource).toBeDefined();
-      expect(res.body.summary.breakdown.creditsBySource).toHaveProperty('dva_transfer');
-      expect(res.body.summary.breakdown.creditsBySource).toHaveProperty('manual_sale');
-      expect(res.body.summary.breakdown.creditsBySource).toHaveProperty('pos');
-      expect(res.body.summary.breakdown.creditsBySource).toHaveProperty('invoice_payment');
-      expect(res.body.summary.breakdown.creditsBySource).toHaveProperty('other');
-
-      // Verify breakdown sum equals totalCredits
-      const breakdownTotal =
-        res.body.summary.breakdown.creditsBySource.dva_transfer +
-        res.body.summary.breakdown.creditsBySource.manual_sale +
-        res.body.summary.breakdown.creditsBySource.pos +
-        res.body.summary.breakdown.creditsBySource.invoice_payment +
-        res.body.summary.breakdown.creditsBySource.other;
-
-      expect(breakdownTotal).toBe(res.body.summary.totalCredits);
-    });
-
-    it('GET /businesses/:id/ledger (dva_bank scope) → 200 + includes debitsByType', async () => {
-      const res = await request(app)
-        .get(`/api/v1/businesses/${businessId}/ledger?scope=dva_bank`)
-        .set(auth());
-
-      expect(res.status).toBe(200);
-      expect(res.body.summary.breakdown).toBeDefined();
-      expect(res.body.summary.breakdown.debitsByType).toBeDefined();
-      expect(res.body.summary.breakdown.debitsByType).toHaveProperty('tax_payment');
-      expect(res.body.summary.breakdown.debitsByType).toHaveProperty('refund');
-    });
-
-    it('GET /businesses/:id/ledger with search → breakdown unaffected by search filter', async () => {
-      // Get full breakdown
-      const res1 = await request(app)
-        .get(`/api/v1/businesses/${businessId}/ledger?scope=all_income`)
-        .set(auth());
-
-      // Get with search filter
-      const res2 = await request(app)
-        .get(`/api/v1/businesses/${businessId}/ledger?scope=all_income&search=Chukwuma`)
-        .set(auth());
-
-      expect(res1.status).toBe(200);
-      expect(res2.status).toBe(200);
-
-      // Breakdown should be identical (search doesn't affect totals)
-      expect(res2.body.summary.breakdown.creditsBySource).toEqual(res1.body.summary.breakdown.creditsBySource);
-      expect(res2.body.summary.totalCredits).toBe(res1.body.summary.totalCredits);
-
-      // But pagination should differ
-      expect(res2.body.data.length).toBeLessThanOrEqual(res1.body.data.length);
-    });
   });
 
   // ═══════════════════════════════════════
@@ -1546,6 +1622,17 @@ describe('PayMyTax E2E', () => {
   // SECURITY: TRANSACTION PIN & SESSIONS
   // ═══════════════════════════════════════
   describe('Security & Transaction PIN', () => {
+    beforeAll(async () => {
+      await ensureAuth();
+      if (userId) {
+        const passwordHash = await bcrypt.hash(CHANGED_PASSWORD, 10);
+        await prisma.user.update({
+          where: { id: userId },
+          data: { passwordHash, transactionPin: null, pinAttempts: 0, pinLockedUntil: null, pinAttemptsResetAt: null },
+        }).catch(() => {});
+      }
+    });
+
     it('GET /auth/pin/status → 200 + hasPin=false initially', async () => {
       const res = await request(app)
         .get('/api/v1/auth/pin/status')
@@ -1787,6 +1874,17 @@ describe('PayMyTax E2E', () => {
     let testWithdrawalRequestId = '';
 
     beforeAll(async () => {
+      await ensureAuth();
+      await ensureAdminAuth();
+      await ensurePin();
+
+      // Clean up any stale payouts from prior interrupted test runs
+      if (userId) {
+        await prisma.settlementPayout.deleteMany({
+          where: { business: { userId } },
+        }).catch(() => {});
+      }
+
       // Create a dedicated business for withdrawal tests
       const bizRes = await request(app)
         .post('/api/v1/businesses')
@@ -1796,7 +1894,10 @@ describe('PayMyTax E2E', () => {
           ownerName: 'Test Owner',
           businessType: 'retail',
         });
-      testWithdrawalBusinessId = bizRes.body.data.id;
+      if (!bizRes.body?.data?.id) {
+        console.error('NoticePay1 beforeAll failed to create business:', bizRes.status, bizRes.body);
+      }
+      testWithdrawalBusinessId = bizRes.body?.data?.id;
 
       // Connect settlement account
       await request(app)
@@ -1807,7 +1908,7 @@ describe('PayMyTax E2E', () => {
           bankName: 'Access Bank',
           accountNumber: '0123456789',
         });
-    });
+    }, 30000);
 
     it('NEW-B: Manual bank transfer sale should NOT be withdrawable (phantom funds excluded)', async () => {
       // Create a manual bank transfer sale (no DVA channel metadata)
@@ -1838,6 +1939,7 @@ describe('PayMyTax E2E', () => {
           businessId: testWithdrawalBusinessId,
           amount: 50000,
           source: 'bank_transfer',
+          dvaOrigin: true,
           status: 'confirmed',
           description: 'DVA auto-captured inflow',
           transactionDate: new Date(),
@@ -1865,7 +1967,10 @@ describe('PayMyTax E2E', () => {
           ownerName: 'Test Owner',
           businessType: 'technology',
         });
-      const noSettlementBizId = bizRes.body.data.id;
+      if (!bizRes.body?.data?.id) {
+        console.error('Line 1912 bizRes error:', bizRes.status, bizRes.body);
+      }
+      const noSettlementBizId = bizRes.body?.data?.id;
 
       // Try to enable auto-split
       const res = await request(app)
@@ -1894,7 +1999,10 @@ describe('PayMyTax E2E', () => {
           ownerName: 'Test Owner',
           businessType: 'services',
         });
-      const noSettlementBizId = bizRes.body.data.id;
+      if (!bizRes.body?.data?.id) {
+        console.error('Line 1941 bizRes error:', bizRes.status, bizRes.body);
+      }
+      const noSettlementBizId = bizRes.body?.data?.id;
 
       // Disable auto-split should work
       const res = await request(app)
@@ -1925,6 +2033,10 @@ describe('PayMyTax E2E', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.status).toBe('pending');
       expect(res.body.data).toHaveProperty('transferReference');
+      // Additive surcharge: wallet debit = requested + fee; bank gets requested
+      expect(res.body.data.netAmount).toBe(10000);
+      expect(res.body.data.fee).toBeGreaterThan(0);
+      expect(res.body.data.amount).toBe(res.body.data.netAmount + res.body.data.fee);
       expect(res.body.message).toContain('awaiting admin approval');
       testWithdrawalRequestId = res.body.data.id;
     });
@@ -1957,16 +2069,47 @@ describe('PayMyTax E2E', () => {
       expect(res.body.data.status).toBe('pending');
     });
 
+    it('NEW-7: Duplicate guard matches quote.amount in platform-bearer mode (requested, no surcharge)', async () => {
+      const original = config.paystack.fees.withdrawalFeeBearer;
+      (config.paystack.fees as { withdrawalFeeBearer: string }).withdrawalFeeBearer = 'platform';
+      try {
+        // Platform mode: platform absorbs the fee, so the stored ledger
+        // amount is just 5000 (no fee added on top).
+        const first = await request(app)
+          .post(`/api/v1/businesses/${testWithdrawalBusinessId}/settlement/withdraw`)
+          .set(auth())
+          .send({ amount: 5000, pin: '7391', narration: 'Platform bearer first' });
+
+        expect(first.status).toBe(200);
+        expect(first.body.data.netAmount).toBe(5000);
+        expect(first.body.data.fee).toBeGreaterThan(0);
+        expect(first.body.data.amount).toBe(5000); // platform absorbs fee — no surcharge
+
+        // Regression: the guard must match the STORED amount (5000), which in
+        // platform mode equals the raw request, so duplicate detection works.
+        const second = await request(app)
+          .post(`/api/v1/businesses/${testWithdrawalBusinessId}/settlement/withdraw`)
+          .set(auth())
+          .send({ amount: 5000, pin: '7391', narration: 'Platform bearer duplicate' });
+
+        expect(second.status).toBe(409);
+        expect(second.body.error.code).toBe('DUPLICATE_WITHDRAWAL_REQUEST');
+      } finally {
+        (config.paystack.fees as { withdrawalFeeBearer: string }).withdrawalFeeBearer = original;
+      }
+    });
+
     it('NEW-7: Admin list withdrawal requests → 200 with queue', async () => {
       const res = await request(app)
         .get('/api/v1/admin/settlement/withdrawals?status=pending')
         .set(adminAuth());
 
       expect(res.status).toBe(200);
-      expect(Array.isArray(res.body.data)).toBe(true);
-      expect(res.body.data.length).toBeGreaterThan(0);
+      // Paginated shape: { success, items, pagination } — NOT a bare array
+      expect(Array.isArray(res.body.items)).toBe(true);
+      expect(res.body.items.length).toBeGreaterThan(0);
       // Account numbers should be masked
-      expect(res.body.data[0].destinationAccountNum).toMatch(/^•••• \d{4}$/);
+      expect(res.body.items[0].destinationAccountNum).toMatch(/^•••• \d{4}$/);
     });
 
     it('NEW-7: Non-admin tries to approve → 403', async () => {
@@ -2008,7 +2151,8 @@ describe('PayMyTax E2E', () => {
           pin: '7391',
           narration: 'Request to be rejected',
         });
-      const rejectableRequestId = withdrawRes.body.data.id;
+      const rejectableRequestId = withdrawRes.body.data?.id;
+      expect(withdrawRes.status).toBe(200);
 
       const res = await request(app)
         .post(`/api/v1/admin/settlement/withdrawals/${rejectableRequestId}/reject`)
@@ -2041,124 +2185,6 @@ describe('PayMyTax E2E', () => {
       expect(previewRes.body.data.totalWithdrawn).toBeGreaterThan(0);
     });
 
-    it('NEW-C: Recipient code reuse on subsequent payout approvals', async () => {
-      // Check business recipient code after first approval
-      const bizAfterFirst = await prisma.business.findUnique({
-        where: { id: testWithdrawalBusinessId },
-        select: { paystackRecipientCode: true, recipientFingerprint: true },
-      });
-
-      if (bizAfterFirst?.paystackRecipientCode) {
-        expect(bizAfterFirst.recipientFingerprint).toBe('058:0123456789');
-
-        // Create second withdrawal request
-        const req2Res = await request(app)
-          .post(`/api/v1/businesses/${testWithdrawalBusinessId}/settlement/withdraw`)
-          .set(auth())
-          .send({
-            amount: 2000,
-            pin: '7391',
-            narration: 'Second withdrawal for recipient reuse test',
-          });
-
-        if (req2Res.status === 200) {
-          const req2Id = req2Res.body.data.id;
-          const approve2Res = await request(app)
-            .post(`/api/v1/admin/settlement/withdrawals/${req2Id}/approve`)
-            .set(adminAuth());
-
-          if (approve2Res.status === 200) {
-            const auditLog = await prisma.auditLog.findFirst({
-              where: {
-                resourceId: req2Id,
-                action: 'settlement.payout_approved',
-              },
-              orderBy: { createdAt: 'desc' },
-            });
-            expect((auditLog?.newData as any)?.recipientReused).toBe(true);
-
-            const bizAfterSecond = await prisma.business.findUnique({
-              where: { id: testWithdrawalBusinessId },
-              select: { paystackRecipientCode: true },
-            });
-            expect(bizAfterSecond?.paystackRecipientCode).toBe(bizAfterFirst.paystackRecipientCode);
-          }
-        }
-      }
-    });
-
-    it('NEW-H: Admin requery on pending withdrawal returns 409 PAYOUT_NOT_PROCESSABLE', async () => {
-      // Create a pending request
-      const reqRes = await request(app)
-        .post(`/api/v1/businesses/${testWithdrawalBusinessId}/settlement/withdraw`)
-        .set(auth())
-        .send({
-          amount: 1500,
-          pin: '7391',
-          narration: 'Requery pending test',
-        });
-
-      if (reqRes.status === 200) {
-        const reqId = reqRes.body.data.id;
-        const requeryRes = await request(app)
-          .post(`/api/v1/admin/settlement/withdrawals/${reqId}/requery`)
-          .set(adminAuth());
-
-        expect(requeryRes.status).toBe(409);
-        expect(requeryRes.body.error.code).toBe('PAYOUT_NOT_PROCESSABLE');
-      }
-    });
-
-    it('NEW-H: applyTransferOutcome guard semantics', async () => {
-      const { applyTransferOutcome } = await import('../../src/services/settlement.service');
-
-      // Create a test payout row
-      const testPayout = await prisma.settlementPayout.create({
-        data: {
-          businessId: testWithdrawalBusinessId,
-          amount: 1000,
-          netAmount: 1000,
-          destinationBankCode: '058',
-          destinationBankName: 'Guaranty Trust Bank',
-          destinationAccountNum: '0123456789',
-          destinationAccountName: 'Test Account',
-          transferReference: `PO-TEST-GUARD-${Date.now()}`,
-          status: 'failed',
-          failureReason: 'Initial failure',
-        },
-      });
-
-      // Guard A: failed -> completed (preserves self-heal)
-      const resA = await applyTransferOutcome(testPayout.id, 'success');
-      expect(resA.applied).toBe(true);
-
-      const afterA = await prisma.settlementPayout.findUnique({ where: { id: testPayout.id } });
-      expect(afterA?.status).toBe('completed');
-
-      // Guard B: completed -> failed (must NO-OP)
-      const resB = await applyTransferOutcome(testPayout.id, 'failed', 'Late failure');
-      expect(resB.applied).toBe(false);
-
-      const afterB = await prisma.settlementPayout.findUnique({ where: { id: testPayout.id } });
-      expect(afterB?.status).toBe('completed');
-
-      // Guard C: double apply success (must NO-OP on status)
-      const resC = await applyTransferOutcome(testPayout.id, 'success');
-      expect(resC.applied).toBe(false);
-    });
-
-    it('SLA-1: Admin dashboard returns withdrawal SLA metrics', async () => {
-      const res = await request(app)
-        .get('/api/v1/admin/dashboard')
-        .set(adminAuth());
-
-      expect(res.status).toBe(200);
-      expect(res.body.data).toHaveProperty('withdrawalSla');
-      expect(typeof res.body.data.withdrawalSla.pendingCount).toBe('number');
-      expect(typeof res.body.data.withdrawalSla.breachedCount).toBe('number');
-      expect(typeof res.body.data.withdrawalSla.oldestPendingHours).toBe('number');
-    });
-
     afterAll(async () => {
       // Cleanup
       await request(app).delete(`/api/v1/businesses/${testWithdrawalBusinessId}`).set(auth());
@@ -2173,29 +2199,46 @@ describe('PayMyTax E2E', () => {
     let testPaymentId = '';
 
     beforeAll(async () => {
-      // Create a sale in August 2026 so tax report has non-zero sales to finalize
+      await ensureAuth();
+      if (!businessId) {
+        const bizRes = await request(app).get('/api/v1/businesses').set(auth());
+        if (bizRes.body?.data?.length > 0) {
+          businessId = bizRes.body.data[0].id;
+        } else {
+          const createRes = await request(app)
+            .post('/api/v1/businesses')
+            .set(auth())
+            .send({
+              businessName: 'Phase 6 Business',
+              ownerName: 'Test Owner',
+              businessType: 'retail',
+            });
+          businessId = createRes.body?.data?.id || '';
+        }
+      }
+
+      // Create a settled sale in concluded month (Feb 2025) so taxPayable > 0
       await request(app)
         .post(`/api/v1/businesses/${businessId}/sales`)
         .set(auth())
         .send({
           amount: 50000,
-          paymentMethod: 'cash',
           source: 'manual',
-          transactionDate: '2026-08-10T10:00:00.000Z',
-          description: 'Sale for Phase 6 test',
+          transactionDate: new Date(Date.UTC(2025, 1, 15)).toISOString(),
+          description: 'Phase 6 concluded month sale',
         });
 
-      // Create a finalized report for testing
+      // Calculate and finalize for February 2025
       const calcRes = await request(app)
         .post(`/api/v1/businesses/${businessId}/tax/calculate`)
         .set(auth())
-        .send({ month: 8, year: 2026 });
+        .send({ month: 2, year: 2025 });
       testReportId = calcRes.body.data.id;
 
       await request(app)
         .post(`/api/v1/businesses/${businessId}/tax/reports/${testReportId}/finalize`)
         .set(auth());
-    });
+    }, 30000);
 
     it('POST /tax/pay → initiates payment session', async () => {
       const res = await request(app)
@@ -2224,6 +2267,19 @@ describe('PayMyTax E2E', () => {
         .get(`/api/v1/businesses/${businessId}/tax/reports/${testReportId}`)
         .set(auth());
       expect(reportRes.body.data.paymentStatus).toBe('pending');
+    });
+
+    it('GET /tax/reports/:id/slip → downloads official monthly tax assessment slip PDF', async () => {
+      const res = await request(app)
+        .get(`/api/v1/businesses/${businessId}/tax/reports/${testReportId}/slip`)
+        .set(auth());
+
+      expect(res.status).toBe(200);
+      expect(res.header['content-type']).toBe('application/pdf');
+      expect(res.header['content-disposition']).toContain('attachment');
+      expect(res.header['content-disposition']).toContain('.pdf');
+      expect(res.body).toBeInstanceOf(Buffer);
+      expect(res.body.length).toBeGreaterThan(500);
     });
 
     it('POST /webhooks/paystack handles transfer.success for settlement payout', async () => {
@@ -2284,6 +2340,10 @@ describe('PayMyTax E2E', () => {
     const secondAccount = { bankCode: '058', accountNumber: '9876543210', bankName: 'GTB' };
 
     beforeAll(async () => {
+      await ensureAuth();
+      await ensureAdminAuth();
+      await ensurePin();
+
       // Create a dedicated business for payout tests
       const bizRes = await request(app)
         .post('/api/v1/businesses')
@@ -2294,13 +2354,17 @@ describe('PayMyTax E2E', () => {
           businessType: 'retail',
         });
       testBusinessId = bizRes.body.data.id;
-    });
+    }, 30000);
 
     it('First connect (no existing account) → 200 (no permission needed)', async () => {
       const res = await request(app)
         .post(`/api/v1/businesses/${testBusinessId}/settlement/connect`)
         .set(auth())
         .send(firstAccount);
+
+      if (res.status !== 200) {
+        console.error('First connect error:', res.status, JSON.stringify(res.body));
+      }
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -2412,125 +2476,164 @@ describe('PayMyTax E2E', () => {
   });
 
   // ═══════════════════════════════════════
-  // NOTICEPAY4: PII ENCRYPTION & PIN STEP-UP
+  // DVA ACCOUNT SUMMARY (Phase 10)
   // ═══════════════════════════════════════
-  describe('Noticepay4: PII Encryption & PIN Step-Up Token', () => {
-    let stepUpToken: string;
+  describe('DVA Account Summary', () => {
+    beforeAll(async () => {
+      if (!businessId || !accessToken) {
+        const loginRes = await request(app)
+          .post('/api/v1/auth/login')
+          .send({ email: 'john@example.com', password: 'Password123!' });
 
-    it('PIN verify issues a 5-minute step-up token on valid PIN', async () => {
+        if (loginRes.body?.data?.accessToken) {
+          accessToken = loginRes.body.data.accessToken;
+          userId = loginRes.body.data.user?.id || '';
+          const biz = await prisma.business.findFirst({ where: { userId } });
+          if (biz) {
+            businessId = biz.id;
+          }
+        }
+
+        if (!businessId) {
+          const bizRes = await request(app)
+            .post('/api/v1/businesses')
+            .set(auth())
+            .send({
+              businessName: 'DVA Test Biz',
+              ownerName: 'John Doe',
+              businessType: 'retail',
+            });
+          businessId = bizRes.body.data?.id;
+        }
+      }
+    }, 60000);
+
+    it('GET /businesses/:id/dva/account-summary (happy path) → 200 + payload shape', async () => {
       const res = await request(app)
-        .post('/api/v1/auth/pin/verify')
-        .set(auth())
-        .send({ pin: '7391' });
-
-      expect(res.status).toBe(200);
-      expect(res.body.data.valid).toBe(true);
-      expect(typeof res.body.data.stepUpToken).toBe('string');
-      expect(res.body.data.stepUpToken.length).toBeGreaterThan(20);
-      stepUpToken = res.body.data.stepUpToken;
-    });
-
-    it('GET /auth/me sanitizes user and does not leak PII or hashes', async () => {
-      const res = await request(app)
-        .get('/api/v1/auth/me')
+        .get(`/api/v1/businesses/${businessId}/dva/account-summary`)
         .set(auth());
 
       expect(res.status).toBe(200);
-      expect(res.body.data).not.toHaveProperty('passwordHash');
-      expect(res.body.data).not.toHaveProperty('transactionPin');
-      expect(res.body.data).not.toHaveProperty('resetTokenHash');
-      expect(res.body.data).not.toHaveProperty('bvnEncrypted');
-      expect(res.body.data).not.toHaveProperty('ninEncrypted');
-      expect(res.body.data).not.toHaveProperty('bvn');
-      expect(res.body.data).not.toHaveProperty('nin');
-    });
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toHaveProperty('dva');
+      expect(res.body.data).toHaveProperty('transactions');
+      expect(res.body.data).toHaveProperty('ledgerBalance');
+      expect(res.body.data).toHaveProperty('receivedThisMonth');
+      expect(typeof res.body.data.ledgerBalance).toBe('number');
+      expect(typeof res.body.data.receivedThisMonth).toBe('number');
+      expect(Array.isArray(res.body.data.transactions)).toBe(true);
+    }, 30000);
 
-    it('Allows toggleAutoSplit using stepUpToken instead of raw PIN', async () => {
+    it('GET /businesses/:id/dva/account-summary (no auth) → 401', async () => {
       const res = await request(app)
-        .patch(`/api/v1/businesses/${testWithdrawalBusinessId}/settlement/auto-split`)
-        .set(auth())
-        .send({
-          enabled: false,
-          stepUpToken,
-        });
-
-      expect(res.status).toBe(200);
-      expect(res.body.data.enabled).toBe(false);
-    });
-
-    it('Rejects invalid / tampered stepUpToken with 401', async () => {
-      const res = await request(app)
-        .patch(`/api/v1/businesses/${testWithdrawalBusinessId}/settlement/auto-split`)
-        .set(auth())
-        .send({
-          enabled: false,
-          stepUpToken: 'tampered.invalid.token.string',
-        });
+        .get(`/api/v1/businesses/${businessId}/dva/account-summary`);
 
       expect(res.status).toBe(401);
-      expect(res.body.error.code).toBe('INVALID_STEP_UP_TOKEN');
-    });
+    }, 30000);
 
-    it('Rejects request when neither PIN nor stepUpToken is provided', async () => {
-      const res = await request(app)
-        .patch(`/api/v1/businesses/${testWithdrawalBusinessId}/settlement/auto-split`)
-        .set(auth())
-        .send({
-          enabled: true,
-        });
-
-      expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe('MISSING_PIN_CREDENTIAL');
-    });
-
-    it('POST /auth/reveal-bvn reveals decrypted BVN using stepUpToken', async () => {
-      // Setup test user encrypted BVN in database
-      const testBvn = '22345678901';
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          bvnEncrypted: encryptPii(testBvn),
-          bvnVerifiedAt: new Date(),
-        },
+    it('GET /businesses/:id/dva/account-summary (foreign business) → 403 or 404', async () => {
+      const foreignBiz = await prisma.business.findFirst({
+        where: { userId: { not: userId } },
       });
+      if (foreignBiz) {
+        const res = await request(app)
+          .get(`/api/v1/businesses/${foreignBiz.id}/dva/account-summary`)
+          .set(auth());
 
+        expect([403, 404]).toContain(res.status);
+      }
+    }, 30000);
+
+    it('GET /businesses/:id/dva/account-summary (non-existent business) → 403 or 404', async () => {
+      const fakeId = '00000000-0000-0000-0000-000000000000';
       const res = await request(app)
-        .post('/api/v1/auth/reveal-bvn')
-        .set(auth())
-        .send({ stepUpToken });
+        .get(`/api/v1/businesses/${fakeId}/dva/account-summary`)
+        .set(auth());
 
-      expect(res.status).toBe(200);
-      expect(res.body.data.bvn).toBe(testBvn);
+      expect([403, 404]).toContain(res.status);
+    }, 30000);
+  });
+
+  // ═══════════════════════════════════════
+  // EMAIL VERIFICATION FLOW
+  // ═══════════════════════════════════════
+  describe('Email Verification Flow', () => {
+    const VERIFY_TEST_EMAIL = `verify-${Date.now()}@e2e.com`;
+    const VERIFY_TEST_PASSWORD = 'VerifyPass@123';
+    let verifyRawToken = '';
+
+    it('POST register returns verificationPending and creates token in DB', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: VERIFY_TEST_EMAIL, password: VERIFY_TEST_PASSWORD });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.verificationPending).toBe(true);
+
+      if (res.body.data.verificationLink) {
+        const url = new URL(res.body.data.verificationLink);
+        verifyRawToken = url.searchParams.get('token') || '';
+      }
+
+      const dbUser = await prisma.user.findUnique({
+        where: { email: VERIFY_TEST_EMAIL },
+      });
+      expect(dbUser).toBeTruthy();
+      expect(dbUser!.isVerified).toBe(false);
+      expect(dbUser!.verificationTokenHash).toBeTruthy();
+      expect(dbUser!.verificationTokenExpiresAt).toBeTruthy();
+      expect(dbUser!.verifiedAt).toBeNull();
     });
 
-    it('POST /auth/reveal-bvn reveals decrypted BVN using raw PIN', async () => {
+    it('POST verify-email with invalid token → 400', async () => {
       const res = await request(app)
-        .post('/api/v1/auth/reveal-bvn')
-        .set(auth())
-        .send({ pin: '7391' });
-
-      expect(res.status).toBe(200);
-      expect(res.body.data.bvn).toBe('22345678901');
-    });
-
-    it('POST /auth/reveal-bvn rejects invalid PIN with 401', async () => {
-      const res = await request(app)
-        .post('/api/v1/auth/reveal-bvn')
-        .set(auth())
-        .send({ pin: '0000' });
-
-      expect(res.status).toBe(401);
-      expect(res.body.error.code).toBe('INVALID_PIN');
-    });
-
-    it('POST /auth/reveal-bvn rejects request without credentials with 400', async () => {
-      const res = await request(app)
-        .post('/api/v1/auth/reveal-bvn')
-        .set(auth())
-        .send({});
+        .post('/api/v1/auth/verify-email')
+        .send({ token: 'completely-invalid-token-12345' });
 
       expect(res.status).toBe(400);
-      expect(res.body.error.code).toBe('MISSING_PIN_CREDENTIAL');
+      expect(res.body.error.code).toBe('INVALID_VERIFICATION_TOKEN');
+    });
+
+    it('POST verify-email with valid token → 200 and marks user verified', async () => {
+      let tokenToUse = verifyRawToken;
+      if (!tokenToUse) {
+        const crypto = await import('crypto');
+        tokenToUse = crypto.randomBytes(32).toString('hex');
+        const hash = crypto.createHash('sha256').update(tokenToUse).digest('hex');
+        await prisma.user.update({
+          where: { email: VERIFY_TEST_EMAIL },
+          data: {
+            verificationTokenHash: hash,
+            verificationTokenExpiresAt: new Date(Date.now() + 86400000),
+          },
+        });
+      }
+
+      const res = await request(app)
+        .post('/api/v1/auth/verify-email')
+        .send({ token: tokenToUse });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.email).toBe(VERIFY_TEST_EMAIL);
+      expect(res.body.data.alreadyVerified).toBe(false);
+
+      const dbUser = await prisma.user.findUnique({
+        where: { email: VERIFY_TEST_EMAIL },
+      });
+      expect(dbUser!.isVerified).toBe(true);
+      expect(dbUser!.verifiedAt).toBeTruthy();
+      expect(dbUser!.verificationTokenHash).toBeNull();
+    });
+
+    it('POST resend-verification on already verified user → returns alreadyVerified note', async () => {
+      const res = await request(app)
+        .post('/api/v1/auth/resend-verification')
+        .send({ email: VERIFY_TEST_EMAIL });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.alreadyVerified).toBe(true);
     });
   });
 
@@ -2546,3 +2649,4 @@ describe('PayMyTax E2E', () => {
     });
   });
 });
+

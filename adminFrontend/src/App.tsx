@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
@@ -7,6 +7,8 @@ import AdminRoute from '@/routes/AdminRoute.tsx';
 import AdminLayout from '@/components/layout/AdminLayout.tsx';
 import PageLoader from '@/components/ui/PageLoader.tsx';
 import ScrollToTop from '@/components/ScrollToTop.tsx';
+import { useAuthStore } from '@/stores/auth.store.ts';
+import { getSSEClient } from '@/lib/sse-client.ts';
 
 // Admin pages — code-split and lazy-loaded
 const AdminLogin = lazy(() => import('@/pages/admin/AdminLogin.tsx'));
@@ -28,11 +30,50 @@ const AdminAISettings = lazy(() => import('@/pages/admin/AdminAISettings.tsx'));
 const AdminSubscriptions = lazy(
   () => import('@/pages/admin/AdminSubscriptions.tsx'),
 );
+const AdminReviews = lazy(() => import('@/pages/admin/AdminReviews.tsx'));
+const AdminBroadcasts = lazy(() => import('@/pages/admin/AdminBroadcasts.tsx'));
 const NotFound = lazy(() => import('@/pages/NotFound.tsx'));
 
-export default function App() {
+function AppShell() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user = useAuthStore((s) => s.user);
+  const fetchMe = useAuthStore((s) => s.fetchMe);
+  const [bootReady, setBootReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function boot() {
+      if (isAuthenticated && !user) {
+        try {
+          await fetchMe();
+        } finally {
+          if (!cancelled) setBootReady(true);
+        }
+      } else {
+        setBootReady(true);
+      }
+    }
+    boot();
+    const t = setTimeout(() => {
+      if (!cancelled) setBootReady(true);
+    }, 2800);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [isAuthenticated, user, fetchMe]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    getSSEClient().connect();
+  }, [isAuthenticated, user]);
+
+  if (!bootReady && isAuthenticated && !user) {
+    return <PageLoader minHeight="min-h-screen" message="Restoring session…" />;
+  }
+
   return (
-    <BrowserRouter>
+    <>
       <ScrollToTop />
       <Toaster
         position='top-right'
@@ -48,60 +89,37 @@ export default function App() {
       <ErrorBoundary>
         <Suspense fallback={<PageLoader />}>
           <Routes>
-            {/* Direct root redirect to admin dashboard */}
             <Route path='/' element={<Navigate to='/admin' replace />} />
-
-            {/* Admin login — standalone layout */}
             <Route path='/admin/login' element={<AdminLogin />} />
-
-            {/* Protected Admin Console Routes */}
             <Route element={<AdminRoute />}>
               <Route element={<AdminLayout />}>
                 <Route path='/admin' element={<AdminDashboard />} />
                 <Route path='/admin/users' element={<AdminUsers />} />
-                <Route
-                  path='/admin/users/:userId'
-                  element={<AdminUserDetail />}
-                />
+                <Route path='/admin/users/:userId' element={<AdminUserDetail />} />
                 <Route path='/admin/businesses' element={<AdminBusinesses />} />
-                <Route
-                  path='/admin/withdrawals'
-                  element={<AdminWithdrawals />}
-                />
-                <Route
-                  path='/admin/settlement/withdrawals'
-                  element={<AdminWithdrawals />}
-                />
-                <Route
-                  path='/admin/transactions'
-                  element={<AdminTransactions />}
-                />
-                <Route
-                  path='/admin/unverified-inflows'
-                  element={<AdminUnverifiedInflows />}
-                />
+                <Route path='/admin/withdrawals' element={<AdminWithdrawals />} />
+                <Route path='/admin/settlement/withdrawals' element={<AdminWithdrawals />} />
+                <Route path='/admin/transactions' element={<AdminTransactions />} />
+                <Route path='/admin/unverified-inflows' element={<AdminUnverifiedInflows />} />
                 <Route path='/admin/audit-logs' element={<AdminAuditLogs />} />
-                <Route
-                  path='/admin/ai-settings'
-                  element={<AdminAISettings />}
-                />
-                <Route
-                  path='/admin/subscriptions'
-                  element={<AdminSubscriptions />}
-                />
-                {/* Reviews — deferred to Phase 2 (see ADM-04b). Old bookmarks land on dashboard, not 404. */}
-                <Route
-                  path='/admin/reviews'
-                  element={<Navigate to='/admin' replace />}
-                />
+                <Route path='/admin/ai-settings' element={<AdminAISettings />} />
+                <Route path='/admin/subscriptions' element={<AdminSubscriptions />} />
+                <Route path='/admin/reviews' element={<AdminReviews />} />
+                <Route path='/admin/broadcasts' element={<AdminBroadcasts />} />
               </Route>
             </Route>
-
-            {/* Catch-all 404 handler */}
             <Route path='*' element={<NotFound />} />
           </Routes>
         </Suspense>
       </ErrorBoundary>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppShell />
     </BrowserRouter>
   );
 }

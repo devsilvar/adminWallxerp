@@ -18,17 +18,20 @@
 
 import { Router } from 'express';
 import { authenticate } from '@/middleware/auth';
+import { requireActiveSubscription } from '@/middleware/subscription';
 import * as dvaController from '@/controllers/dva.controller';
 
 const router = Router({ mergeParams: true });
 
 router.use(authenticate);
+router.use(requireActiveSubscription);
 
 router.post('/setup-virtual-account', dvaController.setupVirtualAccount);
 router.post('/validate-customer', dvaController.validateCustomer);
 router.get('/virtual-account', dvaController.getVirtualAccount);
 router.get('/balance', dvaController.getBalance);
 router.get('/transactions', dvaController.getDVATransactions);
+router.get('/account-summary', dvaController.getAccountSummary);
 router.post('/requery', dvaController.requery);
 router.post('/settlement/resolve', dvaController.resolveSettlement);
 router.post('/settlement/connect', dvaController.connectSettlement);

@@ -1,0 +1,430 @@
+import cron from 'node-cron';
+import prisma from '@/lib/prisma';
+import logger from '@/lib/logger';
+import { config } from '@/config';
+import { getPaymentProvider } from '@/lib/payment';
+import { AppError } from '@/middleware/errorHandler';
+import { WalletService } from '@/services/wallet.service';
+import { eventBus } from '@/core/events/event-bus';
+import { logAudit } from '@/lib/audit';
+import { createReminderOnce } from '@/services/reminder/reminder-generation.service';
+import { formatNaira } from '@/lib/format';
+import { toNumber } from '@/shared/helpers';
+import { emitToAdmins } from '@/services/admin/realtime-admin.helper';
+
+/**
+ * Allocated 32-bit integer for Postgres transaction advisory lock:
+ *   947362 = Reminder daily sweep
+ *   947363 = Wallet ledger reconciliation
+ *   947364 = Payout transfer reconciliation
+ */
+const LOCK_KEY = 947364;
+
+export interface PayoutReconciliationResult {
+  payoutsAudited: number;
+  completedCount: number;
+  failedCount: number;
+  pendingCount: number;
+}
+
+/**
+ * Reconciles stuck settlement payouts by querying Paystack transfer verification API.
+ * Ensures merchant withdrawals never remain indefinitely stuck in 'processing' / 'pending'.
+ */
+export async function executePayoutReconciliationSweep(): Promise<PayoutReconciliationResult> {
+  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+
+  // Fetch payouts initiated >10 mins ago that have a transfer reference and are still pending/processing.
+  // Note: We query by transferReference (not paystackTransferCode) so that payouts where our
+  // initiateTransfer() call timed out before receiving a transfer_code are still swept.
+  const stuckPayouts = await prisma.settlementPayout.findMany({
+    where: {
+      status: { in: ['processing', 'pending'] },
+      transferReference: { not: '' },
+      initiatedAt: { lte: tenMinutesAgo },
+    },
+
+    include: {
+      business: {
+        select: {
+          id: true,
+          userId: true,
+          businessName: true,
+        },
+      },
+    },
+    orderBy: { initiatedAt: 'asc' },
+  });
+
+  if (stuckPayouts.length === 0) {
+    logger.debug('Payout reconciliation sweep: zero stuck payouts found');
+    return { payoutsAudited: 0, completedCount: 0, failedCount: 0, pendingCount: 0 };
+  }
+
+  logger.info('Payout reconciliation sweep: auditing stuck payouts', { count: stuckPayouts.length });
+
+  let completedCount = 0;
+  let failedCount = 0;
+  let pendingCount = 0;
+
+  const provider = getPaymentProvider();
+
+  for (const payout of stuckPayouts) {
+    try {
+      if (typeof provider.verifyTransfer !== 'function') {
+        logger.warn('Payment provider does not support verifyTransfer');
+        break;
+      }
+
+      const result = await provider.verifyTransfer(payout.transferReference);
+      const paystackStatus = result.status?.toLowerCase();
+
+      // Guard against race conditions: refresh payout status
+      const current = await prisma.settlementPayout.findUnique({
+        where: { id: payout.id },
+        select: { status: true },
+      });
+
+      if (current?.status === 'completed' || current?.status === 'failed') {
+        continue;
+      }
+
+      if (paystackStatus === 'success' || paystackStatus === 'completed') {
+        const existingTx = await prisma.walletTransaction.findUnique({
+          where: { linkedPayoutId: payout.id },
+        });
+        if (existingTx) {
+          await prisma.settlementPayout.update({
+            where: { id: payout.id },
+            data: { status: 'completed', completedAt: new Date() },
+          });
+          continue;
+        }
+
+        await prisma.settlementPayout.update({
+          where: { id: payout.id },
+          data: {
+            status: 'completed',
+            completedAt: new Date(),
+          },
+        });
+
+        if (payout.business?.userId) {
+          try {
+            await WalletService.settlePayoutDebit({
+              userId: payout.business.userId,
+              businessId: payout.businessId,
+              amount: toNumber(payout.amount),
+              fee: 0,
+              reference: payout.transferReference,
+              linkedPayoutId: payout.id,
+              description: `Settlement payout completed via automated reconciliation to ${payout.destinationBankName}`,
+            });
+          } catch (err: any) {
+            if (err?.code === 'P2002') {
+              continue;
+            }
+            throw err;
+          }
+
+          eventBus.emit('payout.completed', {
+            userId: payout.business.userId,
+            payoutId: payout.id,
+            amount: toNumber(payout.amount),
+            reference: payout.transferReference,
+          });
+
+          void emitToAdmins({
+            type: 'withdrawal_status_changed',
+            withdrawalId: payout.id,
+            businessId: payout.businessId,
+            businessName: payout.business.businessName,
+            status: 'completed',
+            amount: toNumber(payout.amount),
+            timestamp: new Date().toISOString(),
+          }).catch((err) =>
+            logger.warn('Failed to emit withdrawal_status_changed (cron-completed) to admins', { payoutId: payout.id, err })
+          );
+        }
+
+        logAudit({
+          businessId: payout.businessId,
+          action: 'settlement.payout_reconciled_completed',
+          resourceType: 'settlement_payout',
+          resourceId: payout.id,
+          newData: {
+            status: 'completed',
+            transferReference: payout.transferReference,
+            paystackStatus,
+          },
+        });
+
+        try {
+          await createReminderOnce({
+            businessId: payout.businessId,
+            reminderType: 'payout_completed',
+            scheduledDate: new Date(),
+            message: `Your withdrawal of ${formatNaira(
+              toNumber(payout.netAmount) > 0 ? toNumber(payout.netAmount) : toNumber(payout.amount)
+            )} (ref ${payout.transferReference}) has been verified and transferred to your ${payout.destinationBankName} account.`,
+            referenceType: 'settlement_payout',
+            referenceId: payout.id,
+          });
+        } catch (err: any) {
+          logger.warn('Failed to create payout_completed reminder during reconciliation', {
+            payoutId: payout.id,
+            err: err instanceof Error ? err.message : err,
+          });
+        }
+
+        completedCount++;
+      } else if (paystackStatus === 'failed' || paystackStatus === 'reversed') {
+        await prisma.settlementPayout.update({
+          where: { id: payout.id },
+          data: {
+            status: 'failed',
+            failureReason: result.gatewayResponse || 'Transfer failed at destination bank or gateway',
+          },
+        });
+
+        if (payout.business?.userId) {
+          await WalletService.releaseLockedFunds({
+            userId: payout.business.userId,
+            amount: payout.amount,
+            fee: 0,
+          });
+        }
+
+        logAudit({
+          businessId: payout.businessId,
+          action: 'settlement.payout_reconciled_failed',
+          resourceType: 'settlement_payout',
+          resourceId: payout.id,
+          newData: {
+            status: 'failed',
+            transferReference: payout.transferReference,
+            reason: result.gatewayResponse,
+          },
+        });
+
+        try {
+          await createReminderOnce({
+            businessId: payout.businessId,
+            reminderType: 'payout_failed',
+            scheduledDate: new Date(),
+            message: `Your withdrawal of ${formatNaira(
+              toNumber(payout.amount)
+            )} (ref ${payout.transferReference}) could not be completed and funds have been released back to your available balance.`,
+            referenceType: 'settlement_payout',
+            referenceId: payout.id,
+          });
+        } catch (err: any) {
+          logger.warn('Failed to create payout_failed reminder during reconciliation', {
+            payoutId: payout.id,
+            err: err instanceof Error ? err.message : err,
+          });
+        }
+
+        if (payout.business?.userId) {
+          eventBus.emit('payout.failed', {
+            userId: payout.business.userId,
+            payoutId: payout.id,
+            amount: toNumber(payout.amount),
+            reference: payout.transferReference,
+            reason: result.gatewayResponse || 'Transfer failed at bank/Paystack',
+            isRejection: false,
+          });
+
+          void emitToAdmins({
+            type: 'withdrawal_status_changed',
+            withdrawalId: payout.id,
+            businessId: payout.businessId,
+            businessName: payout.business.businessName,
+            status: 'failed',
+            amount: toNumber(payout.amount),
+            failureReason: result.gatewayResponse || 'Transfer failed at bank/Paystack',
+            timestamp: new Date().toISOString(),
+          }).catch((err) =>
+            logger.warn('Failed to emit withdrawal_status_changed (cron-failed) to admins', { payoutId: payout.id, err })
+          );
+        }
+
+        failedCount++;
+      } else {
+        // Transfer is still in progress / pending upstream
+        pendingCount++;
+        logger.debug('Payout transfer still pending at gateway', {
+          payoutId: payout.id,
+          reference: payout.transferReference,
+          status: paystackStatus,
+        });
+      }
+    } catch (payoutErr: any) {
+      // ─── Handle 404 NOT FOUND from Paystack (reference never reached their system) ───
+      const isNotFound =
+        payoutErr instanceof AppError &&
+        payoutErr.code === 'PAYSTACK_ERROR' &&
+        payoutErr.details?.httpStatus === 404;
+
+      if (isNotFound) {
+        const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+        const payoutInitiatedAt = payout.initiatedAt ? new Date(payout.initiatedAt) : null;
+
+        if (payoutInitiatedAt && payoutInitiatedAt <= thirtyMinutesAgo) {
+          // >30 min old and Paystack has no record → safe to declare failed
+          logger.warn('[RECONCILIATION] Transfer reference not found at Paystack after 30+ min — marking failed', {
+            payoutId: payout.id,
+            reference: payout.transferReference,
+            initiatedAt: payout.initiatedAt,
+          });
+
+          await prisma.settlementPayout.update({
+            where: { id: payout.id },
+            data: {
+              status: 'failed',
+              failureReason: 'Transfer reference not found at payment gateway after 30+ minutes. The transfer was never received by the bank.',
+            },
+          });
+
+          if (payout.business?.userId) {
+            await WalletService.releaseLockedFunds({
+              userId: payout.business.userId,
+              amount: payout.amount,
+              fee: 0,
+            });
+          }
+
+          logAudit({
+            businessId: payout.businessId,
+            action: 'settlement.payout_reconciled_not_found',
+            resourceType: 'settlement_payout',
+            resourceId: payout.id,
+            newData: {
+              status: 'failed',
+              transferReference: payout.transferReference,
+              reason: 'Transfer reference not found at Paystack after 30+ minutes',
+            },
+          });
+
+          try {
+            await createReminderOnce({
+              businessId: payout.businessId,
+              reminderType: 'payout_failed',
+              scheduledDate: new Date(),
+              message: `Your withdrawal of ${formatNaira(
+                toNumber(payout.amount)
+              )} (ref ${payout.transferReference}) could not be completed and funds have been released back to your available balance.`,
+              referenceType: 'settlement_payout',
+              referenceId: payout.id,
+            });
+          } catch (remErr: any) {
+            logger.warn('Failed to create payout_failed reminder during not-found reconciliation', {
+              payoutId: payout.id,
+              err: remErr instanceof Error ? remErr.message : remErr,
+            });
+          }
+
+          if (payout.business?.userId) {
+            eventBus.emit('payout.failed', {
+              userId: payout.business.userId,
+              payoutId: payout.id,
+              amount: toNumber(payout.amount),
+              reference: payout.transferReference,
+              reason: 'Transfer reference not found at payment gateway after 30+ minutes. The transfer was never received by the bank.',
+              isRejection: false,
+            });
+          }
+
+          failedCount++;
+        } else {
+          // <30 min old — Paystack may still be propagating, leave in processing
+          pendingCount++;
+          logger.debug('[RECONCILIATION] Transfer reference not yet at Paystack — awaiting propagation', {
+            payoutId: payout.id,
+            reference: payout.transferReference,
+            initiatedAt: payout.initiatedAt,
+            ageMinutes: payoutInitiatedAt
+              ? Math.round((Date.now() - payoutInitiatedAt.getTime()) / 60_000)
+              : 'unknown',
+          });
+        }
+      } else {
+        // Isolate individual payout errors so one network issue does not fail the entire sweep
+        logger.error('Error reconciling individual payout transfer', {
+          payoutId: payout.id,
+          reference: payout.transferReference,
+          error: payoutErr.message,
+        });
+      }
+    }
+  }
+
+  logger.info('Payout reconciliation sweep completed', {
+    payoutsAudited: stuckPayouts.length,
+    completedCount,
+    failedCount,
+    pendingCount,
+  });
+
+  return {
+    payoutsAudited: stuckPayouts.length,
+    completedCount,
+    failedCount,
+    pendingCount,
+  };
+}
+
+/**
+ * Runs the payout reconciliation sweep wrapped in a transaction-scoped Postgres advisory lock.
+ */
+export async function runPayoutReconciliationSweep(opts?: {
+  bypassLock?: boolean;
+}): Promise<PayoutReconciliationResult> {
+  if (opts?.bypassLock) {
+    return await executePayoutReconciliationSweep();
+  }
+
+  return await prisma.$transaction(
+    async (tx) => {
+      const lockResult = await tx.$queryRaw<Array<{ locked: boolean }>>`
+        SELECT pg_try_advisory_xact_lock(${LOCK_KEY}) AS locked
+      `;
+      const locked = lockResult[0]?.locked === true;
+
+      if (!locked) {
+        logger.warn('Payout reconciliation sweep skipped — another worker holds the lock', {
+          lockKey: LOCK_KEY,
+        });
+        return { payoutsAudited: 0, completedCount: 0, failedCount: 0, pendingCount: 0 };
+      }
+
+      return await executePayoutReconciliationSweep();
+    },
+    { maxWait: 10000, timeout: 60000 }
+  );
+}
+
+/**
+ * Registers the 15-minute payout reconciliation cron job.
+ */
+export function registerPayoutReconciliationCron(): void {
+  if (!config.cron.enabled) {
+    logger.info('Payout reconciliation cron: disabled (cron.enabled is false)');
+    return;
+  }
+
+  // Run every 15 minutes
+  cron.schedule(
+    '*/15 * * * *',
+    async () => {
+      try {
+        await runPayoutReconciliationSweep();
+      } catch (err: any) {
+        logger.error('Payout reconciliation sweep failed', { error: err.message });
+      }
+    },
+    { timezone: 'Africa/Lagos' }
+  );
+
+  logger.info('Payout reconciliation cron registered: every 15 minutes (Africa/Lagos)');
+}

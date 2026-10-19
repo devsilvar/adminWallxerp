@@ -18,7 +18,7 @@ export const authenticate = (
   const token = authHeader.slice(7);
 
   try {
-    const decoded = jwt.verify(token, config.jwt.accessSecret) as JWTPayload;
+    const decoded = jwt.verify(token, config.jwt.accessSecret, { algorithms: ['HS256'] }) as JWTPayload;
     req.user = {
       userId: decoded.userId,
       email: decoded.email,
@@ -40,4 +40,31 @@ export const authorize = (...roles: string[]) => {
     }
     next();
   };
+};
+
+export const optionalAuthenticate = (
+  req: AuthenticatedRequest,
+  _res: Response,
+  next: NextFunction
+): void => {
+  const authHeader = req.headers['authorization'];
+
+  if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.slice(7);
+
+  try {
+    const decoded = jwt.verify(token, config.jwt.accessSecret, { algorithms: ['HS256'] }) as JWTPayload;
+    req.user = {
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role,
+    };
+  } catch {
+    // Optional auth: token is invalid or expired, proceed unauthenticated without crashing
+  }
+
+  next();
 };

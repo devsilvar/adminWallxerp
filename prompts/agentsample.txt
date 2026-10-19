@@ -1,0 +1,179 @@
+# AGENTS.md
+
+This file defines mandatory instructions for AI coding agents.
+
+## Source of truth
+
+Read the relevant documentation before making changes.
+
+Priority:
+
+1. AGENTS.md
+2. Feature specification under /specs
+3. Architecture documentation
+4. Product/business rules
+5. Engineering standards
+6. Existing code and tests
+
+If documents conflict, do not silently choose one.
+Identify the conflict before proceeding.
+
+## Required reading
+
+For every task:
+
+- docs/architecture/architecture.md
+- docs/architecture/dependency-rules.md
+- docs/engineering/tech-stack.md
+- docs/engineering/coding-standards.md
+- docs/security/security.md
+- docs/quality/testing-strategy.md
+- docs/quality/definition-of-done.md
+
+For feature work, also read the relevant:
+
+- specs/<feature>.md
+- plans/current/<feature>.md
+
+## Before implementation
+
+1. Understand the requested behavior.
+2. Locate the relevant feature spec.
+3. Inspect existing implementation.
+4. Identify architectural boundaries involved.
+5. Identify business and security rules.
+6. Determine tests required.
+7. Create/update an implementation plan for non-trivial changes.
+
+Do not begin a large implementation without understanding these.
+
+## Architecture rules
+
+Architecture documentation is mandatory.
+
+Do not:
+
+- bypass defined layers
+- introduce circular dependencies
+- mix domain logic with presentation logic
+- directly access persistence from layers prohibited by architecture
+- create alternative patterns when an approved pattern exists
+- duplicate existing abstractions
+- move responsibilities across boundaries without justification
+
+If a requested feature conflicts with the architecture, surface the conflict.
+
+## Specifications
+
+Feature behavior comes from /specs.
+
+Do not invent unspecified product behavior.
+
+Each feature spec should define:
+
+- objective
+- functional requirements
+- user flows
+- business rules
+- edge cases
+- failure behavior
+- security requirements
+- acceptance criteria
+
+Implementation must satisfy its acceptance criteria.
+
+## Technology
+
+Follow:
+
+docs/engineering/tech-stack.md
+
+Do not:
+
+- replace approved technologies
+- add a new framework unnecessarily
+- introduce dependencies when existing tools solve the problem
+- change dependency versions without reason
+
+## Database
+
+Follow:
+
+docs/data/database-schema.md
+docs/data/data-access.md
+docs/data/migrations.md
+
+Schema changes must use migrations.
+
+Never modify production data manually.
+
+Preserve constraints and data integrity.
+
+## Security
+
+Follow all documents under:
+
+docs/security/
+
+Never:
+
+- commit secrets
+- expose credentials
+- bypass authorization
+- trust unvalidated external input
+- log sensitive information
+- weaken security controls simply to make a feature work
+
+## Testing
+
+Follow:
+
+docs/quality/testing-strategy.md
+
+New behavior requires appropriate tests.
+
+Bug fixes should include regression tests when practical.
+
+Test externally observable behavior rather than implementation details.
+
+## Scope
+
+Make the smallest coherent change required.
+
+Do not:
+
+- refactor unrelated code
+- rename unrelated files
+- change public APIs unnecessarily
+- alter unrelated behavior
+- perform speculative cleanup
+
+## Documentation
+
+Update documentation whenever a change affects:
+
+- architecture
+- APIs
+- database schema
+- configuration
+- security
+- public behavior
+- developer workflow
+
+## Completion
+
+Before claiming completion:
+
+1. Review the diff.
+2. Run formatting.
+3. Run linting.
+4. Run type checking.
+5. Run relevant tests.
+6. Run the full test suite when appropriate.
+7. Run the production build.
+8. Check acceptance criteria.
+9. Check architectural compliance.
+10. Check security implications.
+11. Update documentation.
+
+A feature is not complete merely because the code compiles.

@@ -30,11 +30,15 @@ const OUTCOME_OPTIONS: ReadonlyArray<{ value: TreasuryOutcome; label: string; ac
 export default function TreasuryTab({
   data,
   isLoading,
+  isPageLoading,
+  pendingPage,
   filters,
   onInspect,
 }: {
   data: TreasuryAnalyticsData | null;
   isLoading: boolean;
+  isPageLoading?: boolean;
+  pendingPage?: number | null;
   filters: TreasuryFilters;
   onInspect: (id: string, type: 'inflow' | 'outflow') => void;
 }) {
@@ -235,15 +239,17 @@ export default function TreasuryTab({
       </Panel>
 
       <Panel className='overflow-hidden'>
-        <TransferTable
-          transfers={data?.transfers ?? []}
-          isLoading={isLoading}
-          hasLoadedOnce={data !== null}
-          onInspect={onInspect}
-        />
+        <div className={`transition-opacity ${isPageLoading ? 'opacity-60' : 'opacity-100'}`} aria-busy={isPageLoading}>
+          <TransferTable
+            transfers={data?.transfers ?? []}
+            isLoading={isLoading}
+            hasLoadedOnce={data !== null}
+            onInspect={onInspect}
+          />
+        </div>
 
         {data && (
-          <Pagination pagination={data.pagination} onPageChange={filters.setPage} noun='transfers' />
+          <Pagination pagination={data.pagination} onPageChange={filters.setPage} noun='transfers' isLoading={isPageLoading} pendingPage={pendingPage ?? null} />
         )}
       </Panel>
     </div>

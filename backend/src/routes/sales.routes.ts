@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { authenticate } from '@/middleware/auth';
+import { requireActiveSubscription } from '@/middleware/subscription';
 import { AppError } from '@/middleware/errorHandler';
 import * as salesController from '@/controllers/sales.controller';
 import * as salesImportController from '@/controllers/sales-import.controller';
@@ -8,6 +9,7 @@ import * as salesImportController from '@/controllers/sales-import.controller';
 const router = Router({ mergeParams: true });
 
 router.use(authenticate);
+router.use(requireActiveSubscription);
 
 // ─── Sales CRUD ─────────────────────────────────────────────
 
@@ -15,6 +17,7 @@ router.post('/', salesController.create);
 router.get('/', salesController.getAll);
 router.get('/overview', salesController.getOverview);
 router.get('/summary', salesController.summary);
+router.get('/daily', salesController.daily);
 router.get('/unverified', salesController.getUnverified);
 
 
@@ -68,6 +71,9 @@ router.post(
 );
 router.post('/import/commit', salesImportController.commit);
 
+// ─── Sales PDF Report ───────────────────────────────────────
+import * as reportController from '@/controllers/report.controller';
+router.get('/report/pdf', reportController.downloadSalesReport);
 // ─── Dynamic routes (must come last) ────────────────────────
 
 router.get('/:id', salesController.getById);
@@ -75,5 +81,6 @@ router.put('/:id', salesController.update);
 router.delete('/:id', salesController.remove);
 router.post('/:id/verify', salesController.verify);
 router.post('/:id/reclassify', salesController.reclassify);
+router.post('/:id/reassign', salesController.reassign);
 
 export default router;

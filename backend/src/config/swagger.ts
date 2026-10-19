@@ -59,7 +59,7 @@ const options: swaggerJsdoc.Options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'PayMyTax API',
+      title: 'WallXERP API',
       version: '1.0.0',
       description:
         'SME Tax Calculation, Reporting & Remittance API by WallX. ' +
@@ -86,6 +86,7 @@ const options: swaggerJsdoc.Options = {
       { name: 'Reminders', description: 'In-app reminders (deadline / unfiled / unpaid / margin / invoice / payment / DVA)' },
       { name: 'DVA', description: 'Dedicated Virtual Account — Paystack auto-capture for bank transfers' },
       { name: 'Invoices', description: 'Invoice CRUD + send via email/WhatsApp + PDF + paid → auto-create sale' },
+      { name: 'Customers', description: 'Customer CRM + voucher lookup (PIN + last4, rate-limited)' },
       { name: 'Search', description: 'Cross-domain search across sales, expenses, invoices, reports' },
       { name: 'Admin', description: 'Admin-only endpoints (role: admin)' },
       { name: 'Webhooks', description: 'External webhook receivers (no auth, signature verified)' },
@@ -286,7 +287,29 @@ const options: swaggerJsdoc.Options = {
         // ─── Expenses ────────────────────────────────────────
         ExpenseCategory: {
           type: 'string',
-          enum: ['rent', 'inventory', 'salary', 'utility', 'fuel', 'logistics', 'marketing', 'gift', 'subscription', 'other'],
+          enum: [
+            'bad_debt',
+            'bank_charges',
+            'communication',
+            'depreciation',
+            'fuel',
+            'gift',
+            'insurance',
+            'interest',
+            'inventory',
+            'logistics',
+            'marketing',
+            'office_supplies',
+            'other',
+            'professional_fees',
+            'rent',
+            'repairs_maintenance',
+            'salary',
+            'subscription',
+            'tax_permit',
+            'travel',
+            'utility',
+          ],
         },
         CreateExpenseInput: {
           type: 'object',
@@ -294,7 +317,6 @@ const options: swaggerJsdoc.Options = {
           properties: {
             category: { $ref: '#/components/schemas/ExpenseCategory' },
             description: { type: 'string', minLength: 1, maxLength: 500 },
-            categoryDetail: { type: 'string', minLength: 1, maxLength: 200, description: 'Required when category = other — what the expense actually is' },
             amount: { type: 'number', minimum: 0.01 },
             expenseDate: { type: 'string', format: 'date-time' },
             receiptUrl: { type: 'string', format: 'uri', maxLength: 1000 },
@@ -305,7 +327,6 @@ const options: swaggerJsdoc.Options = {
           properties: {
             category: { $ref: '#/components/schemas/ExpenseCategory' },
             description: { type: 'string', minLength: 1, maxLength: 500 },
-            categoryDetail: { type: 'string', nullable: true, minLength: 1, maxLength: 200, description: 'Required when category = other; null clears it' },
             amount: { type: 'number', minimum: 0.01 },
             expenseDate: { type: 'string', format: 'date-time' },
             receiptUrl: { type: 'string', nullable: true, format: 'uri', maxLength: 1000 },
@@ -323,7 +344,7 @@ const options: swaggerJsdoc.Options = {
               type: 'number',
               minimum: 0,
               maximum: 50,
-              description: 'Override per-business default (7.5% standard FIRS rate)',
+              description: 'Override per-business default (7.5% standard NRS rate)',
             },
           },
         },
@@ -528,6 +549,38 @@ const options: swaggerJsdoc.Options = {
           responses: {
             200: { description: 'Current user profile' },
             401: Unauthorized,
+          },
+        },
+      },
+      '/v1/auth/me/primary-business': {
+        patch: {
+          tags: ['Auth'],
+          summary: 'Update primary business preference for DVA routing',
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['primaryBusinessId'],
+                  properties: {
+                    primaryBusinessId: {
+                      type: 'string',
+                      format: 'uuid',
+                      nullable: true,
+                      description: 'ID of the business to route DVA transfers to, or null to clear',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Primary business preference updated' },
+            400: ValidationError,
+            401: Unauthorized,
+            403: { description: 'Forbidden — user does not own the target business' },
           },
         },
       },
@@ -1009,6 +1062,18 @@ const options: swaggerJsdoc.Options = {
             { name: 'months', in: 'query', schema: { type: 'integer', default: 6, minimum: 1, maximum: 24 } },
           ],
           responses: { 200: { description: 'Dashboard payload' }, 401: Unauthorized, 403: Forbidden },
+        },
+      },
+      '/v1/businesses/{businessId}/tax/dashboard-bundle': {
+        get: {
+          tags: ['Tax'],
+          summary: 'Consolidated dashboard bundle (tax summary, recent sales, expenses, and reports)',
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            { $ref: '#/components/parameters/BusinessIdPathParam' },
+            { name: 'months', in: 'query', schema: { type: 'integer', default: 6, minimum: 1, maximum: 24 } },
+          ],
+          responses: { 200: { description: 'Dashboard bundle payload' }, 401: Unauthorized, 403: Forbidden },
         },
       },
       '/v1/businesses/{businessId}/tax/analytics': {
@@ -1511,11 +1576,11 @@ const options: swaggerJsdoc.Options = {
         },
       },
 
-      // ─── FIRS Remittance (admin) ───────────────────────────
+      // ─── NRS Remittance (admin) ───────────────────────────
       '/v1/admin/remittances/summary': {
         get: {
           tags: ['Admin'],
-          summary: 'Collected tax awaiting FIRS remittance (total + count)',
+          summary: 'Collected tax awaiting NRS remittance (total + count)',
           security: [{ bearerAuth: [] }],
           responses: { 200: { description: 'Collected summary' }, 401: Unauthorized, 403: Forbidden },
         },
@@ -1523,7 +1588,7 @@ const options: swaggerJsdoc.Options = {
       '/v1/admin/remittances': {
         get: {
           tags: ['Admin'],
-          summary: 'List FIRS remittance batches',
+          summary: 'List NRS remittance batches',
           security: [{ bearerAuth: [] }],
           parameters: [
             { $ref: '#/components/parameters/PageParam' },
@@ -1570,9 +1635,9 @@ const options: swaggerJsdoc.Options = {
       '/v1/admin/remittances/{id}/record': {
         post: {
           tags: ['Admin'],
-          summary: 'Record a manual FIRS remittance against a batch',
+          summary: 'Record a manual NRS remittance against a batch',
           description:
-            'Marks the batch (and all member payments) remitted, recording the FIRS reference + optional receipt URL. Idempotent: a second call returns 409.',
+            'Marks the batch (and all member payments) remitted, recording the NRS reference + optional receipt URL. Idempotent: a second call returns 409.',
           security: [{ bearerAuth: [] }],
           parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
           requestBody: {
@@ -1599,6 +1664,69 @@ const options: swaggerJsdoc.Options = {
             401: Unauthorized,
             403: Forbidden,
             404: NotFound,
+          },
+        },
+      },
+
+      // ─── Team Permissions & Roles ──────────────────────────
+      '/v1/businesses/{businessId}/team/my-permissions': {
+        get: {
+          tags: ['Team'],
+          summary: 'Get calling member resolved permissions for business',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'businessId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+          responses: {
+            200: { description: 'Resolved permissions for current user' },
+            401: Unauthorized,
+            403: Forbidden,
+            404: NotFound,
+          },
+        },
+      },
+      '/v1/businesses/{businessId}/team/role-defaults': {
+        get: {
+          tags: ['Team'],
+          summary: 'Get default role permission matrix for non-owner roles',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ name: 'businessId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+          responses: {
+            200: { description: 'Role default permissions matrix' },
+            401: Unauthorized,
+            403: Forbidden,
+            404: NotFound,
+          },
+        },
+      },
+
+      // ─── Customer Vouchers ────────────────────────────────
+      '/v1/businesses/{businessId}/customers/voucher-lookup': {
+        post: {
+          tags: ['Customers'],
+          summary: 'Auth-gated voucher lookup by 6-digit PIN and last 4 digits of phone',
+          description: 'Rate-limited (20 / 15m). Returns customer details and voucher balance upon successful verification.',
+          security: [{ bearerAuth: [] }],
+          parameters: [{ $ref: '#/components/parameters/BusinessIdPathParam' }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['pin', 'last4'],
+                  properties: {
+                    pin: { type: 'string', pattern: '^\\d{6}$', example: '123456' },
+                    last4: { type: 'string', pattern: '^\\d{4}$', example: '5678' },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: { description: 'Voucher verified successfully — returns customer and card balance' },
+            400: ValidationError,
+            401: { description: 'Invalid voucher PIN or phone' },
+            423: { description: 'PIN locked due to excessive failed attempts' },
+            429: { description: 'Rate limit exceeded' },
           },
         },
       },

@@ -70,17 +70,15 @@ export const createApp = (): Application => {
   app.use(requestLogger);
 
   // =================================
-  // RATE LIMITING
+  // RATE LIMITING — always mounted, limits are env-aware via middleware config
   // =================================
-  if (config.app.isProduction) {
-    app.use('/api', globalRateLimiter);
-  }
+  app.use('/api', globalRateLimiter);
 
   // =================================
   // SWAGGER DOCUMENTATION
   // =================================
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-    customSiteTitle: 'PayMyTax API Docs',
+    customSiteTitle: 'WallXERP API Docs',
   }));
   
   app.get('/api-docs.json', (req, res) => {
@@ -106,7 +104,7 @@ export const createApp = (): Application => {
   // Root endpoint
   app.get('/', (req, res) => {
     res.status(200).json({
-      service: 'PayMyTax API by WallX',
+      service: 'WallXERP API by WallX',
       version: '1.0.0',
       status: 'running',
       environment: config.app.env,

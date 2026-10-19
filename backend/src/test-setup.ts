@@ -10,7 +10,7 @@
 import config from './config';
 import logger from './lib/logger';
 
-console.log('🧪 Testing PayMyTax Backend Setup...\n');
+console.log('🧪 Testing WallXERP Backend Setup...\n');
 
 // Test 1: Configuration
 console.log('✅ Test 1: Configuration loaded');

@@ -23,14 +23,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Prisma studio:** `npm run prisma:studio`
 - **Prisma reset:** `npm run prisma:reset` (destructive — resets and re-seeds)
 
-### Frontend (`cd frontend`)
+### SME Frontend (`cd frontend`)
 - **Dev server:** `npm run dev` (Vite, port 5173)
-- **Build:** `npm run build` (tsc + vite build → dist/)
+- **Build:** `npm run build` (tsc -b + vite build → dist/)
 - **Lint:** `npm run lint`
+- **Test:** `npm run test` (Vitest)
 - **Preview:** `npm run preview`
 
-### Running Both
-Start backend (`npm run dev` in backend/) and frontend (`npm run dev` in frontend/) in separate terminals. Frontend proxies `/api` requests to `http://localhost:3000` via Vite config.
+### Admin Frontend (`cd adminFrontend`)
+- **Dev server:** `npm run dev` (Vite, port 5174)
+- **Build:** `npm run build` (tsc -b + vite build → dist/)
+- **Lint:** `npm run lint`
+- **Test:** `npm run test` (Vitest)
+- **Preview:** `npm run preview` (port 5174)
+
+### Running All Three Services
+Start backend (`npm run dev` in `backend/`), SME frontend (`npm run dev` in `frontend/`), and Admin portal (`npm run dev` in `adminFrontend/`) in separate terminals. Both Vite frontends proxy `/api` requests to `http://localhost:3000`.
 
 ## Test Data (Seed)
 - **Admin:** `admin@paymytax.com` / `Admin@123456`
@@ -77,6 +85,7 @@ Start backend (`npm run dev` in backend/) and frontend (`npm run dev` in fronten
 /api/v1/businesses/:businessId/dva/*     — setup/get virtual account
 /api/v1/businesses/:businessId/statements/*— download monthly/period PDF
 /api/v1/businesses/:businessId/invoices/* — CRUD + send/send-email/send-whatsapp/mark-paid/cancel + PDF download
+/api/v1/businesses/:businessId/customers/voucher-lookup — PIN+last4 auth-gated voucher lookup (rate-limited)
 /api/v1/admin/*                          — dashboard, users, businesses, audit-logs (admin role)
 /api/webhooks/paystack                   — webhook (no auth, signature verified)
 ```
@@ -270,15 +279,17 @@ Already on `main`:
 - Request interceptor: attaches Bearer token
 - Response interceptor: on 401, attempts refresh via POST `/auth/refresh`, retries original request once, redirects to `/login` on failure
 
-**Route guards:**
+**Route guards & Session Isolation:**
 - `ProtectedRoute` — requires authentication, redirects to /login
-- `GuestRoute` — redirects authenticated users (admin→/admin, user→/dashboard)
-- `AdminRoute` — requires authentication + admin role, shows spinner during fetchMe, redirects non-admin to /dashboard
+- `GuestRoute` — redirects authenticated users (user→/dashboard)
+- `AdminMoved` (`/admin/*`) — in SME frontend, immediately redirects stale bookmarks/links to `VITE_ADMIN_URL/admin/*`
+- `rejectAdminOnUserRoutes` middleware — backend API backstop that rejects admin JWTs on merchant business routes (`403 ADMIN_CANNOT_USE_USER_APP`)
+- **Logout-Before-Switch:** Admins must explicitly log out from the Admin Portal before logging into the SME app, and merchants must log out before accessing the Admin Portal. Cross-portal links wipe domain store state, trigger `logout()`, and navigate to the other portal's login page.
 
 **Layouts:**
 - `AuthLayout` — centered card for login/register with PayMyTax branding
 - `AppLayout` — sidebar + main content; shows CreateBusinessModal if user has 0 businesses
-- `AdminLayout` — admin sidebar + main content (max-width 7xl)
+- `AdminLayout` (`adminFrontend/`) — dedicated admin sidebar + main content (max-width 7xl) in standalone `adminFrontend` SPA
 
 **Sidebar (`Sidebar.tsx`):** Business selector dropdown (switch/create), quick-action shortcuts (Record sale / Calculate tax), nav items grouped by intent (Operate / Money / Account) with active route highlighting, admin link for admin users. **No user/email block or logout button at the bottom — those moved to the top-bar `UserMenu` (see below).**
 

@@ -6,9 +6,9 @@ export const createBatchSchema = z.object({
   paymentIds: z.array(z.string().uuid()).optional(),
 });
 
-// Record a manual FIRS remittance against an open batch.
+// Record a manual NRS remittance against an open batch.
 export const recordRemittanceSchema = z.object({
-  firsReference: z.string().trim().min(1, 'FIRS reference is required').max(200),
+  firsReference: z.string().trim().min(1, 'NRS reference is required').max(200),
   firsReceiptUrl: z.string().url('Receipt URL must be a valid URL').optional(),
   note: z.string().max(500).optional(),
   transport: z.enum(['manual']).default('manual'),

@@ -2,53 +2,77 @@ import { z } from 'zod';
 import { asNumber } from './query.utils';
 
 const EXPENSE_CATEGORIES = [
-  'rent', 'inventory', 'salary', 'utility', 'fuel', 'logistics', 'marketing',
-  'gift', 'subscription', 'other',
+  'bad_debt',
+  'bank_charges',
+  'communication',
+  'depreciation',
+  'fuel',
+  'gift',
+  'insurance',
+  'interest',
+  'inventory',
+  'logistics',
+  'marketing',
+  'office_supplies',
+  'other',
+  'professional_fees',
+  'rent',
+  'repairs_maintenance',
+  'salary',
+  'subscription',
+  'tax_permit',
+  'travel',
+  'utility',
 ] as const;
-
-const categoryDetailSchema = z.string().min(1, 'Please specify what this expense is').max(200).trim().nullable().optional();
 
 export const createExpenseSchema = z.object({
   category: z.enum(EXPENSE_CATEGORIES),
+  categoryDetail: z.string().max(200).trim().nullable().optional(),
   description: z.string().min(1, 'Description is required').max(500).trim(),
-  categoryDetail: categoryDetailSchema,
   amount: z.number().positive('Amount must be greater than 0'),
+  quantity: z.number().positive('Quantity must be greater than 0').max(100_000).nullable().optional(),
   expenseDate: z.coerce.date(),
-  receiptUrl: z.string().url('Must be a valid URL').max(1000).trim().optional(),
+  receiptUrl: z.string().url('Must be a valid URL').max(1000).trim().nullable().optional(),
   isDeductible: z.boolean().optional().default(true),
-})
-  // "Other" must always be explained — this is the server-side backstop for
-  // the conditional "Specify this expense" box in AddExpenseModal.
-  .superRefine((val, ctx) => {
-    if (val.category === 'other' && !val.categoryDetail) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['categoryDetail'],
-        message: 'Please specify what this expense is',
-      });
-    }
-  });
+}).superRefine((data, ctx) => {
+  // Enforce non-deductibility for government taxes/permits (CITA §27)
+  if (data.category === 'tax_permit' && data.isDeductible === true) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['isDeductible'],
+      message: 'Government taxes and permits are not tax-deductible per CITA §27(a). Set isDeductible to false.',
+    });
+  }
+  
+  // Require categoryDetail for 'other' category (existing rule)
+  if (data.category === 'other' && !data.categoryDetail?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['categoryDetail'],
+      message: 'categoryDetail is required when category is "other"',
+    });
+  }
+});
 
 export const updateExpenseSchema = z.object({
   category: z.enum(EXPENSE_CATEGORIES).optional(),
+  categoryDetail: z.string().max(200).trim().nullable().optional(),
   description: z.string().min(1).max(500).trim().optional(),
-  categoryDetail: categoryDetailSchema,
   amount: z.number().positive('Amount must be greater than 0').optional(),
+  quantity: z.number().positive('Quantity must be greater than 0').max(100_000).nullable().optional(),
   expenseDate: z.coerce.date().optional(),
   receiptUrl: z.string().url('Must be a valid URL').max(1000).trim().nullable().optional(),
   isDeductible: z.boolean().optional(),
-})
-  // Same backstop for updates: if the payload moves an expense to 'other',
-  // the detail must travel with it.
-  .superRefine((val, ctx) => {
-    if (val.category === 'other' && !val.categoryDetail) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['categoryDetail'],
-        message: 'Please specify what this expense is',
-      });
-    }
-  });
+}).superRefine((data, ctx) => {
+  // Enforce non-deductibility for government taxes/permits (CITA §27)
+  if (data.category === 'tax_permit' && data.isDeductible === true) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['isDeductible'],
+      message: 'Government taxes and permits are not tax-deductible per CITA §27(a).',
+    });
+  }
+});
 
 export const expenseQuerySchema = z.object({
   page: asNumber({ min: 1, int: true }).default(1),
@@ -63,6 +87,13 @@ export const expenseQuerySchema = z.object({
 export const expenseSummaryQuerySchema = z.object({
   month: asNumber({ min: 1, max: 12, int: true }),
   year: asNumber({ min: 2020, max: 2100, int: true }),
+});
+
+export const expenseDailyQuerySchema = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be in YYYY-MM-DD format')
+    .optional(),
 });
 
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>;
