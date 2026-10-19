@@ -22,6 +22,7 @@ import StatusPill from './shared/StatusPill';
 import { formatNaira, formatStamp, formatTransferStamp } from './shared/format';
 import type { AdminTransactionRow, AdminTransactionsSummary } from '@/types/index.ts';
 import { usePaginationTransition } from '@/hooks/usePaginationTransition';
+import { getSSEClient } from '@/lib/sse-client';
 
 type SourceFilter = 'all' | 'inflow' | 'withdrawal' | 'tax';
 
@@ -149,6 +150,33 @@ export default function AdminTransactions() {
   useEffect(() => {
     fetchTransactions();
   }, [fetchTransactions]);
+
+  // SSE Realtime Listeners for Transactions (live only when clean unfiltered view on page 1)
+  useEffect(() => {
+    const client = getSSEClient();
+
+    const handleUpdate = () => {
+      const isCleanView = !search && sourceFilter === 'all' && !fromDate && !toDate && pagination.page === 1;
+      if (isCleanView) {
+        fetchTransactions();
+      }
+    };
+
+    const events = [
+      'withdrawal_created',
+      'withdrawal_status_changed',
+      'unverified_inflow_created',
+      'unverified_inflow_verified',
+      'subscription_submitted',
+      'subscription_status_changed',
+    ];
+
+    events.forEach((evt) => client.on(evt, handleUpdate));
+
+    return () => {
+      events.forEach((evt) => client.off(evt, handleUpdate));
+    };
+  }, [fetchTransactions, search, sourceFilter, fromDate, toDate, pagination.page]);
 
   const handlePageChange = (next: number) => {
     if (next === pagination.page || isPageLoading) return;

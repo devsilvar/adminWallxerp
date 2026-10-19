@@ -24,6 +24,7 @@ import StatusPill, { type Tone } from './shared/StatusPill';
 import { formatNaira, formatStamp, formatTransferStamp } from './shared/format';
 import { useAdminStatsStore } from '@/stores/admin.stats.store.ts';
 import { usePaginationTransition } from '@/hooks/usePaginationTransition';
+import { getSSEClient } from '@/lib/sse-client';
 
 interface WithdrawalRequest {
   id: string;
@@ -151,6 +152,37 @@ export default function AdminWithdrawals() {
   useEffect(() => {
     fetchWithdrawals();
   }, [fetchWithdrawals]);
+
+  // Real-time SSE updates for withdrawal events
+  useEffect(() => {
+    const client = getSSEClient();
+    const handleRealtimeUpdate = () => {
+      fetchWithdrawals();
+      useAdminStatsStore.getState().fetchStats({ force: true });
+    };
+
+    client.on('withdrawal_created', handleRealtimeUpdate);
+    client.on('withdrawal_status_changed', handleRealtimeUpdate);
+
+    return () => {
+      client.off('withdrawal_created', handleRealtimeUpdate);
+      client.off('withdrawal_status_changed', handleRealtimeUpdate);
+    };
+  }, [fetchWithdrawals]);
+
+  // Fallback 5s polling while any withdrawal is in actionable state ('pending' | 'processing')
+  useEffect(() => {
+    const hasActionable = withdrawals.some(
+      (w) => w.status === 'pending' || w.status === 'processing'
+    );
+    if (!hasActionable) return;
+
+    const interval = setInterval(() => {
+      fetchWithdrawals();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [withdrawals, fetchWithdrawals]);
 
   const handlePageChange = (next: number) => {
     if (next === pagination.page || isPageLoading) return;

@@ -8,6 +8,7 @@ import AdminLayout from '@/components/layout/AdminLayout.tsx';
 import PageLoader from '@/components/ui/PageLoader.tsx';
 import ScrollToTop from '@/components/ScrollToTop.tsx';
 import { useAuthStore } from '@/stores/auth.store.ts';
+import { getSSEClient } from '@/lib/sse-client.ts';
 
 // Admin pages — code-split and lazy-loaded
 const AdminLogin = lazy(() => import('@/pages/admin/AdminLogin.tsx'));
@@ -61,6 +62,11 @@ function AppShell() {
       clearTimeout(t);
     };
   }, [isAuthenticated, user, fetchMe]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    getSSEClient().connect();
+  }, [isAuthenticated, user]);
 
   if (!bootReady && isAuthenticated && !user) {
     return <PageLoader minHeight="min-h-screen" message="Restoring session…" />;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Megaphone,
   Search,
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api, { getErrorMessage } from '@/lib/axios.ts';
+import { getSSEClient } from '@/lib/sse-client.ts';
 import PageHeader from './shared/PageHeader';
 import PaginationBar, { type PaginationState } from './shared/Pagination';
 import { Panel, PanelEmpty } from './shared/Panel';
@@ -235,6 +236,135 @@ export default function AdminBroadcasts() {
     setDetailPage(next);
     fetchDetail(inspectingBroadcast.id, next);
   };
+
+  const [retrying, setRetrying] = useState(false);
+  const inspectingBroadcastRef = useRef(inspectingBroadcast);
+  inspectingBroadcastRef.current = inspectingBroadcast;
+  const detailPageRef = useRef(detailPage);
+  detailPageRef.current = detailPage;
+
+  // Handle retry of pending emails for a broadcast
+  const handleRetryPending = async (broadcastId: string) => {
+    setRetrying(true);
+    try {
+      const res = await api.post(`/admin/broadcasts/${broadcastId}/retry`);
+      if (res.status === 202) {
+        toast.success(res.data?.message || 'Retry queued for pending recipients');
+        setBroadcasts((prev) =>
+          prev.map((b) => (b.id === broadcastId ? { ...b, status: 'sending' } : b))
+        );
+        setInspectingBroadcast((curr) =>
+          curr && curr.id === broadcastId ? { ...curr, status: 'sending' } : curr
+        );
+        fetchDetail(broadcastId, detailPage);
+      } else {
+        toast.success(res.data?.message || 'No pending recipients to retry');
+      }
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to retry broadcast emails'));
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  // SSE Realtime Listeners for progress and completion
+  useEffect(() => {
+    const sse = getSSEClient();
+
+    const handleProgress = (evt: any) => {
+      setBroadcasts((prev) =>
+        prev.map((b) => {
+          if (b.id !== evt.broadcastId) return b;
+          return {
+            ...b,
+            status: 'sending',
+            sentEmailCount: evt.sent,
+            failedEmailCount: evt.failed,
+          };
+        })
+      );
+
+      setInspectingBroadcast((curr) => {
+        if (!curr || curr.id !== evt.broadcastId) return curr;
+        return {
+          ...curr,
+          status: 'sending',
+          sentEmailCount: evt.sent,
+          failedEmailCount: evt.failed,
+          deliveryStats: {
+            total: evt.totalRecipients,
+            sent: evt.sent,
+            failed: evt.failed,
+            skipped: evt.skipped,
+            pending: evt.pending,
+            read: curr.deliveryStats?.read ?? 0,
+            unread: curr.deliveryStats?.unread ?? 0,
+          },
+        };
+      });
+    };
+
+    const handleCompleted = (evt: any) => {
+      setBroadcasts((prev) =>
+        prev.map((b) => {
+          if (b.id !== evt.broadcastId) return b;
+          return {
+            ...b,
+            status: 'sent',
+            sentEmailCount: evt.sent,
+            failedEmailCount: evt.failed,
+          };
+        })
+      );
+
+      setInspectingBroadcast((curr) => {
+        if (!curr || curr.id !== evt.broadcastId) return curr;
+        return {
+          ...curr,
+          status: 'sent',
+          sentEmailCount: evt.sent,
+          failedEmailCount: evt.failed,
+          deliveryStats: evt.deliveryStats,
+        };
+      });
+
+      toast.success('Broadcast email dispatch completed!');
+      fetchBroadcasts();
+      if (inspectingBroadcastRef.current?.id === evt.broadcastId) {
+        fetchDetail(evt.broadcastId, detailPageRef.current);
+      }
+    };
+
+    sse.on('broadcast_email_progress', handleProgress);
+    sse.on('broadcast_email_completed', handleCompleted);
+
+    return () => {
+      sse.off('broadcast_email_progress', handleProgress);
+      sse.off('broadcast_email_completed', handleCompleted);
+    };
+  }, [fetchBroadcasts]);
+
+  // Fallback Polling: poll every 3s while any broadcast is in 'sending' state
+  const hasSending = useMemo(() => {
+    return (
+      broadcasts.some((b) => b.status === 'sending') ||
+      inspectingBroadcast?.status === 'sending'
+    );
+  }, [broadcasts, inspectingBroadcast?.status]);
+
+  useEffect(() => {
+    if (!hasSending) return;
+
+    const timer = setInterval(() => {
+      fetchBroadcasts();
+      if (inspectingBroadcastRef.current?.id && inspectingBroadcastRef.current.status === 'sending') {
+        fetchDetail(inspectingBroadcastRef.current.id, detailPageRef.current);
+      }
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [hasSending, fetchBroadcasts]);
+
 
   // Filter broadcasts locally by audience tab
   const displayedBroadcasts = useMemo(() => {
@@ -579,11 +709,20 @@ export default function AdminBroadcasts() {
 
                     <td className='py-3 px-3 text-center'>
                       <div className='inline-flex items-center gap-1.5 text-[11px] tabular-nums'>
-                        <span className='text-emerald-600 font-medium'>{b.sentEmailCount} sent</span>
-                        <span className='text-ink-subtle'>/</span>
-                        <span className={b.failedEmailCount > 0 ? 'text-rose-600 font-medium' : 'text-ink-subtle'}>
-                          {b.failedEmailCount} failed
-                        </span>
+                        {b.status === 'sending' ? (
+                          <span className='inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 border border-blue-200 animate-pulse'>
+                            <RefreshCw className='h-2.5 w-2.5 animate-spin' />
+                            <span>Sending… ({b.sentEmailCount} sent)</span>
+                          </span>
+                        ) : (
+                          <>
+                            <span className='text-emerald-600 font-medium'>{b.sentEmailCount} sent</span>
+                            <span className='text-ink-subtle'>/</span>
+                            <span className={b.failedEmailCount > 0 ? 'text-rose-600 font-medium' : 'text-ink-subtle'}>
+                              {b.failedEmailCount} failed
+                            </span>
+                          </>
+                        )}
                       </div>
                     </td>
 
@@ -636,9 +775,20 @@ export default function AdminBroadcasts() {
 
             <div className='space-y-4 text-xs'>
               <div className='rounded-lg bg-panel-subtle p-3 border border-hairline space-y-1.5'>
-                <p className='text-[11px] text-ink-muted uppercase font-semibold tracking-wider'>
-                  Subject
-                </p>
+                <div className='flex items-center justify-between'>
+                  <p className='text-[11px] text-ink-muted uppercase font-semibold tracking-wider'>
+                    Subject
+                  </p>
+                  {inspectingBroadcast.status === 'sending' ? (
+                    <span className='rounded-full bg-blue-100 border border-blue-200 px-2.5 py-0.5 text-[10px] font-semibold text-blue-800 animate-pulse'>
+                      Sending…
+                    </span>
+                  ) : (
+                    <span className='rounded-full bg-emerald-100 border border-emerald-200 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-800'>
+                      Sent
+                    </span>
+                  )}
+                </div>
                 <p className='text-sm font-bold text-ink'>{inspectingBroadcast.title}</p>
                 <div className='flex flex-wrap items-center gap-2 pt-1 text-[11px] text-ink-subtle'>
                   <span>Target: {inspectingBroadcast.audienceType === 'all' ? 'All Active Users' : 'Single User'}</span>
@@ -672,13 +822,39 @@ export default function AdminBroadcasts() {
                   )}
                 </div>
 
-                {(inspectingBroadcast as any).deliveryStats && (
-                  <div className='mb-2 flex flex-wrap gap-1.5'>
-                    <span className='rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-semibold text-emerald-700'>Sent {(inspectingBroadcast as any).deliveryStats.sent}</span>
-                    <span className='rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700'>Skipped {(inspectingBroadcast as any).deliveryStats.skipped}</span>
-                    <span className='rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-semibold text-rose-700'>Failed {(inspectingBroadcast as any).deliveryStats.failed}</span>
-                    {(inspectingBroadcast as any).deliveryStats.pending > 0 && (
-                      <span className='rounded-full bg-gray-50 border border-hairline px-2 py-0.5 text-[10px] font-semibold text-ink-muted'>Pending {(inspectingBroadcast as any).deliveryStats.pending}</span>
+                {inspectingBroadcast.deliveryStats && (
+                  <div className='mb-2 flex flex-wrap items-center justify-between gap-2'>
+                    <div className='flex flex-wrap gap-1.5'>
+                      <span className='rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[10px] font-semibold text-emerald-700'>
+                        Sent {inspectingBroadcast.deliveryStats.sent}
+                      </span>
+                      <span className='rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-700'>
+                        Skipped {inspectingBroadcast.deliveryStats.skipped}
+                      </span>
+                      <span className='rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[10px] font-semibold text-rose-700'>
+                        Failed {inspectingBroadcast.deliveryStats.failed}
+                      </span>
+                      {inspectingBroadcast.deliveryStats.pending > 0 && (
+                        <span className='rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-[10px] font-semibold text-blue-700 animate-pulse'>
+                          Pending {inspectingBroadcast.deliveryStats.pending}
+                        </span>
+                      )}
+                    </div>
+
+                    {(inspectingBroadcast.deliveryStats.pending > 0 || inspectingBroadcast.status === 'sending') && (
+                      <button
+                        type='button'
+                        disabled={retrying || inspectingBroadcast.status === 'sending'}
+                        onClick={() => handleRetryPending(inspectingBroadcast.id)}
+                        className='inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 transition-colors disabled:opacity-50'
+                      >
+                        <RefreshCw className={`h-3 w-3 ${retrying || inspectingBroadcast.status === 'sending' ? 'animate-spin' : ''}`} />
+                        <span>
+                          {inspectingBroadcast.status === 'sending'
+                            ? `Sending… Pending ${inspectingBroadcast.deliveryStats.pending}`
+                            : `Retry Pending (${inspectingBroadcast.deliveryStats.pending})`}
+                        </span>
+                      </button>
                     )}
                   </div>
                 )}

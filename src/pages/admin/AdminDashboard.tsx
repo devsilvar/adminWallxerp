@@ -11,6 +11,7 @@ import OverviewTab from './dashboard/OverviewTab';
 import TaxComplianceTab from './dashboard/TaxComplianceTab';
 import TreasuryTab from './dashboard/TreasuryTab';
 import useTreasuryAnalytics from './dashboard/useTreasuryAnalytics';
+import { getSSEClient } from '@/lib/sse-client';
 
 export default function AdminDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -38,9 +39,66 @@ export default function AdminDashboard() {
       });
   }, []);
 
+  const { refresh: refreshTreasury } = treasury;
+
   useEffect(() => {
     fetchOverviewStats();
   }, [fetchOverviewStats]);
+
+  // SSE Realtime Listeners for all 8 admin events
+  useEffect(() => {
+    const client = getSSEClient();
+
+    const handleUpdate = () => {
+      fetchOverviewStats();
+      if (activeTab === 'treasury') {
+        refreshTreasury();
+      }
+    };
+
+    const events = [
+      'broadcast_email_progress',
+      'broadcast_email_completed',
+      'withdrawal_created',
+      'withdrawal_status_changed',
+      'unverified_inflow_created',
+      'unverified_inflow_verified',
+      'subscription_submitted',
+      'subscription_status_changed',
+    ];
+
+    events.forEach((evt) => client.on(evt, handleUpdate));
+
+    return () => {
+      events.forEach((evt) => client.off(evt, handleUpdate));
+    };
+  }, [fetchOverviewStats, activeTab, refreshTreasury]);
+
+  // Fallback 7s polling while actionable metrics are non-zero
+  useEffect(() => {
+    const hasActionable =
+      (stats?.withdrawalSla?.pendingCount ?? 0) > 0 ||
+      (stats?.unverifiedInflows?.count ?? 0) > 0 ||
+      (stats?.pendingSubscriptionsCount ?? 0) > 0;
+
+    if (!hasActionable) return;
+
+    const interval = setInterval(() => {
+      fetchOverviewStats();
+      if (activeTab === 'treasury') {
+        refreshTreasury();
+      }
+    }, 7000);
+
+    return () => clearInterval(interval);
+  }, [
+    stats?.withdrawalSla?.pendingCount,
+    stats?.unverifiedInflows?.count,
+    stats?.pendingSubscriptionsCount,
+    activeTab,
+    fetchOverviewStats,
+    refreshTreasury,
+  ]);
 
   function handleTabChange(tab: string) {
     const next = new URLSearchParams(searchParams);

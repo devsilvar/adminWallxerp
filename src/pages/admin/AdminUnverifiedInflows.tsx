@@ -21,6 +21,7 @@ import StatusPill from './shared/StatusPill';
 import { formatNaira, formatStamp } from './shared/format';
 import { useAdminStatsStore } from '@/stores/admin.stats.store.ts';
 import { usePaginationTransition } from '@/hooks/usePaginationTransition';
+import { getSSEClient } from '@/lib/sse-client';
 import type { AdminUnverifiedInflowRow } from '@/types/index.ts';
 
 export default function AdminUnverifiedInflows() {
@@ -83,6 +84,45 @@ export default function AdminUnverifiedInflows() {
   useEffect(() => {
     fetchInflows();
   }, [fetchInflows]);
+
+  // SSE Realtime Listeners for unverified inflows
+  useEffect(() => {
+    const client = getSSEClient();
+
+    const handleCreated = () => {
+      fetchInflows();
+      useAdminStatsStore.getState().fetchStats({ force: true });
+    };
+
+    const handleVerified = (evt: { saleId?: string }) => {
+      if (evt?.saleId) {
+        setInflows((prev) => prev.filter((r) => r.id !== evt.saleId));
+      }
+      fetchInflows();
+      useAdminStatsStore.getState().fetchStats({ force: true });
+    };
+
+    client.on('unverified_inflow_created', handleCreated);
+    client.on('unverified_inflow_verified', handleVerified);
+
+    return () => {
+      client.off('unverified_inflow_created', handleCreated);
+      client.off('unverified_inflow_verified', handleVerified);
+    };
+  }, [fetchInflows]);
+
+  // Fallback 7s polling while actionable (unverified rows exist in queue or unverifiedCount > 0)
+  useEffect(() => {
+    const isActionable = inflows.length > 0 || unverifiedCount > 0;
+    if (!isActionable) return;
+
+    const interval = setInterval(() => {
+      fetchInflows();
+      useAdminStatsStore.getState().fetchStats();
+    }, 7000);
+
+    return () => clearInterval(interval);
+  }, [inflows.length, unverifiedCount, fetchInflows]);
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard.writeText(text);

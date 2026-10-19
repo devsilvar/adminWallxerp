@@ -20,6 +20,7 @@ import api, { getErrorMessage } from '@/lib/axios.ts';
 import { useAdminStatsStore } from '@/stores/admin.stats.store.ts';
 import type { SubscriptionSubmission } from '@/types/index.ts';
 import { usePaginationTransition } from '@/hooks/usePaginationTransition';
+import { getSSEClient } from '@/lib/sse-client';
 
 type StatusTab = 'all' | 'pending' | 'approved' | 'rejected';
 
@@ -88,6 +89,45 @@ export default function AdminSubscriptions() {
   useEffect(() => {
     fetchSubmissions();
   }, [fetchSubmissions]);
+
+  // SSE Realtime Listeners for subscriptions
+  useEffect(() => {
+    const client = getSSEClient();
+
+    const handleSubmitted = () => {
+      fetchSubmissions();
+      useAdminStatsStore.getState().fetchStats({ force: true });
+    };
+
+    const handleStatusChanged = (evt: { submissionId?: string; status?: string }) => {
+      if (activeTab === 'pending' && evt?.submissionId && evt?.status !== 'pending') {
+        setSubmissions((prev) => prev.filter((s) => s.id !== evt.submissionId));
+      }
+      fetchSubmissions();
+      useAdminStatsStore.getState().fetchStats({ force: true });
+    };
+
+    client.on('subscription_submitted', handleSubmitted);
+    client.on('subscription_status_changed', handleStatusChanged);
+
+    return () => {
+      client.off('subscription_submitted', handleSubmitted);
+      client.off('subscription_status_changed', handleStatusChanged);
+    };
+  }, [fetchSubmissions, activeTab]);
+
+  // Fallback 7s polling while actionable (pending submissions exist or counts.pending > 0)
+  useEffect(() => {
+    const hasPending = counts.pending > 0 || submissions.some((s) => s.status === 'pending');
+    if (!hasPending) return;
+
+    const interval = setInterval(() => {
+      fetchSubmissions();
+      useAdminStatsStore.getState().fetchStats();
+    }, 7000);
+
+    return () => clearInterval(interval);
+  }, [counts.pending, submissions, fetchSubmissions]);
 
   const handleApprove = async (sub: SubscriptionSubmission) => {
     if (!window.confirm(`Are you sure you want to approve and activate the ${sub.plan} plan for ${sub.customerName}?`)) {

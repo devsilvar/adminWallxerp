@@ -1263,6 +1263,16 @@ export interface PlatformTaxConfig {
   updatedBy?: string | null;
 }
 
+export interface BroadcastDeliveryStats {
+  total: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  pending: number;
+  read?: number;
+  unread?: number;
+}
+
 export interface Broadcast {
   id: string;
   title: string;
@@ -1280,6 +1290,7 @@ export interface Broadcast {
     email: string;
   };
   messages?: UserMessage[];
+  deliveryStats?: BroadcastDeliveryStats;
 }
 
 export interface UserMessage {
