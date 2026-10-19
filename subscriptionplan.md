@@ -1,41 +1,70 @@
-# Architectural Implementation Plan: Shared Organization Subscription for Team Roles
+# Architectural Implementation Plan: Shared Organization Subscription & Multi-Role Alignment
 
 **Document File:** `subscriptionplan.md`  
 **Author:** Senior Systems Architect & Principal Software Engineer  
-**Status:** Approved Architectural Specification & Implementation Plan  
+**Status:** Approved Architectural Specification & Phased Implementation Plan  
 **Target Platform:** PayMyTax by WallX (WallXERP Monorepo)  
 **Governing Documents:** `AGENTS.md`, `docs/architecture.md`, `docs/security.md`, `specs/team-rbac-and-invitations.md`  
 
 ---
 
-## 1. Executive Summary & Problem Analysis
+## 1. Executive Summary & Root Cause Analysis
 
-In WallXERP, a business owner registers an organization and purchases a subscription plan (or activates a 30-day trial) covering their business operations. The owner then invites team members with specialized operational roles:
+In WallXERP, a business owner registers an organization and purchases a subscription plan (or activates a 30-day trial) covering their business operations. The owner invites team members with specialized operational roles:
 - `manager` (Branch operations, team management, customer credits, store vouchers)
 - `sales_staff` (Cashiering, sales recording, counter POS receipts, voucher issuance)
 - `accountant` (Bookkeeping, expense records, tax computation)
 - `viewer` (Auditing, read-only analytics)
 
-### Current Architecture Defect
-Currently, subscription metadata (`subscriptionTier`, `subscriptionExpiresAt`, `trialEndsAt`) is stored directly on individual `User` database records:
-1. **Isolated Trial Clocks**: When an invited team member accepts an invitation, a separate `User` record is created for them with default `subscriptionTier = 'free'` and their own independent 30-day `trialEndsAt` countdown.
-2. **Artificial Lockouts**: When the staff member's individual 30-day trial clock expires, the backend `requireActiveSubscription` middleware blocks them from recording sales, issuing invoices, or logging expenses—**even if the business owner is on an active 1-year Scale-Up paid plan**.
-3. **Misleading User Experience**: The SME frontend (`useSubscriptionStatus`) reads `user.subscriptionTier` from `/auth/me`, showing the staff member "Free Trial - X Days Left" or displaying an upgrade banner prompting an operational cashier to purchase an ERP subscription.
-4. **Disjointed Quotas**: AI CFO queries and feature gates evaluate the staff member's individual tier rather than the business owner's organization pool.
-
-### Architectural Solution: Dynamic Organization Subscription Inheritance
-Under WallXERP's strict **Single-Owner Organization Boundary** (`AGENTS.md` Invariant 4), a team member can **never** belong to businesses owned by different owners. Every invited staff member operates strictly within a single business owner's organization.
-
-Therefore, subscription entitlement is an **Organization-Level Property** owned by the Business Owner:
-- Team members (`sales_staff`, `manager`, `accountant`, `viewer`) dynamically inherit the **exact subscription tier, expiration date, trial status, and read-only grace period** of their business owner.
-- When an owner upgrades from Starter to Scale-Up, or renews their subscription, **all team members immediately inherit the active plan without manual sync, data duplication, or database schema migration**.
-- Billing and subscription management remain strictly owner-only guards (`AGENTS.md` Invariant 5). Staff members see their active plan privileges in read-only mode and are never asked to pay.
+### 1.1. Why Was This Missed Historically?
+An honest architectural post-mortem reveals two decoupled development factors:
+1. **Decoupled Architecture Evolution**:
+   - In early releases of WallXERP, the application was strictly single-user. Subscription attributes (`subscriptionTier`, `subscriptionExpiresAt`, `trialEndsAt`) were placed directly on the `User` table.
+   - When Multi-User RBAC & Team Invitations were introduced later (`BusinessMember`, `Invitation`), development focused on granular route permissions (`verifyBusinessAccess`, masking expenses for cashiers, blocking staff from bank payouts).
+   - Although `checkTeamLimit()` in `subscription-guard.service.ts` resolved the business owner to enforce team seat limits, `requireActiveSubscription` in `middleware/subscription.ts`, `ai.service.ts`, and `getMe()` in `auth.service.ts` were left querying `req.user.userId`.
+2. **The "Fresh User" Automated Testing Blindspot**:
+   - Automated test fixtures generate new user records on the fly.
+   - Because every newly created user record is stamped with a default 30-day free trial from `user.createdAt`, every newly invited staff member in tests had `hasAccess: true` by accident of being in day 1 of their own personal trial.
+   - Automated suites never simulated a scenario where an owner on an active paid plan invites a staff member whose own registration age exceeded 30 days.
 
 ---
 
-## 2. Core Architectural Invariants & Business Rules
+## 2. Core Deductions & System Audit Findings
 
-1. **Single Source of Truth (Zero-Copy Dynamic Resolution)**:
+Our comprehensive audit across all system boundaries uncovered five specific discrepancies that must be resolved:
+
+### Notice 1: AI Assistant CFO Quota & Tier Leakage (`ai.service.ts` & `subscription-guard.service.ts`)
+- **Defect**: In `ai.service.ts` (lines 96–133), when any user chats with the AI CFO, the service queries `prisma.user.findUnique({ where: { id: userId } })` and calls `checkAiQueryLimit(userId, tier)`.
+- **Consequence**: If an owner pays for the Scale-Up plan (unlimited AI queries), but their store manager chats with the AI CFO, the manager is treated as a `free` tier user and locked out after 10 queries (or locked out completely after 30 days).
+- **Resolution**: `generateAIResponse` and `checkAiQueryLimit` must resolve the business owner, evaluate the owner's plan limits, and pool AI queries across the entire organization.
+
+### Notice 2: Write Guard Lockout for Non-Owners (`requireActiveSubscription` in `middleware/subscription.ts`)
+- **Defect**: `requireActiveSubscription` inspects `req.user.userId` rather than the organization owner.
+- **Consequence**: When an invited cashier or manager's personal 30-day clock ends, `requireActiveSubscription` blocks `POST /sales`, `POST /invoices`, and `POST /expenses`, despite the business owner holding an active paid subscription.
+- **Resolution**: Middleware must extract `X-Business-Id` (or route parameter `businessId`), resolve the business owner, and evaluate the owner's active/grace/expired status.
+
+### Notice 3: Profile Endpoint Incomplete Context (`getMe` in `auth.service.ts`)
+- **Defect**: `/auth/me` returns `user.subscriptionTier` ('free') and `user.trialEndsAt` directly from the caller's row.
+- **Consequence**: The SME frontend (`useSubscriptionStatus`) derives subscription status from `useAuthStore.getState().user`. It displays "Free Trial - X Days Left" to cashiers and prompts operational staff to pay for subscriptions.
+- **Resolution**: `getMe` must dynamically inject the owner's active tier, expiration dates, and metadata (`isSubscriptionInherited: true`, `subscriptionOwner: { id, name, email }`).
+
+### Notice 4: Missing Business Context in Client Transport Layer (`frontend/src/lib/axios.ts`)
+- **Defect**: Axios requests only transmit the Bearer JWT token; they do not automatically transmit the active business context on routes without `:businessId` (such as `/auth/me`, `/ai/chat`, `/subscription/proof`).
+- **Consequence**: The backend cannot deterministically infer which business/owner organization the staff member is operating under.
+- **Resolution**: The Axios request interceptor must automatically inject `X-Business-Id: activeBusiness.id` from `useBusinessStore`.
+
+### Notice 5: Frontend Page Confusion & Non-Owner Proof Submission (`Subscription.tsx` & `subscription.controller.ts`)
+- **Defect**: Navigating to `/subscription` renders pricing tiers (₦5,000, ₦15,000, ₦45,000) and bank proof upload forms for all users, including cashiers. Furthermore, `POST /subscription/proof` and `POST /subscription/start-trial` accept requests from non-owners.
+- **Consequence**: Operational staff might assume they need to pay personal subscription fees, creating confusion or duplicate bank transfer proofs.
+- **Resolution**:
+  - Backend: Restrict `startTrial` and `submitProof` to `isOwnerAccount = true` with `403 ONLY_OWNER_CAN_MANAGE_SUBSCRIPTION`.
+  - Frontend: When `!user.isOwnerAccount`, render a read-only **Team Member Subscription Overview** detailing their shared coverage and explaining that billing is managed by the account owner.
+
+---
+
+## 3. Core Architectural Invariants & Business Rules
+
+1. **Single Source of Truth (Zero-Copy Live Resolution)**:
    - Subscription data remains authoritatively on the business owner's `User` record.
    - We **do not** duplicate subscription dates into staff user rows or maintain brittle cron synchronization jobs.
    - Team members resolve the owner's subscription live on every request via `resolveEffectiveSubscription(userId, businessId)`.
@@ -54,9 +83,9 @@ Therefore, subscription entitlement is an **Organization-Level Property** owned 
 
 ---
 
-## 3. Architecture & Data Flow Diagrams
+## 4. Architecture & Data Flow Diagrams
 
-### 3.1. Effective Subscription Resolution Flowchart
+### 4.1. Effective Subscription Resolution Flowchart
 
 ```mermaid
 flowchart TD
@@ -77,14 +106,15 @@ flowchart TD
     - ExpiresAt = owner.subscriptionExpiresAt
     - TrialEndsAt = owner.trialEndsAt
     - isInherited = true
-    - ownerName = owner.fullName"]
+    - ownerName = owner.fullName
+    - ownerEmail = owner.email"]
     Inherit --> EvalOwnerStatus["Evaluate getSubscriptionStatus(owner)"]
     
     OwnerFound -- No (New Unassigned User) --> Fallback["Fallback to User's Own Trial Clock (isInherited = false)"]
     Fallback --> EvalStatus
 ```
 
-### 3.2. Team Member Write Request Interception (`requireActiveSubscription`)
+### 4.2. Request Interception Sequence Diagram (`requireActiveSubscription`)
 
 ```mermaid
 sequenceDiagram
@@ -112,12 +142,13 @@ sequenceDiagram
 
 ---
 
-## 4. Component-by-Component Specifications
+## 5. Detailed Component Specifications & Code Blueprints
 
-### 4.1. Backend Service Layer: Canonical Resolution Helper
+### 5.1. Backend Service Layer: Canonical Resolution Helper
 **File:** `backend/src/services/subscription/subscription-guard.service.ts`
 
 Introduce `resolveEffectiveSubscription`:
+
 ```typescript
 export interface EffectiveSubscriptionContext {
   effectiveUserId: string;       // Owner ID if inherited, else caller ID
@@ -136,94 +167,422 @@ export async function resolveEffectiveSubscription(
   userId: string,
   businessId?: string,
   tx?: TxClient | typeof prisma
-): Promise<EffectiveSubscriptionContext>
+): Promise<EffectiveSubscriptionContext> {
+  const db = tx ?? prisma;
+
+  // 1. Fetch caller user record
+  const caller = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      role: true,
+      fullName: true,
+      email: true,
+      createdAt: true,
+      subscriptionTier: true,
+      subscriptionExpiresAt: true,
+      trialEndsAt: true,
+    },
+  });
+
+  if (!caller) {
+    throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+  }
+
+  // 2. Admin bypass
+  if (caller.role === 'admin') {
+    return {
+      effectiveUserId: caller.id,
+      isInherited: false,
+      ownerName: caller.fullName,
+      ownerEmail: caller.email,
+      businessId,
+      subscriptionTier: 'admin',
+      subscriptionExpiresAt: null,
+      trialEndsAt: null,
+      createdAt: caller.createdAt,
+      status: {
+        tier: 'admin',
+        planName: 'System Administrator',
+        hasAccess: true,
+        isReadOnlyGrace: false,
+        isExpired: false,
+        isPaid: true,
+        expiresAt: null,
+        reason: 'ACTIVE',
+      },
+    };
+  }
+
+  // 3. Check if caller owns at least one business
+  const ownedBusiness = await db.business.findFirst({
+    where: { userId },
+    select: { id: true },
+  });
+
+  if (ownedBusiness) {
+    // Caller is an owner — evaluate their own subscription directly
+    return {
+      effectiveUserId: caller.id,
+      isInherited: false,
+      ownerName: caller.fullName,
+      ownerEmail: caller.email,
+      businessId,
+      subscriptionTier: caller.subscriptionTier || 'free',
+      subscriptionExpiresAt: caller.subscriptionExpiresAt,
+      trialEndsAt: caller.trialEndsAt,
+      createdAt: caller.createdAt,
+      status: getSubscriptionStatus(caller),
+    };
+  }
+
+  // 4. Caller is a non-owner team member — resolve business owner
+  let ownerUser: typeof caller | null = null;
+  let resolvedBusinessId = businessId;
+
+  if (businessId) {
+    const biz = await db.business.findUnique({
+      where: { id: businessId },
+      select: {
+        id: true,
+        user: {
+          select: {
+            id: true,
+            role: true,
+            fullName: true,
+            email: true,
+            createdAt: true,
+            subscriptionTier: true,
+            subscriptionExpiresAt: true,
+            trialEndsAt: true,
+          },
+        },
+      },
+    });
+    if (biz?.user) {
+      ownerUser = biz.user;
+      resolvedBusinessId = biz.id;
+    }
+  }
+
+  if (!ownerUser) {
+    // Fallback: look up caller's active business membership
+    const membership = await db.businessMember.findFirst({
+      where: { userId, isActive: true },
+      select: {
+        business: {
+          select: {
+            id: true,
+            user: {
+              select: {
+                id: true,
+                role: true,
+                fullName: true,
+                email: true,
+                createdAt: true,
+                subscriptionTier: true,
+                subscriptionExpiresAt: true,
+                trialEndsAt: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (membership?.business?.user) {
+      ownerUser = membership.business.user;
+      resolvedBusinessId = membership.business.id;
+    }
+  }
+
+  if (ownerUser) {
+    // Team member inherits the owner's plan and dates
+    return {
+      effectiveUserId: ownerUser.id,
+      isInherited: true,
+      ownerName: ownerUser.fullName,
+      ownerEmail: ownerUser.email,
+      businessId: resolvedBusinessId,
+      subscriptionTier: ownerUser.subscriptionTier || 'free',
+      subscriptionExpiresAt: ownerUser.subscriptionExpiresAt,
+      trialEndsAt: ownerUser.trialEndsAt,
+      createdAt: ownerUser.createdAt,
+      status: getSubscriptionStatus(ownerUser),
+    };
+  }
+
+  // 5. Fallback for new standalone users not yet assigned to any organization
+  return {
+    effectiveUserId: caller.id,
+    isInherited: false,
+    ownerName: caller.fullName,
+    ownerEmail: caller.email,
+    businessId,
+    subscriptionTier: caller.subscriptionTier || 'free',
+    subscriptionExpiresAt: caller.subscriptionExpiresAt,
+    trialEndsAt: caller.trialEndsAt,
+    createdAt: caller.createdAt,
+    status: getSubscriptionStatus(caller),
+  };
+}
 ```
 
-**Implementation Invariants:**
-1. Check `user.role === 'admin'` first: return immediate admin bypass.
-2. Check if user owns at least one business (`db.business.findFirst({ where: { userId } })`). If yes, return their own subscription directly (`isInherited: false`).
-3. If user owns 0 businesses, query their active membership:
-   - If `businessId` is given, query `db.business.findUnique({ where: { id: businessId }, include: { user: true } })`.
-   - If no `businessId`, query `db.businessMember.findFirst({ where: { userId, isActive: true }, include: { business: { include: { user: true } } } })`.
-4. If owner user found, evaluate `getSubscriptionStatus(ownerUser)` and package into `EffectiveSubscriptionContext`.
-5. If neither owned business nor membership exists (e.g. brand-new standalone signup), evaluate caller's own trial info.
-
-### 4.2. Backend User Profile Endpoint (`/auth/me`)
+### 5.2. Backend User Profile Endpoint (`/auth/me`)
 **File:** `backend/src/services/auth/auth.service.ts`
 
 Update `getMe(userId)`:
-```typescript
-// Resolve effective subscription across owner boundary
-const effectiveSub = await resolveEffectiveSubscription(userId);
 
-return {
-  ...sanitizeUser(user),
-  // Override subscription fields with effective owner entitlement
-  subscriptionTier: effectiveSub.subscriptionTier,
-  subscriptionExpiresAt: effectiveSub.subscriptionExpiresAt,
-  trialEndsAt: effectiveSub.trialEndsAt,
-  isSubscriptionInherited: effectiveSub.isInherited,
-  subscriptionOwner: effectiveSub.isInherited
-    ? {
-        id: effectiveSub.effectiveUserId,
-        name: effectiveSub.ownerName,
-        email: effectiveSub.ownerEmail,
-      }
-    : null,
-  pendingInvitationCount,
-  isOwnerAccount,
-  pendingPlan: pendingSubmission?.plan ?? null,
-  hasPendingSubmission: !!pendingSubmission,
-};
+```typescript
+export async function getMe(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!user) {
+    throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+  }
+
+  const [ownedCount, nonOwnerMemberships] = await Promise.all([
+    prisma.business.count({ where: { userId } }),
+    prisma.businessMember.count({ where: { userId, role: { not: 'owner' }, isActive: true } }),
+  ]);
+  const isOwnerAccount = !(ownedCount === 0 && nonOwnerMemberships > 0);
+
+  // Dynamically resolve effective subscription (inherits owner's subscription for team members)
+  const effectiveSub = await resolveEffectiveSubscription(userId);
+
+  const pendingSubmission = await prisma.subscriptionSubmission.findFirst({
+    where: { userId: effectiveSub.effectiveUserId, status: 'pending' },
+    orderBy: { createdAt: 'desc' },
+    select: { plan: true, status: true },
+  });
+
+  return {
+    ...sanitizeUser(user),
+    // Effective subscription metadata
+    subscriptionTier: effectiveSub.subscriptionTier,
+    subscriptionExpiresAt: effectiveSub.subscriptionExpiresAt,
+    trialEndsAt: effectiveSub.trialEndsAt,
+    isSubscriptionInherited: effectiveSub.isInherited,
+    subscriptionOwner: effectiveSub.isInherited
+      ? {
+          id: effectiveSub.effectiveUserId,
+          name: effectiveSub.ownerName,
+          email: effectiveSub.ownerEmail,
+        }
+      : null,
+    pendingInvitationCount,
+    isOwnerAccount,
+    pendingPlan: pendingSubmission?.plan ?? null,
+    hasPendingSubmission: !!pendingSubmission,
+  };
+}
 ```
 
-**Impact**: When the frontend boots and calls `fetchMe()`, the `useAuthStore.getState().user` object immediately contains the owner's active subscription tier and countdown dates.
-
-### 4.3. Backend Middleware: `requireActiveSubscription` & `requireFeature`
+### 5.3. Backend Middleware: `requireActiveSubscription` & `requireFeature`
 **File:** `backend/src/middleware/subscription.ts`
 
-1. **`requireActiveSubscription`**:
-   - Extract `businessId` from `req.headers['x-business-id']`, `req.params.businessId`, `req.params.id`, or `req.body.businessId`.
-   - Call `resolveEffectiveSubscription(userId, businessId)`.
-   - Attach `req.subscription = effectiveSub.status`.
-   - Attach `req.subscriptionContext = effectiveSub`.
-   - If access is blocked or in read-only grace on a mutating HTTP verb (POST/PUT/PATCH/DELETE) and not fund-exempt:
-     - If `effectiveSub.isInherited`:
-       Return friendly error:
-       `"The account owner's subscription has expired. Please contact ${effectiveSub.ownerName || 'your business owner'} to renew."`
-     - Else: standard message for owners.
-2. **`requireFeature(feature)`**:
-   - Uses `req.subscription?.tier` (which is now guaranteed to be the effective organization tier).
+Update `requireActiveSubscription`:
+```typescript
+export async function requireActiveSubscription(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const userId = req.user?.userId;
+  if (!userId) {
+    return next(new AppError(401, 'Unauthorized', 'UNAUTHORIZED'));
+  }
 
-### 4.4. Backend Shared Quota: AI CFO Queries
-**File:** `backend/src/services/subscription/subscription-guard.service.ts`
+  try {
+    const businessId =
+      (req.headers['x-business-id'] as string) ||
+      req.params.businessId ||
+      req.params.id ||
+      req.body?.businessId;
 
-In `checkAiQueryLimit`:
-- When caller is a team member (`isInherited: true`), count queries created by all users belonging to that owner's organization during the current UTC month against the owner's plan limit.
-- Both owner and staff queries are pooled under the organization's monthly allowance (e.g. 10 queries on Starter, 50 queries on Business, unlimited on Scale-Up).
+    const effectiveSub = await resolveEffectiveSubscription(userId, businessId);
 
-### 4.5. Backend Billing Ownership Guards
+    // Admin users bypass all checks
+    if (effectiveSub.status.tier === 'admin') {
+      req.subscription = effectiveSub.status;
+      return next();
+    }
+
+    const enforcementEnabled = config.subscription?.enforcementEnabled ?? false;
+    if (!enforcementEnabled) {
+      req.subscription = effectiveSub.status;
+      return next();
+    }
+
+    const isReadMethod = ['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase());
+
+    if (!effectiveSub.status.hasAccess || effectiveSub.status.isReadOnlyGrace) {
+      if (!isReadMethod) {
+        if (isFundAccessExempt(req)) {
+          req.subscription = effectiveSub.status;
+          return next();
+        }
+
+        const isGrace =
+          effectiveSub.status.reason === 'TRIAL_IN_GRACE_PERIOD' ||
+          effectiveSub.status.reason === 'SUBSCRIPTION_IN_GRACE_PERIOD';
+
+        const msg = effectiveSub.isInherited
+          ? isGrace
+            ? `Your organization's subscription is in a 2-day read-only grace period. Please contact your account owner (${effectiveSub.ownerName || 'Owner'}) to renew.`
+            : `Your organization's subscription has expired. Please contact your account owner (${effectiveSub.ownerName || 'Owner'}) to renew.`
+          : isGrace
+          ? 'Your account is in a 2-day read-only grace period. Upgrade your plan to create or modify records.'
+          : 'Your trial or subscription has expired. Please upgrade to continue using WallXERP.';
+
+        return next(
+          new AppError(403, msg, effectiveSub.status.reason, {
+            tier: effectiveSub.status.tier,
+            expiresAt: effectiveSub.status.expiresAt,
+            readOnlyGrace: effectiveSub.status.isReadOnlyGrace,
+            isInherited: effectiveSub.isInherited,
+            ownerName: effectiveSub.ownerName,
+          })
+        );
+      }
+    }
+
+    req.subscription = effectiveSub.status;
+    return next();
+  } catch (err) {
+    logger.error('Failed to evaluate subscription status in middleware', { err, userId });
+    next(err);
+  }
+}
+```
+
+### 5.4. Backend AI CFO Quota & Scope Pooling
+**Files:** `backend/src/services/ai/ai.service.ts` & `backend/src/services/subscription/subscription-guard.service.ts`
+
+In `ai.service.ts`:
+```typescript
+export async function generateAIResponse(
+  businessId: string,
+  userId: string,
+  userMessage: string,
+  history: ChatMessage[] = []
+): Promise<AIResponse> {
+  // Resolve effective organization subscription
+  const effectiveSub = await resolveEffectiveSubscription(userId, businessId);
+
+  const enforcementEnabled = config.subscription?.enforcementEnabled ?? false;
+  if (enforcementEnabled && !effectiveSub.status.hasAccess) {
+    throw new AppError(
+      403,
+      effectiveSub.isInherited
+        ? `The organization's subscription has expired. Please contact ${effectiveSub.ownerName || 'your business owner'} to continue using the AI CFO.`
+        : 'Your trial or subscription has expired. Please upgrade to continue using the AI CFO.',
+      'SUBSCRIPTION_EXPIRED',
+      { tier: effectiveSub.status.tier, expiresAt: effectiveSub.status.expiresAt }
+    );
+  }
+
+  // Check quota against the effective owner's organization pool
+  const tier = effectiveSub.status.tier;
+  const aiLimit = await checkAiQueryLimit(effectiveSub.effectiveUserId, tier);
+  if (enforcementEnabled && !aiLimit.allowed) {
+    const limits = getPlanLimits(tier);
+    throw new AppError(
+      403,
+      `Your organization has reached its monthly AI query limit (${limits.maxMonthlyAiQueries}). Please contact the account owner to upgrade.`,
+      'AI_QUERY_LIMIT_REACHED',
+      { currentPlan: tier, maxQueries: limits.maxMonthlyAiQueries, currentQueries: aiLimit.current }
+    );
+  }
+
+  const recordAndReturn = (response: AIResponse): AIResponse => {
+    void logAiQuery(effectiveSub.effectiveUserId, businessId, userMessage, response.reply.length).catch((err) => {
+      logger.warn('[AI Service] Failed to log AI query usage:', { error: err.message, userId, businessId });
+    });
+    return response;
+  };
+  // ... proceed to generate response ...
+}
+```
+
+### 5.5. Backend Billing Ownership Guards
 **File:** `backend/src/controllers/subscription.controller.ts`
 
-- In `startTrial`: Guard that only owners (`isOwnerAccount = true`) can trigger free trials. Non-owners return `403 ONLY_OWNER_CAN_MANAGE_SUBSCRIPTION`.
-- In `submitProof`: If a staff member attempts to submit proof, reject with `403 ONLY_OWNER_CAN_MANAGE_SUBSCRIPTION` directing them to have the owner submit payment proofs.
+```typescript
+export const startTrial = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user!.userId;
+  
+  // Guard: Only owners can trigger free trials
+  const [ownedCount, nonOwnerMemberships] = await Promise.all([
+    prisma.business.count({ where: { userId } }),
+    prisma.businessMember.count({ where: { userId, role: { not: 'owner' }, isActive: true } }),
+  ]);
+  if (ownedCount === 0 && nonOwnerMemberships > 0) {
+    throw new AppError(
+      403,
+      'Only the business owner can manage or activate subscription trials.',
+      'ONLY_OWNER_CAN_MANAGE_SUBSCRIPTION'
+    );
+  }
 
-### 4.6. SME Frontend: Automatic Business Context in Axios
+  const result = await subscriptionService.startFreeTrial(userId);
+  const user = await authService.getMe(userId);
+  res.status(200).json({ success: true, data: { trialEndsAt: result.trialEndsAt, user }, message: 'Free trial activated' });
+});
+
+export const submitProof = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user!.userId;
+
+  // Guard: Only owners can submit payment proofs
+  const [ownedCount, nonOwnerMemberships] = await Promise.all([
+    prisma.business.count({ where: { userId } }),
+    prisma.businessMember.count({ where: { userId, role: { not: 'owner' }, isActive: true } }),
+  ]);
+  if (ownedCount === 0 && nonOwnerMemberships > 0) {
+    throw new AppError(
+      403,
+      'Subscription billing and payment proof submissions are managed exclusively by the business owner.',
+      'ONLY_OWNER_CAN_MANAGE_SUBSCRIPTION'
+    );
+  }
+
+  // ... proceed with processPaymentProof ...
+});
+```
+
+### 5.6. SME Frontend: Automatic Business Context in Axios
 **File:** `frontend/src/lib/axios.ts`
 
-In `api.interceptors.request`:
-- Retrieve active business ID from `useBusinessStore.getState().activeBusiness?.id` or `localStorage.getItem('activeBusinessId')`.
-- If present, inject header:
-  `config.headers['X-Business-Id'] = activeBusinessId;`
-- This ensures all background and explicit API requests carry the business context seamlessly.
+```typescript
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('accessToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
 
-### 4.7. SME Frontend: Hook Enhancement
+  // Inject active business ID header for backend context resolution
+  try {
+    const activeBizId = localStorage.getItem('activeBusinessId');
+    if (activeBizId && !config.headers['X-Business-Id']) {
+      config.headers['X-Business-Id'] = activeBizId;
+    }
+  } catch {
+    // LocalStorage read error fallback
+  }
+
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type'];
+  }
+  return config;
+});
+```
+
+### 5.7. SME Frontend: Hook Enhancement
 **File:** `frontend/src/hooks/useSubscriptionStatus.ts`
 
-Extend `SubscriptionStatus`:
 ```typescript
 export interface SubscriptionStatus {
-  // Existing fields:
   tier: SubscriptionTier;
   planName: string;
   isPaid: boolean;
@@ -236,34 +595,56 @@ export interface SubscriptionStatus {
   daysRemaining: number;
   graceHoursRemaining: number;
   formattedCountdown: string;
-
-  // New shared organization fields:
   isInherited: boolean;
   ownerName: string | null;
   ownerEmail: string | null;
 }
 ```
 
-Populate `isInherited: Boolean(user?.isSubscriptionInherited)`, `ownerName: user?.subscriptionOwner?.name || null`.
+In the memoized return:
+```typescript
+const isInherited = Boolean(user?.isSubscriptionInherited);
+const ownerName = user?.subscriptionOwner?.name || null;
+const ownerEmail = user?.subscriptionOwner?.email || null;
 
-### 4.8. SME Frontend: Grace Banner & Subscription Page UX
+return {
+  tier: effectiveTier,
+  planName: TIER_DISPLAY_NAMES[effectiveTier] || 'Starter',
+  isPaid,
+  isTrial,
+  hasAccess,
+  isReadOnlyGrace,
+  isExpired,
+  canWrite,
+  expiresAt,
+  daysRemaining,
+  graceHoursRemaining,
+  formattedCountdown,
+  isInherited,
+  ownerName,
+  ownerEmail,
+};
+```
+
+### 5.8. SME Frontend: UI Role Adaptation
 1. **`frontend/src/components/subscription/SubscriptionGraceBanner.tsx`**:
    - If `status.isInherited`:
-     - Display: *"Your organization's subscription is in a 2-day read-only grace period. Please contact your account owner ({status.ownerName}) to renew."*
+     - Render: *"Your organization's subscription is in a 2-day read-only grace period. Please contact your account owner ({status.ownerName || 'Owner'}) to renew."*
      - Hide the "Upgrade Plan" CTA button from non-owner staff, or change it to "Contact Account Owner".
 2. **`frontend/src/pages/Subscription.tsx`**:
-   - Check `user?.isOwnerAccount`:
-     - **If Owner (`isOwnerAccount === true`)**: Full subscription management, plan cards, billing cycle toggle, manual bank transfer proof upload, receipt upload modal.
+   - Inspect `user?.isOwnerAccount`:
+     - **If Owner (`isOwnerAccount === true`)**: Render full pricing matrix, billing frequency switcher, manual bank transfer upload form, receipt modal.
      - **If Staff (`isOwnerAccount === false`)**:
-       - Render **"Team Member Subscription Access"** banner:
-         *"You are accessing WallXERP as part of {ownerName}'s team under the {planName} plan."*
-       - Display active plan benefits and remaining access period.
-       - Display notice: *"Plan upgrades, renewals, and invoice receipts are managed exclusively by the business owner."*
-       - Hide the bank transfer payment proof submission form to prevent accidental duplicate payments.
+       - Render a dedicated **Team Member Subscription Overview**:
+         - Header badge: *"Team Member Access — Covered by {ownerName || 'Account Owner'}"*
+         - Card: Current Plan name, badge (`Active`), remaining days or expiration date.
+         - Grid: List of features available to the team on this tier.
+         - Callout: *"Subscription renewals, tier changes, and official invoice receipts are managed exclusively by your business owner ({ownerName || 'Account Owner'})."*
+         - Completely hide the payment proof upload form and plan selection cards.
 
 ---
 
-## 5. Phased Implementation Roadmap
+## 6. Phased Implementation Roadmap
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -271,13 +652,13 @@ Populate `isInherited: Boolean(user?.isSubscriptionInherited)`, `ownerName: user
 │          • Add resolveEffectiveSubscription in subscription-guard      │
 │          • Update getMe in auth.service to return effective plan       │
 ├────────────────────────────────────────────────────────────────────────┤
-│ PHASE 2: Backend Middleware & Billing Ownership Guards                 │
+│ PHASE 2: Backend Middleware, AI CFO & Billing Ownership Guards         │
 │          • Update requireActiveSubscription to resolve effective user  │
-│          • Pool AI query limit across organization                     │
+│          • Update generateAIResponse to pool organization quotas       │
 │          • Guard startTrial and submitProof to owner-only              │
 ├────────────────────────────────────────────────────────────────────────┤
 │ PHASE 3: Frontend Client Interceptor & Subscription Hook               │
-│          • Inject X-Business-Id in axios interceptor                   │
+│          • Inject X-Business-Id in axios request interceptor           │
 │          • Extend useSubscriptionStatus with isInherited & ownerName   │
 ├────────────────────────────────────────────────────────────────────────┤
 │ PHASE 4: Frontend UI Role Adaptation                                   │
@@ -290,38 +671,11 @@ Populate `isInherited: Boolean(user?.isSubscriptionInherited)`, `ownerName: user
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Phase 1: Canonical Domain Resolution Helper & `/auth/me` Profile
-- Implement `resolveEffectiveSubscription(userId, businessId, tx)` in `backend/src/services/subscription/subscription-guard.service.ts`.
-- Integrate `resolveEffectiveSubscription` into `getMe(userId)` in `backend/src/services/auth/auth.service.ts`.
-- Ensure `isSubscriptionInherited` and `subscriptionOwner` are returned in the response payload.
-
-### Phase 2: Backend Middleware & Billing Ownership Guards
-- Update `requireActiveSubscription` in `backend/src/middleware/subscription.ts` to use `resolveEffectiveSubscription`.
-- Ensure mutating writes for team members reflect the owner's active/grace/expired status.
-- Update `checkAiQueryLimit` to pool query logs by owner or organization.
-- Guard `startTrial` and `submitProof` in `backend/src/controllers/subscription.controller.ts` with `isOwnerAccount` check.
-
-### Phase 3: Frontend Client Interceptor & Subscription Hook
-- In `frontend/src/lib/axios.ts`, add dynamic `X-Business-Id` header injection from active business.
-- In `frontend/src/hooks/useSubscriptionStatus.ts`, consume `user.isSubscriptionInherited` and `user.subscriptionOwner`.
-
-### Phase 4: Frontend UI Role Adaptation
-- Update `frontend/src/components/subscription/SubscriptionGraceBanner.tsx` to display role-tailored messaging when `isInherited: true`.
-- Update `frontend/src/pages/Subscription.tsx` to render the clean **Team Member Overview** when `!user.isOwnerAccount`.
-
-### Phase 5: Automated QA Verification & Regression Testing
-- Write automated tests:
-  - Unit test: Owner with Scale-Up plan invites Sales Staff -> Staff resolves Scale-Up tier and owner expiration date.
-  - Unit test: Owner trial expires -> Staff write requests receive 403 with owner notification message.
-  - Integration test: Staff login -> `/auth/me` returns inherited subscription details.
-  - Integration test: Non-owner blocked from `POST /subscription/proof` and `POST /subscription/start-trial`.
-- Run full typecheck and build across backend and frontends.
-
 ---
 
-## 6. Test Strategy & QA Verification Matrix (QA Hunter Standard)
+## 7. Test Strategy & QA Verification Matrix (QA Hunter Standard)
 
-Following `prompts/qahunter.md`, the implementation must be validated against the following test matrix:
+Following `prompts/qahunter.md`, all changes must be verified against this test matrix:
 
 | Test ID | Test Scenario | Expected Outcome | Tier |
 | :--- | :--- | :--- | :--- |
@@ -332,17 +686,19 @@ Following `prompts/qahunter.md`, the implementation must be validated against th
 | **SUB-05** | Staff calls `/auth/me` | Returns `isSubscriptionInherited: true` and `subscriptionOwner` details | Integration |
 | **SUB-06** | Staff attempts `POST /subscription/start-trial` | Rejected with 403 `ONLY_OWNER_CAN_MANAGE_SUBSCRIPTION` | Integration |
 | **SUB-07** | Staff attempts `POST /subscription/proof` | Rejected with 403 `ONLY_OWNER_CAN_MANAGE_SUBSCRIPTION` | Integration |
-| **SUB-08** | Staff queries AI CFO assistant | Query counts against owner's plan quota pool | Unit / Integration |
+| **SUB-08** | Staff chats with AI CFO assistant | Quota pooled and counted under owner's allowance | Unit / Integration |
 | **SUB-09** | Admin user calls any endpoint or accesses dashboard | Bypasses all subscription checks (`hasAccess: true`, unlimited) | Unit |
 | **SUB-10** | Staff visits `/subscription` on frontend | Shows Team Member View; payment proof upload is hidden | Frontend Component |
+| **SUB-11** | Staff switches active business in multi-business org | Subscription remains identical across businesses of the same owner | Integration |
 
 ---
 
-## 7. Definition of Done (DoD) Checklist
+## 8. Definition of Done (DoD) Checklist
 
 - [ ] `backend/src/services/subscription/subscription-guard.service.ts` implements `resolveEffectiveSubscription`.
 - [ ] `backend/src/services/auth/auth.service.ts` returns inherited subscription metadata in `getMe`.
 - [ ] `backend/src/middleware/subscription.ts` enforces subscription checks against the owner's status.
+- [ ] `backend/src/services/ai/ai.service.ts` pools AI query limits under the business owner's organization allowance.
 - [ ] `backend/src/controllers/subscription.controller.ts` enforces owner-only guards on trial and proof endpoints.
 - [ ] `frontend/src/lib/axios.ts` sends `X-Business-Id` header on authenticated requests.
 - [ ] `frontend/src/hooks/useSubscriptionStatus.ts` exposes `isInherited` and `ownerName`.
