@@ -45,7 +45,7 @@ This guide covers testing all automated email scenarios in the WallXERP applicat
 You already have Resend configured in `.env`:
 
 ```bash
-RESEND_API_KEY=re_REPLACE_WITH_YOUR_RESEND_KEY
+RESEND_API_KEY=re_placeholder_xxxxxxxxxxxxxxxxxxxx
 EMAIL_FROM=WallXERP <noreply@paymytax.ng>
 ```
 
@@ -222,7 +222,7 @@ EMAIL_FROM=WallXERP <onboarding@resend.dev>
 
 ```bash
 # Check .env has valid API key
-RESEND_API_KEY=re_REPLACE_WITH_YOUR_RESEND_KEY
+RESEND_API_KEY=re_placeholder_xxxxxxxxxxxxxxxxxxxx
 
 # Verify API key is valid at https://resend.com/api-keys
 # Restart backend server after .env changes

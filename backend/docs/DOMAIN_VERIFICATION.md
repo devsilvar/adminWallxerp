@@ -212,7 +212,7 @@ nslookup -type=cname resend2._domainkey.wallxerp.com
 ```bash
 # Updated in backend/.env:
 EMAIL_FROM=WallXERP <noreply@wallxerp.com>
-RESEND_API_KEY=re_REPLACE_WITH_YOUR_RESEND_KEY
+RESEND_API_KEY=re_placeholder_xxxxxxxxxxxxxxxxxxxx
 FRONTEND_URL=http://localhost:5173,https://wallxerp.com
 ```
 
