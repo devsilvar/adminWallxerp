@@ -40,6 +40,23 @@ function AppShell() {
   const fetchMe = useAuthStore((s) => s.fetchMe);
   const [bootReady, setBootReady] = useState(false);
 
+  // Admin security: Force fresh login on every page load by clearing any existing tokens.
+  // This prevents stale token issues where the app gets stuck on "Verifying session..."
+  // for minutes when old tokens exist in localStorage. Admins MUST login fresh each time.
+  useEffect(() => {
+    const hasToken = !!localStorage.getItem('accessToken');
+    if (hasToken) {
+      // Clear tokens silently without triggering navigation or API calls
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      // Reset auth state to force login screen
+      useAuthStore.setState({ user: null, isAuthenticated: false });
+      setBootReady(true);
+    } else {
+      setBootReady(true);
+    }
+  }, []); // Only run once on mount
+
   useEffect(() => {
     let cancelled = false;
     async function boot() {
