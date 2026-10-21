@@ -17,6 +17,9 @@ export default function FeeSettingsTab({ onSweepCompleted: _onSweepCompleted }: 
     withdrawalFeePct: 1.0,
     withdrawalFeeCap: 300,
     minWithdrawalAmount: 1000,
+    autoSweepEnabled: true,
+    autoSweepThreshold: 1000,
+    maxDailyPayout: 500000,
   });
   const [isFeeLoading, setIsFeeLoading] = useState(false);
   const [isFeeSaving, setIsFeeSaving] = useState(false);
@@ -31,6 +34,9 @@ export default function FeeSettingsTab({ onSweepCompleted: _onSweepCompleted }: 
           withdrawalFeePct: Number(cfg.withdrawalFeePct),
           withdrawalFeeCap: Number(cfg.withdrawalFeeCap),
           minWithdrawalAmount: Number(cfg.minWithdrawalAmount),
+          autoSweepEnabled: cfg.autoSweepEnabled ?? true,
+          autoSweepThreshold: Number(cfg.autoSweepThreshold ?? 1000),
+          maxDailyPayout: Number(cfg.maxDailyPayout ?? 500000),
         });
       })
       .catch((err: any) => {
@@ -47,6 +53,9 @@ export default function FeeSettingsTab({ onSweepCompleted: _onSweepCompleted }: 
         withdrawalFeePct: Number(feeForm.withdrawalFeePct),
         withdrawalFeeCap: Number(feeForm.withdrawalFeeCap),
         minWithdrawalAmount: Number(feeForm.minWithdrawalAmount),
+        autoSweepEnabled: Boolean(feeForm.autoSweepEnabled),
+        autoSweepThreshold: Number(feeForm.autoSweepThreshold),
+        maxDailyPayout: Number(feeForm.maxDailyPayout),
       });
       setFeeConfig(res.data.data);
       toast.success('Platform fee configuration saved successfully.');
@@ -165,6 +174,70 @@ export default function FeeSettingsTab({ onSweepCompleted: _onSweepCompleted }: 
                   <p className='mt-1 text-[10px] text-ink-subtle'>
                     Minimum allowable withdrawal request amount (default: ₦1,000.00).
                   </p>
+                </div>
+
+                <div>
+                  <label htmlFor='max-daily-payout' className='mb-1 block text-[11px] font-medium text-ink-muted'>
+                    Maximum daily payout cap (₦)
+                  </label>
+                  <input
+                    id='max-daily-payout'
+                    type='number'
+                    step='1000'
+                    min='0'
+                    max='100000000'
+                    required
+                    value={feeForm.maxDailyPayout}
+                    onChange={(e) =>
+                      setFeeForm({ ...feeForm, maxDailyPayout: parseFloat(e.target.value) || 0 })
+                    }
+                    className={inputClass}
+                  />
+                  <p className='mt-1 text-[10px] text-ink-subtle'>
+                    Maximum cumulative payout allowed per merchant per Lagos day across all businesses. Set to 0 for unlimited. Changes take effect within 30 seconds.
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor='sweep-threshold' className='block text-xs font-semibold text-ink'>
+                    Auto-sweep retained floor (₦)
+                  </label>
+                  <input
+                    id='sweep-threshold'
+                    type='number'
+                    step='100'
+                    min='0'
+                    max='1000000'
+                    required
+                    value={feeForm.autoSweepThreshold}
+                    onChange={(e) =>
+                      setFeeForm({ ...feeForm, autoSweepThreshold: parseFloat(e.target.value) || 0 })
+                    }
+                    className={inputClass}
+                  />
+                  <p className='mt-1 text-[10px] text-ink-subtle'>
+                    Retained floor (R11). This balance is never swept automatically — it stays in the merchant&apos;s wallet for manual withdrawal (default: ₦1,000.00).
+                  </p>
+                </div>
+
+                <div className='flex items-center justify-between rounded border border-hairline bg-panel-subtle px-3 py-2'>
+                  <div>
+                    <label htmlFor='sweep-enabled' className='text-xs font-semibold text-ink block'>
+                      Platform auto-sweep master switch
+                    </label>
+                    <p className='text-[10px] text-ink-subtle'>
+                      Enables or disables automatic T+1 daily payouts across the entire platform.
+                    </p>
+                  </div>
+                  <input
+                    id='sweep-enabled'
+                    type='checkbox'
+                    checked={feeForm.autoSweepEnabled}
+                    onChange={(e) =>
+                      setFeeForm({ ...feeForm, autoSweepEnabled: e.target.checked })
+                    }
+                    className='h-4 w-4 rounded border-hairline-strong text-primary-600 focus:ring-primary-500 cursor-pointer'
+                  />
                 </div>
 
                 {feeConfig?.updatedAt && (

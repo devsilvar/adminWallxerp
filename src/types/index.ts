@@ -707,14 +707,17 @@ export interface AdminUserDetail extends AdminUser {
 
 export interface AdminBusiness {
   id: string;
+  merchantId?: string;
   businessName: string;
   ownerName: string;
   taxId?: string;
   businessType: string;
+  address?: string;
   state?: string;
   city?: string;
+  isActive?: boolean;
   createdAt: string;
-  user: { id: string; email: string };
+  user: { id: string; email: string; isActive?: boolean };
 }
 
 export interface AuditLog {
@@ -970,6 +973,14 @@ export interface TreasuryKPIs {
   totalDisbursementCost: number;
   netPlatformMargin: number;
   isProfitable: boolean;
+  gatewayBalanceNaira: number | null;
+  merchantLiabilityNaira: number;
+  floatNaira: number | null;
+  expectedFeeFloatNaira: number;
+  floatStatus: 'healthy' | 'expected' | 'deficit' | 'unknown';
+  // Reconciliation (optional)
+  paystackGlobalBalance?: number | null;
+  reconciliationVariance?: number | null;
 }
 
 export interface TransferMarginItem {
@@ -1034,6 +1045,9 @@ export interface PlatformFeeConfig {
   withdrawalFeePct: number;
   withdrawalFeeCap: number;
   minWithdrawalAmount: number;
+  autoSweepEnabled?: boolean;
+  autoSweepThreshold?: number;
+  maxDailyPayout?: number;
   updatedAt?: string;
   updatedBy?: string | null;
 }
@@ -1135,7 +1149,7 @@ export interface RegulatoryMeta {
   partnerPSPLicense: string;
   partnerBanks: string;
   governingLaw: string;
-  nonCustodialNotice: string;
+  custodyNotice: string;
   termsVersion: string;
 }
 

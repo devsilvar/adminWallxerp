@@ -2,7 +2,7 @@ import { Suspense, lazy, useMemo } from 'react';
 import { Filter, Search, ShieldCheck, X } from 'lucide-react';
 import { Skeleton } from '@/components/ui/Skeleton.tsx';
 import type { TreasuryAnalyticsData } from '@/types/index.ts';
-import { HairlineCell, HairlineGrid, Panel } from '../shared/Panel';
+import { HairlineGrid, Panel } from '../shared/Panel';
 import Pagination from '../shared/Pagination';
 import SegmentedControl from '../shared/SegmentedControl';
 import StatusPill from '../shared/StatusPill';
@@ -70,15 +70,16 @@ export default function TreasuryTab({
     <div className='space-y-4'>
       {kpis && (
         <>
+          {/* Row 1: Money Flow & Profit/Loss */}
           <HairlineGrid columns={3}>
             <StatCell
-              label='Gross DVA Inflows'
-              sublabel='Merchant bank transfer deposits captured'
+              label='Total Money In'
+              sublabel='Customer deposits to merchant accounts'
               value={formatNaira(kpis.totalGrossInflows)}
             />
             <StatCell
-              label='Gross Outflows'
-              sublabel='Settlement withdrawals disbursed'
+              label='Total Money Out'
+              sublabel='Merchant withdrawals to banks'
               value={formatNaira(kpis.totalGrossOutflows)}
             />
             <div className='bg-panel px-3 py-2.5'>
@@ -88,7 +89,7 @@ export default function TreasuryTab({
                     className={`h-1.5 w-1.5 rounded-full ${kpis.isProfitable ? 'bg-success-600' : 'bg-danger-600'}`}
                     aria-hidden='true'
                   />
-                  Net Platform Margin
+                  Platform Profit / Loss
                 </span>
               </div>
               <p
@@ -99,42 +100,77 @@ export default function TreasuryTab({
                 {formatSignedNaira(kpis.netPlatformMargin)}
               </p>
               <p className='mt-0.5 text-[10px] text-ink-subtle'>
-                Fees collected − (DVA 1% absorbed + gateway costs)
+                Your revenue minus all costs
               </p>
             </div>
           </HairlineGrid>
 
+          {/* Row 2: Cash Position & Solvency */}
           <HairlineGrid columns={3}>
-            <HairlineCell>
-              <div className='flex items-baseline justify-between gap-2'>
-                <span className='text-[11px] font-medium text-ink-muted'>Inflow Fee Absorbed</span>
-                <span className='text-[10px] font-medium text-ink-subtle'>−1.00%</span>
+            <StatCell
+              label='Cash Available'
+              sublabel='Real money in Paystack account right now'
+              value={kpis.gatewayBalanceNaira != null ? formatNaira(kpis.gatewayBalanceNaira) : 'Unavailable'}
+            />
+            <StatCell
+              label='Total You Owe Merchants'
+              sublabel='All merchant wallet balances combined'
+              value={formatNaira(kpis.merchantLiabilityNaira)}
+            />
+            <div className='bg-panel px-3 py-2.5'>
+              <div className='flex items-start justify-between gap-2'>
+                <span className='flex items-center gap-1.5 text-[11px] font-medium text-ink-muted'>
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      kpis.floatStatus === 'healthy'
+                        ? 'bg-success-600'
+                        : kpis.floatStatus === 'expected'
+                        ? 'bg-primary-600'
+                        : kpis.floatStatus === 'deficit'
+                        ? 'bg-danger-600'
+                        : 'bg-ink-muted'
+                    }`}
+                    aria-hidden='true'
+                  />
+                  Reserve Surplus / Deficit
+                </span>
+                <StatusPill
+                  tone={
+                    kpis.floatStatus === 'healthy'
+                      ? 'success'
+                      : kpis.floatStatus === 'expected'
+                      ? 'neutral'
+                      : kpis.floatStatus === 'deficit'
+                      ? 'danger'
+                      : 'neutral'
+                  }
+                >
+                  {kpis.floatStatus === 'healthy'
+                    ? 'Healthy'
+                    : kpis.floatStatus === 'expected'
+                    ? 'Expected'
+                    : kpis.floatStatus === 'deficit'
+                    ? 'Deficit'
+                    : 'Unknown'}
+                </StatusPill>
               </div>
-              <p className='mt-1 font-mono text-lg font-semibold tabular-nums text-ink'>
-                {formatSignedNaira(-kpis.totalInflowFeesAbsorbed)}
+              <p
+                className={`mt-1 font-mono text-xl font-semibold tabular-nums ${
+                  kpis.floatStatus === 'healthy'
+                    ? 'text-success-700'
+                    : kpis.floatStatus === 'expected'
+                    ? 'text-ink'
+                    : kpis.floatStatus === 'deficit'
+                    ? 'text-danger-700'
+                    : 'text-ink-muted'
+                }`}
+              >
+                {kpis.floatNaira != null ? formatSignedNaira(kpis.floatNaira) : 'Unavailable'}
               </p>
-              <p className='mt-0.5 text-[10px] text-ink-subtle'>Paystack DVA cost absorbed by platform</p>
-            </HairlineCell>
-            <HairlineCell>
-              <div className='flex items-baseline justify-between gap-2'>
-                <span className='text-[11px] font-medium text-ink-muted'>Withdrawal Fees Collected</span>
-                <span className='text-[10px] font-medium text-ink-subtle'>Revenue</span>
-              </div>
-              <p className='mt-1 font-mono text-lg font-semibold tabular-nums text-success-700'>
-                {formatSignedNaira(kpis.totalWithdrawalFeesCollected)}
+              <p className='mt-0.5 text-[10px] text-ink-subtle'>
+                Cash available minus what you owe = {kpis.floatNaira != null && kpis.floatNaira >= 0 ? 'surplus' : 'shortfall'}
               </p>
-              <p className='mt-0.5 text-[10px] text-ink-subtle'>Platform fee charged on payout</p>
-            </HairlineCell>
-            <HairlineCell>
-              <div className='flex items-baseline justify-between gap-2'>
-                <span className='text-[11px] font-medium text-ink-muted'>Disbursement Costs</span>
-                <span className='text-[10px] font-medium text-ink-subtle'>Gateway cost</span>
-              </div>
-              <p className='mt-1 font-mono text-lg font-semibold tabular-nums text-ink'>
-                {formatSignedNaira(-kpis.totalDisbursementCost)}
-              </p>
-              <p className='mt-0.5 text-[10px] text-ink-subtle'>Transfer schedule + ₦50 EMTL levy</p>
-            </HairlineCell>
+            </div>
           </HairlineGrid>
         </>
       )}
@@ -145,26 +181,41 @@ export default function TreasuryTab({
             <ShieldCheck className='mt-0.5 h-4 w-4 shrink-0 text-success-600' aria-hidden='true' />
             <div>
               <div className='flex flex-wrap items-center gap-2'>
-                <h2 className='text-[13px] font-semibold text-ink'>1:1 Gateway Solvency Oracle</h2>
-                <StatusPill tone='success'>100% fully backed</StatusPill>
+                <h2 className='text-[13px] font-semibold text-ink'>Solvency Check</h2>
+                <StatusPill
+                  tone={
+                    kpis?.floatStatus === 'deficit'
+                      ? 'danger'
+                      : kpis?.floatStatus === 'healthy' || kpis?.floatStatus === 'expected'
+                      ? 'success'
+                      : 'neutral'
+                  }
+                >
+                  {kpis?.floatStatus === 'healthy'
+                    ? 'Fully covered'
+                    : kpis?.floatStatus === 'expected'
+                    ? 'Fully covered'
+                    : kpis?.floatStatus === 'deficit'
+                    ? 'Shortfall detected'
+                    : 'Unknown'}
+                </StatusPill>
               </div>
               <p className='mt-0.5 text-[11px] text-ink-muted'>
-                Live Paystack gateway balance continuously audited against aggregate merchant liabilities via
-                nightly 01:00 WAT reconciliation.
+                Your Paystack cash is checked daily at 1:00 AM to make sure you have enough to pay all merchants.
               </p>
             </div>
           </div>
           <dl className='flex shrink-0 items-center gap-4 text-[11px]'>
             <div>
               <dt className='text-[10px] font-medium uppercase tracking-wider text-ink-subtle'>
-                Reserve invariant
+                Safety rule
               </dt>
-              <dd className='font-mono font-medium text-success-700'>Assets ≥ Liabilities</dd>
+              <dd className='font-mono font-medium text-success-700'>Cash ≥ What You Owe</dd>
             </div>
             <div className='h-6 w-px bg-hairline' aria-hidden='true' />
             <div>
               <dt className='text-[10px] font-medium uppercase tracking-wider text-ink-subtle'>
-                Operating model
+                Model
               </dt>
               <dd className='font-medium text-ink'>Non-custodial</dd>
             </div>

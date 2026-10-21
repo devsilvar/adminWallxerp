@@ -183,7 +183,7 @@ export default function AdminBusinesses() {
                     <td className='px-3 py-1.5 text-ink-muted'>{b.businessType}</td>
                     <td className='px-3 py-1.5 font-mono text-ink-muted whitespace-nowrap'>{b.merchantId || '—'}</td>
                     <td className='px-3 py-1.5 text-ink-muted'>
-                      {[b.city, b.state].filter(Boolean).join(', ') || '—'}
+                      {[b.city, b.state].filter(Boolean).join(', ') || b.address || '—'}
                     </td>
                     <td className='px-3 py-1.5'>
                       {typeof b.isActive === 'boolean' ? (

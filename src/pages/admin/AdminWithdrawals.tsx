@@ -35,6 +35,8 @@ interface WithdrawalRequest {
   netAmount: number;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   isStale?: boolean;
+  needsReconciliation?: boolean;
+  reconciliationReason?: string | null;
   destinationBankName: string;
   destinationAccountNum: string;
   destinationAccountName: string;
@@ -48,7 +50,7 @@ interface WithdrawalRequest {
   autoPayoutEnabled?: boolean;
 }
 
-type StatusFilter = 'all' | 'pending' | 'processing' | 'completed' | 'failed';
+type StatusFilter = 'all' | 'pending' | 'processing' | 'completed' | 'failed' | 'reconciliation';
 
 const STATUS_OPTIONS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
   { value: 'all', label: 'All' },
@@ -56,13 +58,14 @@ const STATUS_OPTIONS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
   { value: 'processing', label: 'Processing' },
   { value: 'completed', label: 'Completed' },
   { value: 'failed', label: 'Failed' },
+  { value: 'reconciliation', label: 'Needs Reconciliation' },
 ];
 
 const STATUS_META: Record<
   WithdrawalRequest['status'],
   { tone: Tone; label: string; icon: typeof Clock }
 > = {
-  pending: { tone: 'warning', label: 'Awaiting approval', icon: Clock },
+  pending: { tone: 'warning', label: 'Awaiting funding', icon: Clock },
   processing: { tone: 'info', label: 'Transfer in progress', icon: Loader2 },
   completed: { tone: 'success', label: 'Completed', icon: CheckCircle2 },
   failed: { tone: 'danger', label: 'Failed', icon: XCircle },
@@ -128,7 +131,11 @@ export default function AdminWithdrawals() {
       limit: String(pagination.limit),
     });
 
-    if (statusFilter !== 'all') params.append('status', statusFilter);
+    if (statusFilter === 'reconciliation') {
+      params.append('needsReconciliation', 'true');
+    } else if (statusFilter !== 'all') {
+      params.append('status', statusFilter);
+    }
     if (search) params.append('search', search);
 
     try {
@@ -359,6 +366,13 @@ export default function AdminWithdrawals() {
   const isStale = (w: WithdrawalRequest) => w.status === 'processing' && w.isStale;
 
   const WithdrawalStatus = ({ withdrawal }: { withdrawal: WithdrawalRequest }) => {
+    if (withdrawal.needsReconciliation) {
+      return (
+        <StatusPill tone='danger' icon={<AlertTriangle className='h-3 w-3' />}>
+          Needs reconciliation
+        </StatusPill>
+      );
+    }
     if (isStale(withdrawal)) {
       return (
         <StatusPill tone='warning' icon={<AlertTriangle className='h-3 w-3' />}>
@@ -672,6 +686,27 @@ export default function AdminWithdrawals() {
                             Re-query
                           </Button>
                         )}
+
+                        {w.status === 'failed' && (
+                          <>
+                            {w.needsReconciliation && (
+                              <Button
+                                variant='secondary'
+                                size='sm'
+                                onClick={() => openRejectModal(w)}
+                              >
+                                Release
+                              </Button>
+                            )}
+                            <Button
+                              variant='secondary'
+                              size='sm'
+                              onClick={() => openManualSettleModal(w)}
+                            >
+                              Settle Offline
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -768,11 +803,19 @@ export default function AdminWithdrawals() {
           setShowRejectModal(false);
           setRejectReason('');
         }}
-        title={selectedWithdrawal?.status === 'processing' ? 'Cancel & Refund Withdrawal' : 'Reject Withdrawal'}
+        title={
+          selectedWithdrawal?.status === 'processing'
+            ? 'Cancel & Refund Withdrawal'
+            : selectedWithdrawal?.needsReconciliation
+              ? 'Release Locked Funds'
+              : 'Reject Withdrawal'
+        }
         subtitle={
           selectedWithdrawal?.status === 'processing'
             ? 'Cancel transfer and return funds to merchant wallet balance'
-            : 'Provide a reason for rejection'
+            : selectedWithdrawal?.needsReconciliation
+              ? 'Return held funds back to merchant wallet available balance'
+              : 'Provide a reason for rejection'
         }
         icon={<XCircle className='h-4 w-4' />}
         size='sm'
@@ -797,7 +840,11 @@ export default function AdminWithdrawals() {
               disabled={rejectReason.trim().length < 3}
             >
               <XCircle className='h-3.5 w-3.5' />
-              {selectedWithdrawal?.status === 'processing' ? 'Cancel & Return Funds' : 'Reject Request'}
+              {selectedWithdrawal?.status === 'processing'
+                ? 'Cancel & Return Funds'
+                : selectedWithdrawal?.needsReconciliation
+                  ? 'Release Held Funds'
+                  : 'Reject Request'}
             </Button>
           </>
         }
@@ -817,6 +864,14 @@ export default function AdminWithdrawals() {
                 The withdrawal is marked failed and{' '}
                 <strong>{formatNaira(selectedWithdrawal.amount)}</strong> is returned to the
                 business wallet balance.
+              </p>
+            )}
+
+            {selectedWithdrawal.needsReconciliation && (
+              <p className='rounded border border-warning-200 bg-warning-50 px-3 py-2 text-[11px] text-warning-900'>
+                The payout will be marked resolved and{' '}
+                <strong>{formatNaira(selectedWithdrawal.amount)}</strong> will be unlocked and returned
+                to the business available wallet balance.
               </p>
             )}
 
@@ -1004,14 +1059,26 @@ export default function AdminWithdrawals() {
               </Button>
             )}
             {detailWithdrawal?.status === 'failed' && (
-              <Button
-                variant='secondary'
-                size='sm'
-                onClick={() => fromDetail(openManualSettleModal)(detailWithdrawal)}
-              >
-                <Building2 className='h-3.5 w-3.5' />
-                Settle Offline
-              </Button>
+              <>
+                {detailWithdrawal.needsReconciliation && (
+                  <Button
+                    variant='danger'
+                    size='sm'
+                    onClick={() => fromDetail(openRejectModal)(detailWithdrawal)}
+                  >
+                    <XCircle className='h-3.5 w-3.5' />
+                    Release Funds
+                  </Button>
+                )}
+                <Button
+                  variant='secondary'
+                  size='sm'
+                  onClick={() => fromDetail(openManualSettleModal)(detailWithdrawal)}
+                >
+                  <Building2 className='h-3.5 w-3.5' />
+                  Settle Offline
+                </Button>
+              </>
             )}
           </>
         }
@@ -1144,6 +1211,19 @@ export default function AdminWithdrawals() {
                   </div>
                 )}
               </dl>
+
+              {detailWithdrawal.needsReconciliation && (
+                <div className='mt-2 rounded border border-danger-200 bg-danger-50 px-2.5 py-2 text-[11px] text-danger-700'>
+                  <span className='flex items-center gap-1 font-semibold'>
+                    <AlertTriangle className='h-3.5 w-3.5' aria-hidden='true' />
+                    Reconciliation Required
+                  </span>
+                  <span className='mt-0.5 block'>
+                    {detailWithdrawal.reconciliationReason ||
+                      'Payout failed at gateway. Funds remain securely locked in the business wallet until an administrator releases them or confirms offline settlement.'}
+                  </span>
+                </div>
+              )}
 
               {detailWithdrawal.failureReason && (
                 <p className='mt-2 rounded border border-danger-200 bg-danger-50 px-2.5 py-2 text-[11px] text-danger-700'>
