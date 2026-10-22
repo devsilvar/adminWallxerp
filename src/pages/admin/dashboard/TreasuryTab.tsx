@@ -1,5 +1,5 @@
 import { Suspense, lazy, useMemo } from 'react';
-import { Filter, Search, ShieldCheck, X } from 'lucide-react';
+import { Clock, Filter, Search, ShieldCheck, X } from 'lucide-react';
 import { Skeleton } from '@/components/ui/Skeleton.tsx';
 import type { TreasuryAnalyticsData } from '@/types/index.ts';
 import { HairlineGrid, Panel } from '../shared/Panel';
@@ -70,6 +70,12 @@ export default function TreasuryTab({
     <div className='space-y-4'>
       {kpis && (
         <>
+          {/* All-time period indicator */}
+          <div className='flex items-center gap-1.5 px-3 py-1.5 bg-panel border border-hairline rounded-md w-fit'>
+            <Clock className='w-3 h-3 text-ink-muted' />
+            <span className='text-[11px] font-medium text-ink-muted'>All time</span>
+          </div>
+          
           {/* Row 1: Money Flow & Profit/Loss */}
           <HairlineGrid columns={3}>
             <StatCell
@@ -100,7 +106,7 @@ export default function TreasuryTab({
                 {formatSignedNaira(kpis.netPlatformMargin)}
               </p>
               <p className='mt-0.5 text-[10px] text-ink-subtle'>
-                Your revenue minus all costs
+                Withdrawal fees − (DVA fees + payout costs)
               </p>
             </div>
           </HairlineGrid>
@@ -109,7 +115,7 @@ export default function TreasuryTab({
           <HairlineGrid columns={3}>
             <StatCell
               label='Cash Available'
-              sublabel='Real money in Paystack account right now'
+              sublabel='Money received minus money paid out - our estimate of what we are holding'
               value={kpis.gatewayBalanceNaira != null ? formatNaira(kpis.gatewayBalanceNaira) : 'Unavailable'}
             />
             <StatCell

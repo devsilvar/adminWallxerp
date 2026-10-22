@@ -54,7 +54,7 @@ type StatusFilter = 'all' | 'pending' | 'processing' | 'completed' | 'failed' | 
 
 const STATUS_OPTIONS: ReadonlyArray<{ value: StatusFilter; label: string }> = [
   { value: 'all', label: 'All' },
-  { value: 'pending', label: 'Pending' },
+  { value: 'pending', label: 'Awaiting Funding' },
   { value: 'processing', label: 'Processing' },
   { value: 'completed', label: 'Completed' },
   { value: 'failed', label: 'Failed' },
@@ -78,11 +78,12 @@ export default function AdminWithdrawals() {
   const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(
-    initialStatus && STATUS_OPTIONS.some((o) => o.value === initialStatus) ? initialStatus : 'pending'
+    initialStatus && STATUS_OPTIONS.some((o) => o.value === initialStatus) ? initialStatus : 'all'
   );
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const slaStats = useAdminStatsStore((s) => s.stats?.withdrawalSla ?? null);
+  const disputeStats = useAdminStatsStore((s) => s.stats?.withdrawalDisputes ?? null);
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 20,
@@ -319,10 +320,10 @@ export default function AdminWithdrawals() {
     setShowRejectModal(true);
   };
 
-  const openManualSettleModal = (withdrawal: WithdrawalRequest) => {
+  const openManualSettleModal = (withdrawal: WithdrawalRequest, prefilledNotes?: string) => {
     setSelectedWithdrawal(withdrawal);
     setManualSessionRef('');
-    setManualNotes('');
+    setManualNotes(prefilledNotes || '');
     setShowManualSettleModal(true);
   };
 
@@ -405,12 +406,10 @@ export default function AdminWithdrawals() {
   };
 
   const pendingCount = withdrawals.filter((w) => w.status === 'pending').length;
+  const reconciliationCount = withdrawals.filter((w) => w.needsReconciliation).length;
   const isFiltered = Boolean(search) || statusFilter !== 'all';
   const net = (w: WithdrawalRequest) => w.netAmount || w.amount;
 
-  const pendingValue = withdrawals
-    .filter((w) => w.status === 'pending')
-    .reduce((sum, w) => sum + Number(w.amount ?? 0), 0);
   const processingCount = withdrawals.filter((w) => w.status === 'processing').length;
   const completedCount = withdrawals.filter((w) => w.status === 'completed').length;
 
@@ -436,7 +435,7 @@ export default function AdminWithdrawals() {
           {pendingCount > 0 && statusFilter === 'all' ? (
             <Button size='sm' onClick={() => applyStatusFilter('pending')}>
               <Clock className='h-3.5 w-3.5' />
-              {pendingCount} Pending Review
+              {pendingCount} Awaiting Funding
             </Button>
           ) : (
             <span className='text-[11px] text-ink-muted'>
@@ -454,7 +453,7 @@ export default function AdminWithdrawals() {
       </div>
 
       {/* SLA Alert Banner */}
-      {slaStats && slaStats.breachedCount > 0 && (
+      {((disputeStats && disputeStats.count > 0) || (slaStats && slaStats.breachedCount > 0)) && (
         <div
           role='status'
           aria-live='polite'
@@ -463,41 +462,48 @@ export default function AdminWithdrawals() {
           <div className='flex items-center gap-2.5'>
             <AlertTriangle className='h-5 w-5 shrink-0 text-danger-600' aria-hidden='true' />
             <div>
-              <p className='text-xs font-semibold text-ink'>
-                <span>{slaStats.breachedCount}</span> withdrawal
-                {slaStats.breachedCount === 1 ? ' has' : 's have'} been pending over 24 hours — oldest at{' '}
-                {slaStats.oldestPendingHours}h.
-              </p>
-              <p className='mt-0.5 text-[11px] text-ink-muted'>
-                Immediate review required. Approve, reject, or re-query the transfer status.
-              </p>
+              {disputeStats && disputeStats.count > 0 ? (
+                <>
+                  <p className='text-xs font-semibold text-ink'>
+                    <span>{disputeStats.count}</span> failed withdrawal
+                    {disputeStats.count === 1 ? ' is' : 's are'} waiting for a dispute decision — oldest at{' '}
+                    {disputeStats.oldestHours}h. The money is held; the merchant has not been refunded.
+                  </p>
+                  {slaStats && slaStats.breachedCount > 0 && (
+                    <p className='mt-0.5 text-[11px] text-ink-muted'>
+                      Additionally, {slaStats.breachedCount} funding-shortfall request
+                      {slaStats.breachedCount === 1 ? ' has' : 's have'} been pending over 24 hours.
+                    </p>
+                  )}
+                </>
+              ) : slaStats ? (
+                <>
+                  <p className='text-xs font-semibold text-ink'>
+                    <span>{slaStats.breachedCount}</span> withdrawal
+                    {slaStats.breachedCount === 1 ? ' has' : 's have'} been pending over 24 hours — oldest at{' '}
+                    {slaStats.oldestPendingHours}h.
+                  </p>
+                  <p className='mt-0.5 text-[11px] text-ink-muted'>
+                    Immediate review required. Approve, reject, or re-query the transfer status.
+                  </p>
+                </>
+              ) : null}
             </div>
           </div>
         </div>
       )}
 
-      {/* Summary KPI Cards — Subscriptions desk pattern */}
+      {/* Summary KPI Cards */}
       <div className='grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4'>
         <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
           <div className='flex items-center justify-between text-ink-subtle'>
-            <span className='text-xs font-medium'>Pending Approval</span>
+            <span className='text-xs font-medium'>Awaiting Funding</span>
             <Clock className='h-4 w-4 text-amber-500' />
           </div>
           <p className='mt-2 text-2xl font-bold tabular-nums text-amber-600'>
             {slaStats?.pendingCount ?? pendingCount}
           </p>
-          <p className='mt-0.5 text-[11px] text-ink-subtle'>Awaiting admin decision</p>
-        </div>
-
-        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
-          <div className='flex items-center justify-between text-ink-subtle'>
-            <span className='text-xs font-medium'>Pending Value</span>
-            <Wallet className='h-4 w-4 text-primary-500' />
-          </div>
-          <p className='mt-2 font-mono text-2xl font-bold tabular-nums text-ink'>
-            {formatNaira(pendingValue)}
-          </p>
-          <p className='mt-0.5 text-[11px] text-ink-subtle'>Gross amount in queue</p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>Gateway short — fund and release</p>
         </div>
 
         <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
@@ -509,6 +515,21 @@ export default function AdminWithdrawals() {
             {processingCount}
           </p>
           <p className='mt-0.5 text-[11px] text-ink-subtle'>Transfers processing</p>
+        </div>
+
+        <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
+          <div className='flex items-center justify-between text-ink-subtle'>
+            <span className='text-xs font-medium'>Needs Dispute</span>
+            <AlertTriangle className='h-4 w-4 text-danger-500' />
+          </div>
+          <p className='mt-2 text-2xl font-bold tabular-nums text-danger-600'>
+            {disputeStats?.count ?? 0}
+          </p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>
+            {disputeStats && disputeStats.count > 0 
+              ? `₦${disputeStats.valueNaira.toLocaleString()} held — oldest ${disputeStats.oldestHours}h` 
+              : 'No active disputes'}
+          </p>
         </div>
 
         <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
@@ -539,6 +560,7 @@ export default function AdminWithdrawals() {
             >
               {opt.label}
               {opt.value === 'pending' && pendingCount > 0 ? ` (${pendingCount})` : ''}
+              {opt.value === 'reconciliation' && reconciliationCount > 0 ? ` (${reconciliationCount})` : ''}
             </button>
           ))}
         </div>
@@ -687,25 +709,14 @@ export default function AdminWithdrawals() {
                           </Button>
                         )}
 
-                        {w.status === 'failed' && (
-                          <>
-                            {w.needsReconciliation && (
-                              <Button
-                                variant='secondary'
-                                size='sm'
-                                onClick={() => openRejectModal(w)}
-                              >
-                                Release
-                              </Button>
-                            )}
-                            <Button
-                              variant='secondary'
-                              size='sm'
-                              onClick={() => openManualSettleModal(w)}
-                            >
-                              Settle Offline
-                            </Button>
-                          </>
+                        {w.status === 'failed' && w.needsReconciliation && (
+                          <Button
+                            variant='danger'
+                            size='sm'
+                            onClick={() => openRejectModal(w)}
+                          >
+                            Dispute
+                          </Button>
                         )}
                       </div>
                     </td>
@@ -796,7 +807,7 @@ export default function AdminWithdrawals() {
         )}
       </Modal>
 
-      {/* Reject / Cancel & refund */}
+      {/* Reject / Cancel & refund / Dispute failed withdrawal */}
       <Modal
         isOpen={showRejectModal && Boolean(selectedWithdrawal)}
         onClose={() => {
@@ -804,17 +815,17 @@ export default function AdminWithdrawals() {
           setRejectReason('');
         }}
         title={
-          selectedWithdrawal?.status === 'processing'
-            ? 'Cancel & Refund Withdrawal'
-            : selectedWithdrawal?.needsReconciliation
-              ? 'Release Locked Funds'
+          selectedWithdrawal?.status === 'failed' && selectedWithdrawal?.needsReconciliation
+            ? 'Dispute failed withdrawal'
+            : selectedWithdrawal?.status === 'processing'
+              ? 'Cancel & Refund Withdrawal'
               : 'Reject Withdrawal'
         }
         subtitle={
-          selectedWithdrawal?.status === 'processing'
-            ? 'Cancel transfer and return funds to merchant wallet balance'
-            : selectedWithdrawal?.needsReconciliation
-              ? 'Return held funds back to merchant wallet available balance'
+          selectedWithdrawal?.status === 'failed' && selectedWithdrawal?.needsReconciliation
+            ? `The transfer failed. ₦${selectedWithdrawal.amount.toLocaleString()} is held in the merchant's wallet and has NOT been returned to them. Decide what happens next.`
+            : selectedWithdrawal?.status === 'processing'
+              ? 'Cancel transfer and return funds to merchant wallet balance'
               : 'Provide a reason for rejection'
         }
         icon={<XCircle className='h-4 w-4' />}
@@ -832,6 +843,19 @@ export default function AdminWithdrawals() {
             >
               Cancel
             </Button>
+            {selectedWithdrawal?.status === 'failed' && selectedWithdrawal?.needsReconciliation && (
+              <Button
+                variant='secondary'
+                size='sm'
+                onClick={() => {
+                  setShowRejectModal(false);
+                  openManualSettleModal(selectedWithdrawal, rejectReason.trim());
+                }}
+                disabled={processing}
+              >
+                Mark settled offline
+              </Button>
+            )}
             <Button
               variant='danger'
               size='sm'
@@ -842,8 +866,8 @@ export default function AdminWithdrawals() {
               <XCircle className='h-3.5 w-3.5' />
               {selectedWithdrawal?.status === 'processing'
                 ? 'Cancel & Return Funds'
-                : selectedWithdrawal?.needsReconciliation
-                  ? 'Release Held Funds'
+                : selectedWithdrawal?.status === 'failed' && selectedWithdrawal?.needsReconciliation
+                  ? 'Release funds'
                   : 'Reject Request'}
             </Button>
           </>
@@ -857,6 +881,16 @@ export default function AdminWithdrawals() {
               <p className='font-mono text-xs text-ink-muted'>
                 {formatNaira(selectedWithdrawal.amount)}
               </p>
+              {selectedWithdrawal.transferReference && (
+                <p className='font-mono text-[10px] text-ink-subtle mt-0.5'>
+                  Ref: {selectedWithdrawal.transferReference}
+                </p>
+              )}
+              {selectedWithdrawal.failureReason && (
+                <p className='text-[10px] text-danger-700 mt-0.5'>
+                  Failure: {selectedWithdrawal.failureReason}
+                </p>
+              )}
             </div>
 
             {selectedWithdrawal.status === 'processing' && (
@@ -867,7 +901,16 @@ export default function AdminWithdrawals() {
               </p>
             )}
 
-            {selectedWithdrawal.needsReconciliation && (
+            {selectedWithdrawal.status === 'failed' && selectedWithdrawal.needsReconciliation && (
+              <p className='rounded border border-danger-200 bg-danger-50 px-3 py-2 text-[11px] text-danger-900'>
+                The transfer failed. <strong>{formatNaira(selectedWithdrawal.amount)}</strong> is held in
+                the merchant's wallet and has NOT been returned to them. Choose: <strong>Release funds</strong> to
+                return the amount to their available balance, or <strong>Mark settled offline</strong> if you
+                paid them out-of-band.
+              </p>
+            )}
+
+            {selectedWithdrawal.needsReconciliation && selectedWithdrawal.status !== 'failed' && (
               <p className='rounded border border-warning-200 bg-warning-50 px-3 py-2 text-[11px] text-warning-900'>
                 The payout will be marked resolved and{' '}
                 <strong>{formatNaira(selectedWithdrawal.amount)}</strong> will be unlocked and returned
@@ -880,7 +923,11 @@ export default function AdminWithdrawals() {
                 htmlFor='reject-reason'
                 className='mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-ink-muted'
               >
-                {selectedWithdrawal.status === 'processing' ? 'Cancellation reason' : 'Rejection reason'}{' '}
+                {selectedWithdrawal.status === 'failed' && selectedWithdrawal.needsReconciliation 
+                  ? 'Reason for your decision'
+                  : selectedWithdrawal.status === 'processing' 
+                    ? 'Cancellation reason' 
+                    : 'Rejection reason'}{' '}
                 <span className='text-danger-600'>*</span>
               </label>
               <textarea
@@ -888,9 +935,11 @@ export default function AdminWithdrawals() {
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
                 placeholder={
-                  selectedWithdrawal.status === 'processing'
-                    ? 'e.g. Transfer not found on Paystack, gateway timeout, cancelled at merchant request…'
-                    : 'e.g. Insufficient verification documents, suspicious activity…'
+                  selectedWithdrawal.status === 'failed' && selectedWithdrawal.needsReconciliation
+                    ? 'e.g. NIBSS switch down, merchant confirmed offline payment received, genuine gateway failure…'
+                    : selectedWithdrawal.status === 'processing'
+                      ? 'e.g. Transfer not found on Paystack, gateway timeout, cancelled at merchant request…'
+                      : 'e.g. Insufficient verification documents, suspicious activity…'
                 }
                 rows={4}
                 maxLength={500}
@@ -1058,27 +1107,15 @@ export default function AdminWithdrawals() {
                 Re-query Paystack
               </Button>
             )}
-            {detailWithdrawal?.status === 'failed' && (
-              <>
-                {detailWithdrawal.needsReconciliation && (
-                  <Button
-                    variant='danger'
-                    size='sm'
-                    onClick={() => fromDetail(openRejectModal)(detailWithdrawal)}
-                  >
-                    <XCircle className='h-3.5 w-3.5' />
-                    Release Funds
-                  </Button>
-                )}
-                <Button
-                  variant='secondary'
-                  size='sm'
-                  onClick={() => fromDetail(openManualSettleModal)(detailWithdrawal)}
-                >
-                  <Building2 className='h-3.5 w-3.5' />
-                  Settle Offline
-                </Button>
-              </>
+            {detailWithdrawal?.status === 'failed' && detailWithdrawal.needsReconciliation && (
+              <Button
+                variant='danger'
+                size='sm'
+                onClick={() => fromDetail(openRejectModal)(detailWithdrawal)}
+              >
+                <AlertTriangle className='h-3.5 w-3.5' />
+                Dispute
+              </Button>
             )}
           </>
         }

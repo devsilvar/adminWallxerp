@@ -564,6 +564,11 @@ export interface AdminDashboardStats {
     breachedCount: number;
     oldestPendingHours: number;
   };
+  withdrawalDisputes?: {
+    count: number;
+    valueNaira: number;
+    oldestHours: number;
+  };
   unverifiedInflows?: {
     count: number;
   };
@@ -697,9 +702,28 @@ export interface AdminUserWalletBalance {
   currency: string;
 }
 
+export interface WalletBusinessContribution {
+  businessId: string;
+  businessName: string;
+  netContribution: number;
+  creditTotal: number;
+  debitTotal: number;
+  transactionCount: number;
+  percentageOfTotal: number;
+}
+
+export interface UserWalletBreakdown {
+  totalBalance: number;
+  lockedBalance: number;
+  availableBalance: number;
+  businesses: WalletBusinessContribution[];
+  unattributedBalance: number;
+}
+
 export interface AdminUserDetail extends AdminUser {
   updatedAt?: string;
   walletBalance?: AdminUserWalletBalance | null;
+  walletBreakdown?: UserWalletBreakdown;
   businesses: AdminUserBusiness[];
   subscriptionSubmissions?: AdminUserSubscriptionSubmission[];
   feedbacks?: AdminUserFeedback[];

@@ -93,7 +93,7 @@ export default function OverviewTab({ stats }: { stats: AdminDashboardStats }) {
             <div>
               <p className='flex flex-wrap items-center gap-2 text-xs font-semibold text-ink'>
                 {sla.pendingCount} withdrawal{sla.pendingCount === 1 ? '' : 's'}{' '}
-                awaiting approval
+                awaiting funding
                 {sla.breachedCount > 0 && (
                   <StatusPill tone='danger'>
                     SLA breach ({sla.breachedCount})
@@ -102,8 +102,13 @@ export default function OverviewTab({ stats }: { stats: AdminDashboardStats }) {
               </p>
               <p className='mt-0.5 text-[11px] text-ink-muted'>
                 {breached
-                  ? `${sla.breachedCount} transfer(s) pending over 24h. Immediate review required.`
-                  : 'Pending review within normal 24h SLA window.'}
+                  ? `${sla.breachedCount} transfer(s) pending over 24h. Gateway funding required.`
+                  : 'Pending gateway funding within normal 24h SLA window.'}
+                {stats?.withdrawalDisputes && stats.withdrawalDisputes.count > 0 && (
+                  <span className='text-danger-700 font-semibold'>
+                    {' · '}{stats.withdrawalDisputes.count} failed transfer{stats.withdrawalDisputes.count === 1 ? '' : 's'} need{stats.withdrawalDisputes.count === 1 ? 's' : ''} dispute resolution.
+                  </span>
+                )}
               </p>
             </div>
           </div>
