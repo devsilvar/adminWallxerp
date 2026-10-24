@@ -8,12 +8,75 @@ import { createReminderOnce } from '@/services/reminder.service';
 import { formatNaira } from '@/lib/format';
 import { invalidateOwnershipCache } from '@/lib/ownership';
 import { dvaProcessingFee, round2 } from '@/lib/paystack-fees';
-import { WalletService } from '../wallet.service';
-import { toNumber, resolveTransactionDateForLockedMonth } from '@/shared/helpers';
+import { toNumber, resolveTransactionDateForLockedMonth, nextBusinessDayStart } from '@/shared/helpers';
 import { eventBus } from '@/core/events/event-bus';
 import { eventBus as realtimeBus } from '@/lib/realtime-emitter';
 import { encrypt, computeBlindIndex } from '@/lib/crypto';
 import { emitToAdmins } from '@/services/admin/realtime-admin.helper';
+
+// ─── Payer extraction ───────────────────────────────────────
+
+/**
+ * Extract the PAYER identity from a Paystack dedicated-NUBAN charge.
+ *
+ * `data.customer` on a DVA charge is the *merchant's own* Paystack customer —
+ * the `CUS_xxx` we created from `business.ownerName` during setup. Reading it
+ * as the payer is why every inbound transfer was labelled with the merchant's
+ * own name (or the generic "Bank Transfer" when the field was absent).
+ *
+ * The sender's details ride on `data.authorization` as `sender_name` and
+ * `sender_bank` for transfers into a dedicated account. When the originating
+ * bank withholds the sender name, Paystack only carries it in `narration`
+ * (e.g. "Transfer from JOHN DOE / GTBank"), so we parse that as a fallback
+ * rather than inventing a value.
+ *
+ * Returns nulls when the payload genuinely has no sender identity.
+ */
+function extractPayer(data: any): { name: string | null; bank: string | null } {
+  const auth = data?.authorization ?? {};
+
+  const pick = (...candidates: unknown[]): string | null => {
+    for (const value of candidates) {
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return null;
+  };
+
+  let name = pick(auth.sender_name, data?.sender_name);
+
+  if (!name && typeof data?.narration === 'string') {
+    // Paystack sometimes withholds sender_name and only carries the payer in
+    // `narration`. Two shapes seen in the wild:
+    //   1. "Transfer from JOHN DOE / GTBank"          (sender name as-is)
+    //   2. "NIP: RHODA CHURCH -1123344343/44343231232" (NIP format: payer
+    //      name immediately after "NIP:")
+    // Try both before giving up — falling through to the merchant name
+    // (data.customer) is the old mislabelling bug.
+    const fromMatch = data.narration.match(
+      /\bfrom\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,4})/i,
+    );
+    if (fromMatch) name = fromMatch[1].trim();
+
+    if (!name) {
+      const nipMatch = data.narration.match(/\bNIP[:\s]+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,4})/i);
+      if (nipMatch) name = nipMatch[1].trim();
+    }
+  }
+
+  if (!name) {
+    logger.warn('[dva:payer] No sender identity in DVA charge payload — falling back to merchant name', {
+      narration: typeof data?.narration === 'string' ? data.narration : undefined,
+      hasAuthorization: !!data?.authorization,
+      authorizationKeys: data?.authorization ? Object.keys(data.authorization) : [],
+      customer: data?.customer,
+    });
+  }
+
+  return {
+    name: name || null,
+    bank: pick(auth.sender_bank, data?.sender_bank),
+  };
+}
 
 // ─── Process DVA Assignment Webhook ─────────────────────────
 
@@ -160,11 +223,9 @@ export async function processCustomerIdentificationWebhook(event: any) {
 
     try {
       const provider = getPaymentProvider();
-      const subaccount = business.paystackSubaccountCode || undefined;
       const dva = await provider.createDedicatedAccount(
         customerCode,
         config.paystack.preferredBank,
-        subaccount,
       );
 
       if (dva.accountNumber) {
@@ -330,10 +391,6 @@ export async function processDVATransferWebhook(event: any) {
     where: { referenceId: reference },
   });
 
-  const existingWalletTx = await prisma.walletTransaction.findUnique({
-    where: { reference },
-  });
-
   if (existingSaleAnywhere && existingSaleAnywhere.businessId !== business.id) {
     logger.info('DVA transfer already authoritatively recorded under another business', {
       reference,
@@ -347,69 +404,60 @@ export async function processDVATransferWebhook(event: any) {
     where: { referenceId: reference, businessId: business.id },
   }));
 
-  if (existingSale && existingWalletTx) {
-    logger.info('DVA transfer already fully recorded and credited', { reference, businessId: business.id });
-    return true;
-  }
-
-  const customerHint = 
-    data.metadata?.purpose || 
-    data.narration || 
-    (data.customer?.first_name 
-      ? `${data.customer.first_name} ${data.customer.last_name || ''}`.trim()
-      : null);
-
-  const isSplitSettled = Boolean(business.autoSplitEnabled && business.paystackSubaccountCode);
-  const splitPct = isSplitSettled ? business.taxSplitPercentage : null;
-  const platformRetained =
-    isSplitSettled && business.taxSplitPercentage != null
-      ? new Prisma.Decimal(amount).mul(business.taxSplitPercentage).div(100)
-      : null;
-
-  const feeNaira =
-    typeof data.fees === 'number' ? round2(data.fees / 100) : dvaProcessingFee(amount);
-  // Boss's rule: Platform absorbs Paystack's 1% DVA fee; customer receives 100% of deposit in full
-  const netRetained =
-    isSplitSettled && platformRetained
-      ? toNumber(platformRetained)
-      : amount;
-
-  // Self-healing path: sale was previously recorded but wallet crediting failed
-  if (existingSale && !existingWalletTx) {
-    logger.warn('DVA transfer sale exists but wallet credit is missing — executing healing credit', {
+  if (existingSale) {
+    logger.info('DVA transfer already recorded — skipping duplicate capture', {
       reference,
       businessId: business.id,
       saleId: existingSale.id,
     });
-
-    const walletTx = await WalletService.creditWallet({
-      userId: business.userId,
-      businessId: business.id,
-      amount,
-      fee: 0,
-      netAmount: netRetained,
-      reference,
-      source: 'dva',
-      description: `DVA bank transfer from ${data.customer?.first_name || 'Customer'}`,
-      linkedSaleId: existingSale.id,
-      metadata: {
-        channel: 'dva',
-        paystackTransactionId: data.id,
-        splitSettled: isSplitSettled,
-        paystackFeeNaira: feeNaira,
-        healed: true,
-      },
-    });
-
-    eventBus.emit('wallet.credited', {
-      userId: business.userId,
-      businessId: business.id,
-      amount,
-      transactionId: walletTx.transaction.id,
-    });
-
     return true;
   }
+
+  const payer = extractPayer(data);
+
+  // On a DVA charge `data.customer` is this merchant's own Paystack customer,
+  // so it is only a last-resort label (and what simulated payloads provide).
+  const legacyCustomerName = data.customer?.first_name
+    ? `${data.customer.first_name} ${data.customer.last_name || ''}`.trim()
+    : null;
+  const payerName = payer.name || legacyCustomerName;
+
+  logger.info('[dva:payer] DVA transfer payer resolved', {
+    businessId: business.id,
+    reference,
+    payerName,
+    source: payer.name
+      ? data?.authorization?.sender_name
+        ? 'authorization.sender_name'
+        : data?.sender_name
+          ? 'data.sender_name'
+          : 'narration'
+      : legacyCustomerName
+        ? 'legacy:data.customer (MERCHANT OWNER — no sender in payload)'
+        : 'none',
+    senderName: payer.name,
+    senderBank: payer.bank,
+    narration: typeof data?.narration === 'string' ? data.narration : undefined,
+    merchantCustomerName: legacyCustomerName,
+  });
+
+  const customerHint =
+    data.metadata?.purpose ||
+    payer.name ||
+    data.narration ||
+    legacyCustomerName ||
+    null;
+
+  // D2/D7: Tax auto-split is permanently retired. 100% of customer deposits
+  // land in WallX balance and are credited in full to the merchant's wallet.
+  const isSplitSettled = false;
+  const splitPct = null;
+  const platformRetained = null;
+
+  const feeNaira =
+    typeof data.fees === 'number' ? round2(data.fees / 100) : dvaProcessingFee(amount);
+  // Boss's rule: Platform absorbs Paystack's 1% DVA fee; customer receives 100% of deposit in full
+  const netRetained = amount;
 
   // Standard atomic path: create both sale and wallet credit in one transaction fence
   try {
@@ -425,7 +473,7 @@ export async function processDVATransferWebhook(event: any) {
       });
     }
 
-    const { sale, walletTx } = await prisma.$transaction(
+    const sale = await prisma.$transaction(
       async (tx) => {
         const sale = await tx.salesTransaction.create({
           data: {
@@ -435,10 +483,9 @@ export async function processDVATransferWebhook(event: any) {
             dvaOrigin: true,
             status: 'pending',
             referenceId: reference,
-            customerName: data.customer?.first_name
-              ? `${data.customer.first_name} ${data.customer.last_name || ''}`.trim()
-              : 'Bank Transfer',
+            customerName: payerName || 'Bank Transfer',
             transactionDate: dateRes.effectiveDate,
+            settledAt: nextBusinessDayStart(rawPaidDate),
             settledViaSplit: isSplitSettled,
             splitPct,
             platformRetained,
@@ -446,10 +493,12 @@ export async function processDVATransferWebhook(event: any) {
               channel: 'dva',
               paystackTransactionId: data.id,
               autoRecorded: true,
-              splitSettled: isSplitSettled,
+              splitSettled: false,
               paystackFeeNaira: typeof data.fees === 'number' ? round2(data.fees / 100) : null,
               paystackFeeModelledNaira: dvaProcessingFee(amount),
               monthLockAdjusted: dateRes.wasAdjusted,
+              senderName: payer.name,
+              senderBank: payer.bank,
               ...(dateRes.wasAdjusted
                 ? {
                     originalPaidAt: data.paid_at,
@@ -463,27 +512,6 @@ export async function processDVATransferWebhook(event: any) {
           },
         });
 
-        const walletTx = await WalletService.creditWallet(
-          {
-            userId: business.userId,
-            businessId: business.id,
-            amount,
-            fee: 0,
-            netAmount: netRetained,
-            reference,
-            source: 'dva',
-            description: `DVA bank transfer from ${data.customer?.first_name || 'Customer'}`,
-            linkedSaleId: sale.id,
-            metadata: {
-              channel: 'dva',
-              paystackTransactionId: data.id,
-              splitSettled: isSplitSettled,
-              paystackFeeNaira: feeNaira,
-            },
-          },
-          tx
-        );
-
         await logAudit(
           {
             businessId: business.id,
@@ -494,7 +522,7 @@ export async function processDVATransferWebhook(event: any) {
               amount,
               reference,
               channel: 'dva',
-              customerName: data.customer?.first_name,
+              customerName: payerName,
               monthLockAdjusted: dateRes.wasAdjusted,
               transactionDate: dateRes.effectiveDate.toISOString(),
             },
@@ -502,40 +530,29 @@ export async function processDVATransferWebhook(event: any) {
           tx
         );
 
-        return { sale, walletTx };
+        return sale;
       },
       { maxWait: 10000, timeout: 20000 }
     );
 
-    logger.info('Sale auto-captured and wallet credited atomically from DVA transfer', {
+    logger.info('Sale auto-captured into settlement from DVA transfer', {
       businessId: business.id,
       amount,
       reference,
       saleId: sale.id,
-      walletTxId: walletTx.transaction.id,
+      settledAt: sale.settledAt,
     });
 
     eventBus.emit('dva.transfer_received', {
       accountNumber,
       amount,
       reference,
-      payerName: data.customer?.first_name
-        ? `${data.customer.first_name} ${data.customer.last_name || ''}`.trim()
-        : undefined,
+      payerName: payerName || undefined,
       rawEvent: event,
     });
 
-    eventBus.emit('wallet.credited', {
-      userId: business.userId,
-      businessId: business.id,
-      amount,
-      transactionId: walletTx.transaction.id,
-    });
-
     const _ownerId = (business as any).userId as string;
-    const customerName = data.customer?.first_name
-      ? `${data.customer.first_name} ${data.customer.last_name || ''}`.trim()
-      : (data.customer?.name as string) || 'Unknown Customer';
+    const customerName = payerName || 'Unknown Customer';
 
     realtimeBus.emitToUserIds([_ownerId], {
       type: 'dva_transfer_received',

@@ -9,13 +9,16 @@ const router = Router();
 
 /**
  * TEST ONLY: Simulate a DVA transfer webhook from Paystack
- * 
+ *
  * POST /api/test/simulate-transfer
  * Body: {
  *   businessId: string,
  *   amount: number (in naira),
  *   customerName?: string,
- *   narration?: string
+ *   narration?: string,
+ *   senderName?: string,
+ *   senderBank?: string,
+ *   withAuthorization?: boolean
  * }
  */
 router.post('/simulate-transfer', asyncHandler(async (req: Request, res: Response) => {
@@ -23,7 +26,15 @@ router.post('/simulate-transfer', asyncHandler(async (req: Request, res: Respons
     throw new AppError(403, 'Test endpoints disabled in production', 'FORBIDDEN');
   }
 
-  const { businessId, amount, customerName, narration } = req.body;
+  const {
+    businessId,
+    amount,
+    customerName,
+    narration,
+    senderName,
+    senderBank,
+    withAuthorization = true,
+  } = req.body;
 
   if (!businessId || !amount) {
     throw new AppError(400, 'businessId and amount are required', 'INVALID_INPUT');
@@ -42,7 +53,13 @@ router.post('/simulate-transfer', asyncHandler(async (req: Request, res: Respons
     throw new AppError(400, 'No virtual account set up for this business', 'NO_DVA');
   }
 
-  // Generate a fake Paystack event
+  // Generate a fake Paystack event.
+  //
+  // `data.customer` mirrors the real DVA charge: it is the MERCHANT's own
+  // Paystack customer (created from business.businessName at DVA setup), NOT
+  // the sender. `data.authorization.sender_name` / `sender_bank` is where
+  // Paystack puts the real payer on a dedicated_nuban charge. Simulating
+  // without the authorization block reproduces the old mislabeling bug.
   const fakeEvent = {
     event: 'charge.success',
     data: {
@@ -56,6 +73,15 @@ router.post('/simulate-transfer', asyncHandler(async (req: Request, res: Respons
         first_name: customerName || 'Test',
         last_name: 'Customer',
       },
+      ...(withAuthorization
+        ? {
+            authorization: {
+              sender_name: senderName || 'AIYEGBAJEJE FATIMAH OYENIKE',
+              sender_bank: senderBank || 'Wema Bank',
+              receiver_bank_account_number: business.virtualAccountNumber,
+            },
+          }
+        : {}),
       dedicated_account: {
         account_number: business.virtualAccountNumber,
       },
@@ -134,22 +160,29 @@ router.get('/check-classifications', asyncHandler(async (req: Request, res: Resp
  * 
  * POST /api/v1/test/trigger-transfer
  * Body: {
- *   amount?: number (default: 740),
- *   accountNumber?: string (default: 8148434507),
- *   bankCode?: string (default: 999992 - OPay),
+ *   amount: number,
+ *   accountNumber: string,
+ *   bankCode: string,
  *   reason?: string,
- *   secretKey?: string (optional live key override)
+
  * }
  */
 router.post('/trigger-transfer', asyncHandler(async (req: Request, res: Response) => {
-  const amount = Number(req.body.amount || 740);
-  const accountNumber = String(req.body.accountNumber || '8148434507');
-  const bankCode = String(req.body.bankCode || '999992');
-  const reason = String(req.body.reason || 'WallXERP Settlement Transfer');
-  const secretKey = req.body.secretKey || process.env.PAYSTACK_SECRET_KEY;
+  const amount = Number(req.body.amount);
+  const accountNumber = String(req.body.accountNumber || '');
+  const bankCode = String(req.body.bankCode || '');
+  if (!req.body.amount || !accountNumber || !bankCode) {
+    throw new AppError(400, 'amount, accountNumber, and bankCode are required', 'VALIDATION_ERROR');
+  }
+  const reason = String(req.body.reason || 'WallXERP Test Transfer');
+  const secretKey = process.env.PAYSTACK_SECRET_KEY;
 
   if (!secretKey) {
     throw new AppError(500, 'Paystack secret key not configured', 'CONFIG_ERROR');
+  }
+
+  if (!secretKey.startsWith('sk_test_')) {
+    throw new AppError(403, 'Test transfers can only be triggered with Paystack test keys', 'FORBIDDEN_IN_PRODUCTION');
   }
 
   // 1. Resolve Account Name
