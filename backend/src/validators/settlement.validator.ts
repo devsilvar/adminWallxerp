@@ -40,15 +40,20 @@ export const withdrawBalanceSchema = z
     path: ['pin'],
   });
 
-export const toggleAutoSplitSchema = z
+export const advanceRequestSchema = z
   .object({
-    enabled: z.boolean(),
-    taxSplitPercentage: z.number().min(0).max(100).optional().default(7.5),
+    amount: z
+      .number()
+      .positive('Advance amount must be greater than zero'),
     pin: z
       .string()
       .regex(/^\d{4}$/, 'Transaction PIN must be exactly 4 digits')
       .optional(),
     stepUpToken: z.string().min(1, 'Step-up authorization token is required').optional(),
+    acceptCharge: z.boolean().refine((v) => v === true, {
+      message: 'You must accept the advance fee',
+    }),
+    narration: z.string().trim().max(100, 'Narration cannot exceed 100 characters').optional(),
   })
   .refine((data) => Boolean(data.pin || data.stepUpToken), {
     message: 'Either transaction PIN or step-up authorization token is required',
@@ -83,8 +88,7 @@ export const rejectWithdrawalSchema = z.object({
 export type ResolveSettlementInput = z.infer<typeof resolveSettlementSchema>;
 export type ConnectSettlementInput = z.infer<typeof connectSettlementSchema>;
 export type WithdrawBalanceInput = z.infer<typeof withdrawBalanceSchema>;
-export type ToggleAutoSplitInput = z.infer<typeof toggleAutoSplitSchema>;
+export type AdvanceRequestInput = z.infer<typeof advanceRequestSchema>;
 export type ToggleAutoPayoutInput = z.infer<typeof toggleAutoPayoutSchema>;
 export type PayoutHistoryQueryInput = z.infer<typeof payoutHistoryQuerySchema>;
 export type RejectWithdrawalInput = z.infer<typeof rejectWithdrawalSchema>;
-
