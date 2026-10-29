@@ -106,7 +106,7 @@ export default function OverviewTab({ stats }: { stats: AdminDashboardStats }) {
                   : 'Pending gateway funding within normal 24h SLA window.'}
                 {stats?.withdrawalDisputes && stats.withdrawalDisputes.count > 0 && (
                   <span className='text-danger-700 font-semibold'>
-                    {' · '}{stats.withdrawalDisputes.count} failed transfer{stats.withdrawalDisputes.count === 1 ? '' : 's'} need{stats.withdrawalDisputes.count === 1 ? 's' : ''} dispute resolution.
+                    {' Â· '}{stats.withdrawalDisputes.count} failed transfer{stats.withdrawalDisputes.count === 1 ? '' : 's'} need{stats.withdrawalDisputes.count === 1 ? 's' : ''} dispute resolution.
                   </span>
                 )}
               </p>
@@ -145,7 +145,7 @@ export default function OverviewTab({ stats }: { stats: AdminDashboardStats }) {
         </div>
       )}
 
-      {/* Summary KPI Cards — Subscriptions desk pattern */}
+      {/* Summary KPI Cards â€” Subscriptions desk pattern */}
       <div className='grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4'>
         {STATS.map(({ key, label, sublabel, icon: Icon, route, isCurrency }) => {
           const raw = stats[key];

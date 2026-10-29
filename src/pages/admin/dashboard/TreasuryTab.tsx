@@ -106,7 +106,7 @@ export default function TreasuryTab({
                 {formatSignedNaira(kpis.netPlatformMargin)}
               </p>
               <p className='mt-0.5 text-[10px] text-ink-subtle'>
-                Withdrawal fees − (DVA fees + payout costs)
+                Withdrawal fees âˆ’ (DVA fees + payout costs)
               </p>
             </div>
           </HairlineGrid>
@@ -216,7 +216,7 @@ export default function TreasuryTab({
               <dt className='text-[10px] font-medium uppercase tracking-wider text-ink-subtle'>
                 Safety rule
               </dt>
-              <dd className='font-mono font-medium text-success-700'>Cash ≥ What You Owe</dd>
+              <dd className='font-mono font-medium text-success-700'>Cash â‰¥ What You Owe</dd>
             </div>
             <div className='h-6 w-px bg-hairline' aria-hidden='true' />
             <div>

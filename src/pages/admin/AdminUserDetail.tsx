@@ -222,7 +222,7 @@ export default function AdminUserDetail() {
               {user.isVerified ? 'Email Verified' : 'Email Unverified'}
             </StatusPill>
             <StatusPill tone={user.autoPayoutEnabled ? 'success' : 'neutral'}>
-              {user.autoPayoutEnabled ? '⚡ Auto Transfers' : '🔒 Manual Review'}
+              {user.autoPayoutEnabled ? 'âš¡ Auto Transfers' : 'ðŸ”’ Manual Review'}
             </StatusPill>
             <StatusPill tone={getPlanBadge(user.subscriptionTier).tone}>
               {getPlanBadge(user.subscriptionTier).label}
@@ -231,7 +231,7 @@ export default function AdminUserDetail() {
         </div>
       </div>
 
-      {/* Top Action Command Bar — Subscriptions desk pattern */}
+      {/* Top Action Command Bar â€” Subscriptions desk pattern */}
       <Panel className='p-3 bg-panel-subtle border-hairline-strong shadow-2xs rounded-xl'>
         <div className='flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3'>
           <div className='flex items-center gap-2 text-xs text-ink-muted'>
@@ -304,7 +304,7 @@ export default function AdminUserDetail() {
         </div>
       </Panel>
 
-      {/* KPI Overview Grid — Subscriptions desk pattern */}
+      {/* KPI Overview Grid â€” Subscriptions desk pattern */}
       <div className='grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4'>
         {/* Wallet Balance Card */}
         <Panel className='p-4 space-y-2 shadow-2xs rounded-xl'>
@@ -356,7 +356,7 @@ export default function AdminUserDetail() {
             {user.businesses.length}
           </div>
           <div className='text-[11px] text-ink-subtle'>
-            {totalSalesCount} sales · {totalInvoicesCount} invoices recorded
+            {totalSalesCount} sales Â· {totalInvoicesCount} invoices recorded
           </div>
         </Panel>
 
@@ -436,10 +436,10 @@ export default function AdminUserDetail() {
                       {/* In/Out breakdown */}
                       <div className='flex items-center gap-4 text-[11px] text-ink-muted pl-6'>
                         <span className='flex items-center gap-1'>
-                          <span className='text-success-600'>↓</span> In: {formatNaira(biz.creditTotal)}
+                          <span className='text-success-600'>â†“</span> In: {formatNaira(biz.creditTotal)}
                         </span>
                         <span className='flex items-center gap-1'>
-                          <span className='text-danger-600'>↑</span> Out: {formatNaira(biz.debitTotal)}
+                          <span className='text-danger-600'>â†‘</span> Out: {formatNaira(biz.debitTotal)}
                         </span>
                       </div>
 
@@ -502,7 +502,7 @@ export default function AdminUserDetail() {
                         <div>
                           <h3 className='text-sm font-bold text-ink'>{b.businessName}</h3>
                           <p className='text-xs text-ink-muted'>
-                            Owned by <span className='font-medium text-ink'>{b.ownerName}</span> · Registered {formatDate(b.createdAt)}
+                            Owned by <span className='font-medium text-ink'>{b.ownerName}</span> Â· Registered {formatDate(b.createdAt)}
                           </p>
                         </div>
                       </div>
@@ -631,7 +631,7 @@ export default function AdminUserDetail() {
                         </span>
                       </div>
                       <p className='text-[11px] text-ink-muted'>
-                        Cycle: <span className='capitalize font-medium'>{sub.billingCycle}</span> · Submitted {formatDate(sub.createdAt)}
+                        Cycle: <span className='capitalize font-medium'>{sub.billingCycle}</span> Â· Submitted {formatDate(sub.createdAt)}
                       </p>
                       {sub.notes && (
                         <p className='text-[11px] text-ink-subtle italic'>
@@ -785,7 +785,7 @@ export default function AdminUserDetail() {
               <div className='flex items-center justify-between'>
                 <span className='text-ink-muted text-[11px]'>Settlement Mode</span>
                 <StatusPill tone={user.autoPayoutEnabled ? 'success' : 'neutral'}>
-                  {user.autoPayoutEnabled ? '⚡ Automatic Transfers' : '🔒 Manual Review'}
+                  {user.autoPayoutEnabled ? 'âš¡ Automatic Transfers' : 'ðŸ”’ Manual Review'}
                 </StatusPill>
               </div>
 

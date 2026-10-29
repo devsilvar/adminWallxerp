@@ -279,7 +279,7 @@ export default function AdminSubscriptions() {
             <CreditCard className='h-4 w-4 text-primary-500' />
           </div>
           <p className='mt-2 text-2xl font-bold text-primary-700 tabular-nums'>
-            ₦{counts.totalRevenueApproved.toLocaleString()}
+            â‚¦{counts.totalRevenueApproved.toLocaleString()}
           </p>
           <p className='text-[11px] text-ink-subtle mt-0.5'>Cumulative subscription volume</p>
         </div>
@@ -322,7 +322,7 @@ export default function AdminSubscriptions() {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder='Search customer, email, business…'
+            placeholder='Search customer, email, businessâ€¦'
             className='w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-hairline bg-panel text-ink placeholder:text-ink-subtle focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500'
           />
         </div>
@@ -347,7 +347,7 @@ export default function AdminSubscriptions() {
                 <tr>
                   <td colSpan={6} className='py-12 text-center text-ink-subtle'>
                     <RefreshCw className='mx-auto h-6 w-6 animate-spin mb-2 text-primary-600' />
-                    Loading submissions queue…
+                    Loading submissions queueâ€¦
                   </td>
                 </tr>
               ) : submissions.length === 0 ? (
@@ -409,7 +409,7 @@ export default function AdminSubscriptions() {
 
                       <td className='py-3.5 px-4'>
                         <span className='font-bold text-ink tabular-nums text-sm'>
-                          ₦{Number(sub.amount).toLocaleString()}
+                          â‚¦{Number(sub.amount).toLocaleString()}
                         </span>
                       </td>
 
@@ -499,7 +499,7 @@ export default function AdminSubscriptions() {
         )}
       </div>
 
-      {/* ── Receipt Inspector Modal ── */}
+      {/* â”€â”€ Receipt Inspector Modal â”€â”€ */}
       {inspectingSub && (
         <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150'>
           <div className='relative w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl bg-panel border border-hairline shadow-2xl flex flex-col md:flex-row'>
@@ -643,7 +643,7 @@ export default function AdminSubscriptions() {
                   <div className='flex items-center justify-between'>
                     <span className='text-ink-muted'>Claimed Amount:</span>
                     <span className='font-extrabold text-primary-700 text-sm'>
-                      ₦{Number(inspectingSub.amount).toLocaleString()}
+                      â‚¦{Number(inspectingSub.amount).toLocaleString()}
                     </span>
                   </div>
 
@@ -709,7 +709,7 @@ export default function AdminSubscriptions() {
                       className='w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50'
                     >
                       <CheckCircle2 className='h-4 w-4' />
-                      <span>{actionLoading ? 'Activating…' : 'Approve & Activate Plan'}</span>
+                      <span>{actionLoading ? 'Activatingâ€¦' : 'Approve & Activate Plan'}</span>
                     </button>
 
                     <button
@@ -734,7 +734,7 @@ export default function AdminSubscriptions() {
         </div>
       )}
 
-      {/* ── Rejection Reason Modal ── */}
+      {/* â”€â”€ Rejection Reason Modal â”€â”€ */}
       {rejectModalOpen && inspectingSub && (
         <div className='fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150'>
           <div className='w-full max-w-md rounded-2xl bg-panel border border-hairline p-6 shadow-2xl space-y-4'>
@@ -775,7 +775,7 @@ export default function AdminSubscriptions() {
                 onClick={handleRejectSubmit}
                 className='px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold disabled:opacity-50'
               >
-                {actionLoading ? 'Rejecting…' : 'Confirm Rejection'}
+                {actionLoading ? 'Rejectingâ€¦' : 'Confirm Rejection'}
               </button>
             </div>
           </div>

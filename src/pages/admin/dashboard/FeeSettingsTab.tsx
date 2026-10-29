@@ -177,16 +177,14 @@ export default function FeeSettingsTab({ onSweepCompleted: _onSweepCompleted }: 
                 </div>
 
                 <div>
-                  <label htmlFor='max-daily-payout' className='mb-1 block text-[11px] font-medium text-ink-muted'>
+                  <label htmlFor='fee-max-daily' className='mb-1 block text-[11px] font-medium text-ink-muted'>
                     Maximum daily payout cap (₦)
                   </label>
                   <input
-                    id='max-daily-payout'
+                    id='fee-max-daily'
                     type='number'
-                    step='1000'
+                    step='10000'
                     min='0'
-                    max='100000000'
-                    required
                     value={feeForm.maxDailyPayout}
                     onChange={(e) =>
                       setFeeForm({ ...feeForm, maxDailyPayout: parseFloat(e.target.value) || 0 })
@@ -199,16 +197,14 @@ export default function FeeSettingsTab({ onSweepCompleted: _onSweepCompleted }: 
                 </div>
 
                 <div>
-                  <label htmlFor='sweep-threshold' className='block text-xs font-semibold text-ink'>
+                  <label htmlFor='sweep-threshold' className='mb-1 block text-[11px] font-medium text-ink-muted'>
                     Auto-sweep retained floor (₦)
                   </label>
                   <input
                     id='sweep-threshold'
                     type='number'
-                    step='100'
+                    step='500'
                     min='0'
-                    max='1000000'
-                    required
                     value={feeForm.autoSweepThreshold}
                     onChange={(e) =>
                       setFeeForm({ ...feeForm, autoSweepThreshold: parseFloat(e.target.value) || 0 })
