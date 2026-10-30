@@ -1355,4 +1355,65 @@ export interface BroadcastStats {
   failedEmailCount: number;
 }
 
+// ─── Marketplace Admin Moderation Types ─────────────────────────────────────
+
+export type AdminProductListingStatus =
+  | 'draft'
+  | 'pending_approval'
+  | 'approved'
+  | 'rejected'
+  | 'archived';
+
+export interface AdminMarketplaceProduct {
+  id: string;
+  businessId: string;
+  name: string;
+  slug: string;
+  productType: 'physical' | 'service';
+  category: string;
+  description: string;
+  price: number | string;
+  compareAtPrice?: number | string | null;
+  currency: string;
+  stockQuantity?: number | null;
+  trackInventory: boolean;
+  attributes?: Record<string, any> | null;
+  images: string[];
+  contactPhone?: string | null;
+  contactWhatsapp?: string | null;
+  purchaseUrl?: string | null;
+  status: AdminProductListingStatus;
+  rejectionReason?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  business?: {
+    id: string;
+    businessName: string;
+    city?: string | null;
+    state?: string | null;
+    isVerified?: boolean;
+    taxId?: string | null;
+    logoUrl?: string | null;
+    ownerName?: string | null;
+    user?: {
+      email?: string | null;
+      phone?: string | null;
+      isVerified?: boolean;
+    };
+  };
+}
+
+export interface AdminMarketplaceQueueResponse {
+  data: AdminMarketplaceProduct[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
+
 
