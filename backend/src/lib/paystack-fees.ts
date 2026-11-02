@@ -43,6 +43,7 @@
  */
 
 import config from '@/config';
+import { AppError } from '@/middleware/errorHandler';
 
 export type WithdrawalFeeBearer = 'merchant' | 'platform';
 
@@ -148,6 +149,59 @@ export interface WithdrawalQuote {
 export const MIN_WITHDRAWAL_AMOUNT = 1000.00;
 export const WALLX_WITHDRAWAL_PCT = 1.0; // 1%
 export const WALLX_WITHDRAWAL_CAP = 300.00; // ₦300 cap
+
+export const ADVANCE_FEE_PCT = 1.0; // 1%
+export const ADVANCE_FEE_CAP = 500.00; // ₦500 cap
+export const MAX_ADVANCE_PCT = 30.0; // 30%
+export const MIN_ADVANCE_AMOUNT = 1000.00; // ₦1,000 min
+
+export interface AdvanceQuote {
+  requested: number;
+  amount: number;
+  fee: number;
+  netAmount: number;
+  paystackAmount: number;
+  bearer: 'merchant';
+}
+
+export function advanceFee(
+  amountNaira: number,
+  config?: { pct?: number; cap?: number }
+): number {
+  const amount = Number(amountNaira);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  const pct = config?.pct !== undefined ? config.pct : ADVANCE_FEE_PCT;
+  const cap = config?.cap !== undefined ? config.cap : ADVANCE_FEE_CAP;
+  return round2(Math.min((amount * pct) / 100, cap));
+}
+
+export function quoteAdvance(
+  requestedNaira: number,
+  config?: { pct?: number; cap?: number; minAmount?: number }
+): AdvanceQuote {
+  const requested = round2(Number(requestedNaira) || 0);
+  const minFloor = config?.minAmount !== undefined ? config.minAmount : MIN_ADVANCE_AMOUNT;
+
+  if (requested <= 0 || requested < minFloor) {
+    throw new AppError(
+      400,
+      `Minimum advance amount is ₦${minFloor.toLocaleString('en-NG', { minimumFractionDigits: 2 })}`,
+      'INVALID_ADVANCE_AMOUNT'
+    );
+  }
+
+  const fee = advanceFee(requested, config);
+  const totalDebit = round2(requested + fee);
+
+  return {
+    requested,
+    amount: totalDebit,
+    fee,
+    netAmount: requested,
+    paystackAmount: requested,
+    bearer: 'merchant',
+  };
+}
 
 export interface FeeConfigOptions {
   pct?: number;

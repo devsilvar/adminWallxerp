@@ -7,6 +7,13 @@ export interface PlatformFeeConfigData {
   withdrawalFeePct: number;
   withdrawalFeeCap: number;
   minWithdrawalAmount: number;
+  advanceFeePct: number;
+  advanceFeeCap: number;
+  maxAdvancePct: number;
+  minAdvanceAmount: number;
+  autoSweepEnabled: boolean;
+  autoSweepThreshold: number;
+  maxDailyPayout: number;
   updatedAt?: Date;
   updatedBy?: string | null;
 }
@@ -15,6 +22,13 @@ export const DEFAULT_FEE_CONFIG: PlatformFeeConfigData = {
   withdrawalFeePct: 1.0,
   withdrawalFeeCap: 300.0,
   minWithdrawalAmount: 1000.0,
+  advanceFeePct: 1.0,
+  advanceFeeCap: 500.0,
+  maxAdvancePct: 30.0,
+  minAdvanceAmount: 1000.0,
+  autoSweepEnabled: true,
+  autoSweepThreshold: 1000.0,
+  maxDailyPayout: 500000.0,
 };
 
 let cachedFeeConfig: PlatformFeeConfigData | null = null;
@@ -42,6 +56,13 @@ export class PlatformConfigService {
           withdrawalFeePct: toNumber(configRecord.withdrawalFeePct),
           withdrawalFeeCap: toNumber(configRecord.withdrawalFeeCap),
           minWithdrawalAmount: toNumber(configRecord.minWithdrawalAmount),
+          advanceFeePct: toNumber(configRecord.advanceFeePct ?? DEFAULT_FEE_CONFIG.advanceFeePct),
+          advanceFeeCap: toNumber(configRecord.advanceFeeCap ?? DEFAULT_FEE_CONFIG.advanceFeeCap),
+          maxAdvancePct: toNumber(configRecord.maxAdvancePct ?? DEFAULT_FEE_CONFIG.maxAdvancePct),
+          minAdvanceAmount: toNumber(configRecord.minAdvanceAmount ?? DEFAULT_FEE_CONFIG.minAdvanceAmount),
+          autoSweepEnabled: configRecord.autoSweepEnabled ?? true,
+          autoSweepThreshold: toNumber(configRecord.autoSweepThreshold ?? 1000.0),
+          maxDailyPayout: toNumber(configRecord.maxDailyPayout ?? 500000.0),
           updatedAt: configRecord.updatedAt,
           updatedBy: configRecord.updatedBy,
         };
@@ -63,28 +84,60 @@ export class PlatformConfigService {
    */
   static async updateFeeConfig(
     params: {
-      withdrawalFeePct: number;
-      withdrawalFeeCap: number;
-      minWithdrawalAmount: number;
+      withdrawalFeePct?: number;
+      withdrawalFeeCap?: number;
+      minWithdrawalAmount?: number;
+      advanceFeePct?: number;
+      advanceFeeCap?: number;
+      maxAdvancePct?: number;
+      minAdvanceAmount?: number;
+      autoSweepEnabled?: boolean;
+      autoSweepThreshold?: number;
+      maxDailyPayout?: number;
     },
     adminUserId: string,
     reqMeta?: { ip?: string; userAgent?: string }
   ): Promise<PlatformFeeConfigData> {
     const previousConfig = await this.getFeeConfig();
 
+    const withdrawalFeePct = params.withdrawalFeePct !== undefined ? params.withdrawalFeePct : previousConfig.withdrawalFeePct;
+    const withdrawalFeeCap = params.withdrawalFeeCap !== undefined ? params.withdrawalFeeCap : previousConfig.withdrawalFeeCap;
+    const minWithdrawalAmount = params.minWithdrawalAmount !== undefined ? params.minWithdrawalAmount : previousConfig.minWithdrawalAmount;
+    const advanceFeePct = params.advanceFeePct !== undefined ? params.advanceFeePct : previousConfig.advanceFeePct;
+    const advanceFeeCap = params.advanceFeeCap !== undefined ? params.advanceFeeCap : previousConfig.advanceFeeCap;
+    const maxAdvancePct = params.maxAdvancePct !== undefined ? params.maxAdvancePct : previousConfig.maxAdvancePct;
+    const minAdvanceAmount = params.minAdvanceAmount !== undefined ? params.minAdvanceAmount : previousConfig.minAdvanceAmount;
+    const autoSweepEnabled = params.autoSweepEnabled ?? previousConfig.autoSweepEnabled;
+    const autoSweepThreshold = params.autoSweepThreshold ?? previousConfig.autoSweepThreshold;
+    const maxDailyPayout = params.maxDailyPayout !== undefined ? params.maxDailyPayout : previousConfig.maxDailyPayout;
+
     const updated = await prisma.platformFeeConfig.upsert({
       where: { id: 'default' },
       create: {
         id: 'default',
-        withdrawalFeePct: params.withdrawalFeePct,
-        withdrawalFeeCap: params.withdrawalFeeCap,
-        minWithdrawalAmount: params.minWithdrawalAmount,
+        withdrawalFeePct,
+        withdrawalFeeCap,
+        minWithdrawalAmount,
+        advanceFeePct,
+        advanceFeeCap,
+        maxAdvancePct,
+        minAdvanceAmount,
+        autoSweepEnabled,
+        autoSweepThreshold,
+        maxDailyPayout,
         updatedBy: adminUserId,
       },
       update: {
-        withdrawalFeePct: params.withdrawalFeePct,
-        withdrawalFeeCap: params.withdrawalFeeCap,
-        minWithdrawalAmount: params.minWithdrawalAmount,
+        withdrawalFeePct,
+        withdrawalFeeCap,
+        minWithdrawalAmount,
+        advanceFeePct,
+        advanceFeeCap,
+        maxAdvancePct,
+        minAdvanceAmount,
+        autoSweepEnabled,
+        autoSweepThreshold,
+        maxDailyPayout,
         updatedBy: adminUserId,
       },
     });
@@ -93,6 +146,13 @@ export class PlatformConfigService {
       withdrawalFeePct: toNumber(updated.withdrawalFeePct),
       withdrawalFeeCap: toNumber(updated.withdrawalFeeCap),
       minWithdrawalAmount: toNumber(updated.minWithdrawalAmount),
+      advanceFeePct: toNumber(updated.advanceFeePct),
+      advanceFeeCap: toNumber(updated.advanceFeeCap),
+      maxAdvancePct: toNumber(updated.maxAdvancePct),
+      minAdvanceAmount: toNumber(updated.minAdvanceAmount),
+      autoSweepEnabled: updated.autoSweepEnabled,
+      autoSweepThreshold: toNumber(updated.autoSweepThreshold),
+      maxDailyPayout: toNumber(updated.maxDailyPayout),
       updatedAt: updated.updatedAt,
       updatedBy: updated.updatedBy,
     };
@@ -122,5 +182,12 @@ export class PlatformConfigService {
   static invalidateFeeConfigCache(): void {
     cachedFeeConfig = null;
     cacheExpiry = 0;
+  }
+
+  /**
+   * Alias for test suites and scripts to purge memory cache.
+   */
+  static clearCache(): void {
+    this.invalidateFeeConfigCache();
   }
 }

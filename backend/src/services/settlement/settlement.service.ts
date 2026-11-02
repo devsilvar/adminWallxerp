@@ -13,7 +13,7 @@ import {
 } from '@/lib/paystack-fees';
 import config from '@/config';
 import {
-  ToggleAutoSplitInput,
+  ToggleAutoPayoutInput,
 } from '@/validators/settlement.validator';
 import {
   toNumber,
@@ -54,7 +54,7 @@ export { getPayoutPreview } from './payout-preview.service';
 export async function toggleAutoSplit(
   userId: string,
   businessId: string,
-  params: ToggleAutoSplitInput
+  params: ToggleAutoPayoutInput
 ) {
   const business = await getWithdrawalActor(userId, businessId);
 
@@ -78,27 +78,10 @@ export async function toggleAutoSplit(
     throw new AppError(400, 'Transaction PIN or step-up authorization token is required', 'PIN_REQUIRED');
   }
 
-  // Percentage clamps (NEW-8)
-  let splitPct: number;
-  if (params.enabled) {
-    splitPct = params.taxSplitPercentage ?? 7.5;
-    if (splitPct < config.settlement.minTaxSplitPct || splitPct > config.settlement.maxTaxSplitPct) {
-      throw new AppError(
-        400,
-        `Tax split percentage must be between ${config.settlement.minTaxSplitPct}% and ${config.settlement.maxTaxSplitPct}%`,
-        'INVALID_SPLIT_PERCENTAGE'
-      );
-    }
-  } else {
-    // Preserve existing percentage setting on disable
-    splitPct = toNumber(business.taxSplitPercentage) || 7.5;
-  }
-
   const updatedBusiness = await prisma.business.update({
     where: { id: businessId },
     data: {
       autoSplitEnabled: params.enabled,
-      taxSplitPercentage: splitPct,
     },
   });
 
@@ -107,7 +90,7 @@ export async function toggleAutoSplit(
     const provider = getPaymentProvider();
     try {
       await provider.updateSubaccount(business.paystackSubaccountCode, {
-        percentageCharge: params.enabled ? splitPct : 0,
+        percentageCharge: params.enabled ? 7.5 : 0,
       });
     } catch (err) {
       logger.warn('Could not sync subaccount split percentage with Paystack', {
@@ -126,7 +109,6 @@ export async function toggleAutoSplit(
     resourceId: businessId,
     newData: {
       autoSplitEnabled: params.enabled,
-      taxSplitPercentage: splitPct,
     },
   });
 

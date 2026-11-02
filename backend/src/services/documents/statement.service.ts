@@ -13,7 +13,6 @@ import { getUnifiedLedger } from '@/services/ledger.service';
 import { sendEmail } from '@/lib/email';
 import { generateStatementHtml, generateStatementText } from '@/lib/email/templates/statement';
 import { toNumber, TAXABLE_SALES_WHERE } from '@/shared/helpers';
-import { calculateTaxWithStrategy } from '@/services/tax/tax-calculation-strategy';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -496,23 +495,12 @@ export async function getPnlStatementData(
 
   const grossProfit = Math.max(totalSales - deductibleExpenses, 0);
   const profitMargin = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
-  let taxRate: number;
-  let taxPayable: number;
-  if (existingReport) {
-    taxRate = toNumber(existingReport.taxRate);
-    taxPayable = toNumber(existingReport.taxPayable);
-  } else {
-    const calcResult = await calculateTaxWithStrategy({
-      businessId,
-      month,
-      year,
-      totalSales,
-      totalExpenses: deductibleExpenses,
-      grossProfit,
-    });
-    taxRate = calcResult.taxRate;
-    taxPayable = calcResult.taxPayable;
-  }
+  const taxRate = existingReport ? toNumber(existingReport.taxRate) : config.tax.defaultRate;
+  const taxPayable = existingReport
+    ? toNumber(existingReport.taxPayable)
+    : grossProfit > 0
+    ? (grossProfit * taxRate) / 100
+    : 0;
   const netProfitAfterTax = Math.max(totalSales - totalExpenses - taxPayable, 0);
 
   const reportStatus: PnlStatementPdfOptions['summary']['reportStatus'] =

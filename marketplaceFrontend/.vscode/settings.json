@@ -1,0 +1,37 @@
+{
+  // Astro Language Server
+  "astro.typescript.enabled": true,
+  "astro.typescript.allowArbitraryAttributes": false,
+  
+  // TypeScript
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  
+  // Editor
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  
+  // File Associations
+  "files.associations": {
+    "*.astro": "astro"
+  },
+  
+  // Tailwind CSS IntelliSense
+  "tailwindCSS.experimental.classRegex": [
+    ["cva\\(([^)]*)\\)", "[\"'`]([^\"'`]*).*?[\"'`]"],
+    ["cn\\(([^)]*)\\)", "(?:'|\"|`)([^']*)(?:'|\"|`)"]
+  ],
+  "tailwindCSS.classAttributes": [
+    "class",
+    "className",
+    ".*Classes.*"
+  ],
+  
+  // Emmet
+  "emmet.includeLanguages": {
+    "astro": "html"
+  }
+}

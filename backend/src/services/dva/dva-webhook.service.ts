@@ -473,6 +473,8 @@ export async function processDVATransferWebhook(event: any) {
       });
     }
 
+    const settledAt = nextBusinessDayStart(rawPaidDate);
+
     const sale = await prisma.$transaction(
       async (tx) => {
         const sale = await tx.salesTransaction.create({
@@ -485,7 +487,7 @@ export async function processDVATransferWebhook(event: any) {
             referenceId: reference,
             customerName: payerName || 'Bank Transfer',
             transactionDate: dateRes.effectiveDate,
-            settledAt: nextBusinessDayStart(rawPaidDate),
+            settledAt,
             settledViaSplit: isSplitSettled,
             splitPct,
             platformRetained,

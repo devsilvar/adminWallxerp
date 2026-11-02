@@ -1,0 +1,47 @@
+---
+import Header from '@/components/Header';
+import Footer from '@/components/Footer';
+import '@/styles/globals.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+  cartItemCount?: number;
+}
+
+const {
+  title = 'Marketplace - Your trusted online store',
+  description = 'Shop quality products at great prices',
+  cartItemCount = 0,
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="description" content={description} />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.ico" />
+    <meta name="generator" content={Astro.generator} />
+    
+    <!-- Fonts: Montserrat (headings) + Inter (body)
+         Self-hosted via @fontsource — imported in globals.css, no CDN dependency -->
+    <!-- WallX brand colours for address bar on mobile Chrome -->
+    <meta name="theme-color" content="#352778" />
+    
+    <title>{title}</title>
+  </head>
+  <body>
+    <div class="flex min-h-screen flex-col">
+      <Header cartItemCount={cartItemCount} client:load />
+      
+      <main class="flex-1">
+        <slot />
+      </main>
+      
+      <Footer />
+    </div>
+  </body>
+</html>

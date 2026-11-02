@@ -6,6 +6,7 @@ import { SETTLED_SALE_STATUSES } from '@/shared/helpers';
 import { AppError } from '@/middleware/errorHandler';
 import logger from '@/lib/logger';
 import { config } from '@/config';
+import { round2 } from '@/lib/paystack-fees';
 
 export interface CreditWalletParams {
   userId: string;
@@ -46,6 +47,26 @@ export interface ReleaseLockedFundsParams {
   userId: string;
   amount: number | Prisma.Decimal;
   fee?: number | Prisma.Decimal;
+}
+
+export interface ReserveAdvanceFundsParams {
+  userId: string;
+  amount: number | Prisma.Decimal;
+  fee?: number | Prisma.Decimal;
+  reference: string;
+  linkedPayoutId?: string;
+  description?: string;
+}
+
+export interface SettleAdvanceDebitParams {
+  userId: string;
+  businessId?: string | null;
+  amount: number | Prisma.Decimal;
+  fee?: number | Prisma.Decimal;
+  reference: string;
+  linkedPayoutId?: string;
+  description?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface WalletHistoryQuery {
@@ -608,6 +629,172 @@ export class WalletService {
   /**
    * Queries paginated wallet ledger history for a user.
    */
+  /**
+   * Locks funds for a settlement advance withdrawal.
+   */
+  static async reserveAdvanceFunds(
+    params: ReserveAdvanceFundsParams,
+    tx?: TxClient
+  ): Promise<{ success: boolean; lockedAmount: number; wallet: WalletBalance }> {
+    const execute = async (db: TxClient) => {
+      await this.getOrCreateWallet(params.userId, db);
+
+      if (typeof (db as any).$queryRaw === 'function') {
+        await (db as any).$queryRaw`SELECT id FROM wallet_balances WHERE user_id = ${params.userId} FOR UPDATE`;
+      }
+
+      const wallet = await db.walletBalance.findUnique({ where: { userId: params.userId } });
+      if (!wallet) throw new AppError(404, 'Wallet not found', 'WALLET_NOT_FOUND');
+
+      const amountNum = toNumber(params.amount);
+      const feeNum = toNumber(params.fee ?? 0);
+      const totalDebit = round2(amountNum + feeNum);
+      const totalDebitDec = new Prisma.Decimal(totalDebit);
+
+      const updatedWallet = await db.walletBalance.update({
+        where: { userId: params.userId },
+        data: {
+          lockedBalance: { increment: totalDebitDec },
+          version: { increment: 1 },
+          updatedAt: new Date(),
+        },
+      });
+
+      return { success: true, lockedAmount: totalDebit, wallet: updatedWallet };
+    };
+
+    if (tx) {
+      return execute(tx);
+    }
+    return prisma.$transaction(execute, TX_OPTIONS);
+  }
+
+  /**
+   * Completes an advance debit once transfer has executed.
+   */
+  static async settleAdvanceDebit(
+    params: SettleAdvanceDebitParams,
+    tx?: TxClient
+  ): Promise<{ wallet: WalletBalance; transaction: WalletTransaction }> {
+    const execute = async (db: TxClient) => {
+      await this.getOrCreateWallet(params.userId, db);
+
+      if (typeof (db as any).$queryRaw === 'function') {
+        await (db as any).$queryRaw`SELECT id FROM wallet_balances WHERE user_id = ${params.userId} FOR UPDATE`;
+      }
+
+      if (params.linkedPayoutId) {
+        const existingTx = await db.walletTransaction.findFirst({
+          where: { linkedPayoutId: params.linkedPayoutId },
+        });
+        if (existingTx) {
+          const currentWallet = await db.walletBalance.findUnique({ where: { userId: params.userId } });
+          return { wallet: currentWallet!, transaction: existingTx };
+        }
+      }
+
+      const wallet = await db.walletBalance.findUnique({ where: { userId: params.userId } });
+      if (!wallet) throw new AppError(404, 'Wallet not found', 'WALLET_NOT_FOUND');
+
+      const amountDec = new Prisma.Decimal(params.amount);
+      const feeDec = new Prisma.Decimal(params.fee ?? 0);
+      const totalDebitDec = amountDec.plus(feeDec);
+
+      const updatedWallet = await db.walletBalance.update({
+        where: { userId: params.userId },
+        data: {
+          balance: { decrement: totalDebitDec },
+          lockedBalance: { decrement: totalDebitDec },
+          version: { increment: 1 },
+          updatedAt: new Date(),
+        },
+      });
+
+      if (toNumber(updatedWallet.balance) < 0) {
+        logger.warn(
+          `[ADVANCE_NEGATIVE_BALANCE] Wallet balance went negative after settlement advance debit. userId=${params.userId}, balance=${updatedWallet.balance.toString()}, linkedPayoutId=${params.linkedPayoutId}`
+        );
+      }
+
+      try {
+        const transaction = await db.walletTransaction.create({
+          data: {
+            walletId: updatedWallet.id,
+            userId: params.userId,
+            businessId: params.businessId,
+            type: 'advance' as any,
+            amount: amountDec,
+            fee: feeDec,
+            netAmount: totalDebitDec.negated(),
+            balanceAfter: updatedWallet.balance,
+            reference: params.reference,
+            source: 'settlement_advance',
+            description: params.description ?? 'Settlement advance withdrawal',
+            metadata: params.metadata ?? (Prisma.JsonNull as any),
+            linkedPayoutId: params.linkedPayoutId,
+          },
+        });
+
+        return { wallet: updatedWallet, transaction };
+      } catch (err: any) {
+        if (err.code === 'P2002' && params.linkedPayoutId) {
+          const existingTx = await db.walletTransaction.findFirst({
+            where: { linkedPayoutId: params.linkedPayoutId },
+          });
+          if (existingTx) {
+            return { wallet: updatedWallet, transaction: existingTx };
+          }
+        }
+        throw err;
+      }
+    };
+
+    if (tx) {
+      return execute(tx);
+    }
+    return prisma.$transaction(execute, TX_OPTIONS);
+  }
+
+  static async releaseAdvanceLockedFunds(
+    params: { userId: string; amount: number | Prisma.Decimal; fee?: number | Prisma.Decimal },
+    tx?: TxClient
+  ): Promise<{ success: boolean; releasedAmount: number; wallet: WalletBalance }> {
+    const execute = async (db: TxClient) => {
+      await this.getOrCreateWallet(params.userId, db);
+
+      if (typeof (db as any).$queryRaw === 'function') {
+        await (db as any).$queryRaw`SELECT id FROM wallet_balances WHERE user_id = ${params.userId} FOR UPDATE`;
+      }
+
+      const wallet = await db.walletBalance.findUnique({ where: { userId: params.userId } });
+      if (!wallet) throw new AppError(404, 'Wallet not found', 'WALLET_NOT_FOUND');
+
+      const amountNum = toNumber(params.amount);
+      const feeNum = toNumber(params.fee ?? 0);
+      const totalDebit = round2(amountNum + feeNum);
+
+      const currentLocked = toNumber(wallet.lockedBalance);
+      const actualToRelease = Math.min(currentLocked, totalDebit);
+      const releaseDec = new Prisma.Decimal(actualToRelease);
+
+      const updatedWallet = await db.walletBalance.update({
+        where: { userId: params.userId },
+        data: {
+          lockedBalance: { decrement: releaseDec },
+          version: { increment: 1 },
+          updatedAt: new Date(),
+        },
+      });
+
+      return { success: true, releasedAmount: actualToRelease, wallet: updatedWallet };
+    };
+
+    if (tx) {
+      return execute(tx);
+    }
+    return prisma.$transaction(execute, TX_OPTIONS);
+  }
+
   static async getWalletHistory(userId: string, query: WalletHistoryQuery = {}) {
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(100, Math.max(1, query.limit || 20));

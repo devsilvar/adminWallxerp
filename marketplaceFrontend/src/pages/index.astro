@@ -1,0 +1,407 @@
+---
+import Layout from '@/layouts/Layout.astro';
+import ProductCard from '@/components/ProductCard';
+import { getProducts } from '@/lib/api';
+import { MARKETPLACE_CATEGORIES, CATEGORY_LABELS } from '@/types';
+import { 
+  ShieldCheck, 
+  MessageSquare, 
+  Store, 
+  ArrowRight,
+  Search,
+  BadgeCheck,
+  Package,
+  Zap,
+  Star,
+  Shirt,
+  BriefcaseBusiness,
+  BookOpen,
+  Sofa,
+  Smartphone,
+  ShoppingBasket,
+  Wrench,
+  LayoutGrid,
+} from 'lucide-react';
+
+const response = await getProducts({ limit: 12 });
+const products = response.data || [];
+const totalCount = response.pagination?.total || products.length;
+
+const statStrip = [
+  { value: '100%', label: 'Verified Merchants', detail: 'Admin identity-vetted' },
+  { value: '\u20a60', label: 'Platform Commission', detail: 'Buyers pay real prices' },
+  { value: '36+', label: 'States Covered', detail: 'Nationwide Nigeria' },
+  { value: (totalCount > 0 ? totalCount + '+' : 'Growing'), label: 'Live Listings', detail: 'Approved & active' },
+];
+
+// Category grid — Jiji-style visual icon grid
+const CATEGORY_GRID = [
+  { slug: 'fashion',     label: 'Fashion',        sub: 'Clothes & wearables',   color: 'bg-pink-50',    border: 'border-pink-100',    icon: 'Shirt' },
+  { slug: 'bags',        label: 'Bags',            sub: 'Luggage & accessories', color: 'bg-amber-50',   border: 'border-amber-100',   icon: 'BriefcaseBusiness' },
+  { slug: 'electronics', label: 'Electronics',     sub: 'Phones & gadgets',      color: 'bg-blue-50',    border: 'border-blue-100',    icon: 'Smartphone' },
+  { slug: 'furniture',   label: 'Furniture',       sub: 'Home & living',         color: 'bg-emerald-50', border: 'border-emerald-100', icon: 'Sofa' },
+  { slug: 'food',        label: 'Food',            sub: 'Groceries & produce',   color: 'bg-green-50',   border: 'border-green-100',   icon: 'ShoppingBasket' },
+  { slug: 'books',       label: 'Books',           sub: 'Stationery & learning', color: 'bg-orange-50',  border: 'border-orange-100',  icon: 'BookOpen' },
+  { slug: 'services',    label: 'Services',        sub: 'Skills & consultancy',  color: 'bg-purple-50',  border: 'border-purple-100',  icon: 'Wrench' },
+  { slug: 'other',       label: 'Other',           sub: 'General products',      color: 'bg-gray-50',    border: 'border-gray-100',    icon: 'LayoutGrid' },
+];
+---
+
+<Layout 
+  title="WallX Marketplace — Buy Directly from Verified Nigerian Businesses"
+  description="Browse approved goods and services from verified Nigerian businesses. Chat directly on WhatsApp or call sellers. Zero commission platform."
+>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       1. HERO
+       ══════════════════════════════════════════════════════════════ -->
+  <section class="relative overflow-hidden border-b border-gray-200 bg-gradient-to-b from-[#f8f6ff] via-white to-white">
+    <!-- Dot-grid overlay -->
+    <div class="pointer-events-none absolute inset-0 opacity-[0.022] bg-dot-grid-purple" />
+    <!-- Ambient radial glow -->
+    <div class="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 h-[400px] w-[800px] rounded-full bg-gradient-to-b from-purple-200/30 to-transparent blur-3xl" />
+
+    <div class="relative mx-auto max-w-[1152px] px-5 sm:px-8 py-16 sm:py-24 text-center">
+
+      <!-- Eyebrow pill -->
+      <div class="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white/90 px-4 py-1.5 mb-8 shadow-sm">
+        <span class="relative flex h-2 w-2 shrink-0">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+        </span>
+        <span class="text-[12px] font-bold tracking-wide text-gray-700">WallX Verified Nigeria Marketplace</span>
+      </div>
+
+      <!-- Headline -->
+      <h1 class="mx-auto max-w-[720px] text-[2.35rem] sm:text-5xl font-extrabold leading-[1.12] tracking-tight text-gray-900">
+        Buy Directly From
+        <span class="block mt-1 bg-gradient-to-r from-[#352778] via-[#7c3aed] to-[#a855f7] bg-clip-text text-transparent">
+          Verified Nigerian Businesses
+        </span>
+      </h1>
+
+      <!-- Subheadline -->
+      <p class="mx-auto mt-5 max-w-[540px] text-[15.5px] leading-relaxed text-gray-500">
+        No middlemen. No inflated markup. Connect directly with verified SME merchants via WhatsApp and phone across all 36 states.
+      </p>
+
+      <!-- Search Bar — Premium pill style -->
+      <form
+        action="/products"
+        method="GET"
+        class="mx-auto mt-9 flex max-w-[540px] items-center gap-2 rounded-2xl border border-gray-200 bg-white p-1.5 shadow-[0_4px_24px_0_rgba(53,39,120,0.1)]"
+      >
+        <div class="relative flex-1">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" client:load />
+          <input
+            type="text"
+            name="search"
+            placeholder="Search products, services, or businesses..."
+            class="w-full rounded-xl bg-transparent py-2.5 pl-10 pr-3 text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none"
+          />
+        </div>
+        <button
+          type="submit"
+          class="shrink-0 rounded-xl bg-gradient-to-r from-[#352778] to-[#7c3aed] px-5 py-2.5 text-[13px] font-bold text-white hover:opacity-95 hover:-translate-y-px transition-all active:scale-[0.98]"
+        >
+          Search
+        </button>
+      </form>
+
+      <!-- Category Chips — quick-access filters below search -->
+      <div class="mt-5 flex flex-wrap items-center justify-center gap-2">
+        <a
+          href="/products"
+          class="rounded-full bg-[#352778] px-3.5 py-1.5 text-[12px] font-bold text-white transition-opacity hover:opacity-90"
+        >
+          All Items
+        </a>
+        {
+          MARKETPLACE_CATEGORIES.map((cat) => (
+            <a
+              href={`/products?category=${cat}`}
+              class="rounded-full border border-gray-200 bg-white px-3.5 py-1.5 text-[12px] font-medium text-gray-600 transition-all hover:border-[#7c3aed] hover:text-[#352778] hover:bg-purple-50/40"
+            >
+              {CATEGORY_LABELS[cat]}
+            </a>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       2. STATS STRIP
+       ══════════════════════════════════════════════════════════════ -->
+  <section class="border-b border-gray-200 bg-gray-50/80">
+    <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-9">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-6 lg:gap-10">
+        {statStrip.map((s) => (
+          <div class="flex items-start gap-3.5">
+            <div class="mt-0.5 h-10 w-1 rounded-full bg-gradient-to-b from-[#352778] to-[#a855f7] shrink-0"></div>
+            <div>
+              <div class="text-[1.6rem] font-extrabold leading-none tracking-tight text-gray-900" style="font-family:'Montserrat',sans-serif;">
+                {s.value}
+              </div>
+              <div class="mt-1 text-[13px] font-semibold text-gray-800">{s.label}</div>
+              <div class="text-[11.5px] text-gray-400 mt-0.5">{s.detail}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       3. CATEGORY GRID — Jiji-style visual browse grid
+       ══════════════════════════════════════════════════════════════ -->
+  <section class="border-b border-gray-200 bg-white py-10 sm:py-14">
+    <div class="mx-auto max-w-[1152px] px-5 sm:px-8">
+
+      <!-- Section label -->
+      <div class="flex items-center justify-between mb-7">
+        <div>
+          <h2 class="text-[1.1rem] font-extrabold tracking-tight text-gray-900 border-l-[3px] border-[#352778] pl-3.5">
+            Browse by Category
+          </h2>
+          <p class="pl-3.5 mt-0.5 text-[12px] text-gray-400">Find exactly what you're looking for</p>
+        </div>
+        <a href="/products" class="text-[12.5px] font-bold text-[#352778] hover:text-[#7c3aed] transition-colors inline-flex items-center gap-1">
+          View all
+          <ArrowRight className="h-3.5 w-3.5" client:load />
+        </a>
+      </div>
+
+      <!-- 8-block grid: 4-col desktop, 4-col tablet, 2-col mobile -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+        {CATEGORY_GRID.map((cat) => (
+          <a
+            href={`/products?category=${cat.slug}`}
+            class={`group flex flex-col items-center gap-2.5 rounded-2xl border ${cat.border} ${cat.color} px-3 py-5 text-center hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 cursor-pointer`}
+          >
+            <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-white shadow-sm border border-white/80">
+              {cat.icon === 'Shirt' && <Shirt className="h-5 w-5 text-pink-500" client:load />}
+              {cat.icon === 'BriefcaseBusiness' && <BriefcaseBusiness className="h-5 w-5 text-amber-600" client:load />}
+              {cat.icon === 'Smartphone' && <Smartphone className="h-5 w-5 text-blue-600" client:load />}
+              {cat.icon === 'Sofa' && <Sofa className="h-5 w-5 text-emerald-600" client:load />}
+              {cat.icon === 'ShoppingBasket' && <ShoppingBasket className="h-5 w-5 text-green-600" client:load />}
+              {cat.icon === 'BookOpen' && <BookOpen className="h-5 w-5 text-orange-500" client:load />}
+              {cat.icon === 'Wrench' && <Wrench className="h-5 w-5 text-purple-600" client:load />}
+              {cat.icon === 'LayoutGrid' && <LayoutGrid className="h-5 w-5 text-gray-500" client:load />}
+            </div>
+            <div>
+              <p class="text-[12.5px] font-bold text-gray-900 leading-tight group-hover:text-[#352778] transition-colors">{cat.label}</p>
+              <p class="text-[10.5px] text-gray-400 mt-0.5 leading-tight hidden sm:block">{cat.sub}</p>
+            </div>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       4. SAFETY NOTICE
+       ══════════════════════════════════════════════════════════════ -->
+  <div class="mx-auto max-w-[1152px] px-5 sm:px-8 pt-9">
+    <div class="flex gap-3 items-start rounded-2xl border border-amber-200/80 bg-amber-50 px-5 py-4">
+      <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" client:load />
+      <div>
+        <p class="text-[13px] font-bold text-amber-900">Safe Shopping Protocol</p>
+        <p class="mt-0.5 text-[12.5px] leading-relaxed text-amber-800">
+          Merchant identity and tax records are vetted before listing approval. Always inspect goods before payment, meet in busy public places, and never pay upfront fees.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       4. FEATURED LISTINGS
+       ══════════════════════════════════════════════════════════════ -->
+  <section class="mx-auto max-w-[1152px] px-5 sm:px-8 py-12 sm:py-16">
+
+    <!-- Section Header -->
+    <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+      <div>
+        <div class="inline-flex items-center gap-1.5 rounded-full border border-purple-200/80 bg-purple-50 px-3 py-1 mb-3">
+          <Zap className="h-3.5 w-3.5 text-[#7c3aed]" client:load />
+          <span class="text-[11px] font-bold uppercase tracking-widest text-[#352778]">Live Listings</span>
+        </div>
+        <h2 class="text-2xl sm:text-[1.75rem] font-extrabold tracking-tight text-gray-900 border-l-[3px] border-[#352778] pl-4">
+          Featured Listings
+        </h2>
+        <p class="mt-1 pl-4 text-[13px] text-gray-400">
+          {totalCount} verified listings across Nigeria
+        </p>
+      </div>
+      <a
+        href="/products"
+        class="inline-flex items-center gap-1 text-[13px] font-bold text-[#352778] hover:text-[#7c3aed] transition-colors self-start sm:self-auto"
+      >
+        View all products
+        <ArrowRight className="h-4 w-4" client:load />
+      </a>
+    </div>
+
+    <!-- Grid: 4-col on xl (≈270px cards), 3-col md, 2-col sm -->
+    {
+      products.length > 0 ? (
+        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+          {products.map((product) => (
+            <ProductCard product={product} client:load />
+          ))}
+        </div>
+      ) : (
+        <div class="rounded-2xl border border-dashed border-gray-300 bg-gray-50/50 py-16 text-center">
+          <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-50">
+            <Store className="h-7 w-7 text-purple-300" client:load />
+          </div>
+          <h3 class="text-[15px] font-bold text-gray-900">No Approved Products Live Yet</h3>
+          <p class="mt-2 text-[13px] text-gray-400 max-w-sm mx-auto">
+            Be the first verified SME merchant to showcase your inventory to thousands of buyers across Nigeria.
+          </p>
+          <a
+            href="http://localhost:5173/inventory"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="mt-6 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#352778] to-[#7c3aed] px-6 py-2.5 text-[13px] font-bold text-white shadow-sm hover:shadow-md hover:-translate-y-px transition-all"
+          >
+            <Store className="h-4 w-4" client:load />
+            List Your Products Free
+          </a>
+        </div>
+      )
+    }
+
+    {
+      products.length > 0 && (
+        <div class="mt-10 text-center">
+          <a href="/products">
+            <button class="rounded-full border-2 border-[#352778] px-8 py-2.5 text-[13px] font-bold text-[#352778] hover:bg-[#352778] hover:text-white transition-all duration-200">
+              Explore All {totalCount} Listings
+            </button>
+          </a>
+        </div>
+      )
+    }
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       5. HOW IT WORKS — Fast, Safe & Direct 3-Step Buying Flow
+       ══════════════════════════════════════════════════════════════ -->
+  <section class="border-t border-gray-200 bg-gray-50/60 py-14 sm:py-18">
+    <div class="mx-auto max-w-[1152px] px-5 sm:px-8">
+
+      <div class="text-center mb-10">
+        <div class="inline-flex items-center gap-1.5 rounded-full border border-purple-200/80 bg-white px-3.5 py-1.5 mb-4 shadow-sm">
+          <Star className="h-3.5 w-3.5 text-[#7c3aed]" client:load />
+          <span class="text-[11px] font-bold uppercase tracking-widest text-[#352778]">How Buying Works</span>
+        </div>
+        <h2 class="text-2xl sm:text-[1.75rem] font-extrabold tracking-tight text-gray-900">
+          Fast, Safe & Direct in 3 Simple Steps
+        </h2>
+        <p class="mt-2.5 text-[13.5px] text-gray-500 max-w-[440px] mx-auto">
+          No complicated carts, no middleman markup. Connect directly with real Nigerian business owners.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 gap-5 md:grid-cols-3">
+        <!-- Step 1 -->
+        <div class="flex flex-col rounded-2xl border border-gray-200 bg-white p-7 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+          <div class="flex items-center justify-between mb-5">
+            <div class="flex h-11 w-11 items-center justify-center rounded-xl border border-purple-100 bg-purple-50">
+              <ShieldCheck className="h-5.5 w-5.5 text-[#7c3aed]" client:load />
+            </div>
+            <span class="text-xs font-black text-purple-300 uppercase tracking-widest">Step 01</span>
+          </div>
+          <h3 class="text-[15px] font-bold text-gray-900">Find What You Need</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-gray-500">
+            Browse verified listings across electronics, fashion, groceries, and services with upfront, transparent pricing.
+          </p>
+          <div class="mt-auto pt-4 border-t border-gray-100 text-[11px] font-bold uppercase tracking-widest text-[#352778]">
+            Vetted Catalog
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="flex flex-col rounded-2xl border border-gray-200 bg-white p-7 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+          <div class="flex items-center justify-between mb-5">
+            <div class="flex h-11 w-11 items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50">
+              <MessageSquare className="h-5.5 w-5.5 text-emerald-600" client:load />
+            </div>
+            <span class="text-xs font-black text-emerald-300 uppercase tracking-widest">Step 02</span>
+          </div>
+          <h3 class="text-[15px] font-bold text-gray-900">Click to Chat or Call</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-gray-500">
+            Open any product to unlock direct WhatsApp chat and phone numbers. Inquire, confirm stock, and negotiate in real time.
+          </p>
+          <div class="mt-auto pt-4 border-t border-gray-100 text-[11px] font-bold uppercase tracking-widest text-emerald-600">
+            Direct Contact
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="flex flex-col rounded-2xl border border-gray-200 bg-white p-7 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+          <div class="flex items-center justify-between mb-5">
+            <div class="flex h-11 w-11 items-center justify-center rounded-xl border border-blue-100 bg-blue-50">
+              <Package className="h-5.5 w-5.5 text-blue-600" client:load />
+            </div>
+            <span class="text-xs font-black text-blue-300 uppercase tracking-widest">Step 03</span>
+          </div>
+          <h3 class="text-[15px] font-bold text-gray-900">Inspect & Transact Safely</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-gray-500">
+            Arrange delivery or meet in person. Inspect your items before payment with 0% platform commission taken.
+          </p>
+          <div class="mt-auto pt-4 border-t border-gray-100 text-[11px] font-bold uppercase tracking-widest text-blue-600">
+            Zero Commission
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       6. MERCHANT CTA BANNER
+       ══════════════════════════════════════════════════════════════ -->
+  <section class="mx-auto max-w-[1152px] px-5 sm:px-8 py-14 sm:py-18">
+    <div class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#2a1e60] via-[#352778] to-[#6d28d9] px-8 py-12 md:px-14 md:py-14 shadow-xl">
+      <!-- Pattern overlay -->
+      <div class="pointer-events-none absolute inset-0 opacity-[0.035] bg-dot-grid-white" />
+      <!-- Soft ambient blob -->
+      <div class="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-purple-400/20 blur-3xl" />
+      <div class="pointer-events-none absolute -bottom-16 left-1/3 h-64 w-64 rounded-full bg-indigo-400/15 blur-3xl" />
+
+      <div class="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-8">
+        <div class="max-w-xl">
+          <div class="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 mb-5">
+            <BadgeCheck className="h-3.5 w-3.5 text-white/80" client:load />
+            <span class="text-[11px] font-bold uppercase tracking-widest text-white/80">For Nigerian Business Owners</span>
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-snug">
+            Grow your business with<br class="hidden sm:inline" /> free marketplace exposure.
+          </h2>
+          <p class="mt-4 text-[14px] leading-relaxed text-white/75">
+            Syndicate your top products to thousands of buyers across Nigeria. Zero setup fees. Admin-verified listing. Go live in minutes from your WallXERP dashboard.
+          </p>
+        </div>
+        <div class="flex flex-col sm:flex-row md:flex-col gap-3 shrink-0">
+          <a
+            href="http://localhost:5173/inventory"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <button class="w-full md:w-auto inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-3 text-[13.5px] font-bold text-[#352778] shadow-md hover:bg-purple-50 hover:-translate-y-px hover:shadow-lg transition-all active:scale-[0.98]">
+              Open Merchant Inventory
+              <ArrowRight className="h-4 w-4" client:load />
+            </button>
+          </a>
+          <a href="http://localhost:5173/register" target="_blank" rel="noopener noreferrer">
+            <button class="w-full md:w-auto inline-flex items-center justify-center rounded-full border border-white/30 px-6 py-3 text-[13.5px] font-bold text-white hover:bg-white/10 transition-all">
+              Create Free Account
+            </button>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</Layout>

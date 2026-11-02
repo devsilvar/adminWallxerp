@@ -8,6 +8,9 @@ const router = Router({ mergeParams: true });
 router.use(authenticate);
 
 router.get('/preview', asyncHandler(settlementController.getPayoutPreview));
+router.get('/advance/preview', asyncHandler(settlementController.getAdvancePreview));
+router.post('/advance', asyncHandler(settlementController.requestAdvance));
+router.get('/advance/history', asyncHandler(settlementController.listAdvanceHistory));
 router.post('/resolve', asyncHandler(settlementController.resolveAccount));
 router.post('/connect', asyncHandler(settlementController.connectBank));
 router.post('/withdraw', asyncHandler(settlementController.withdrawBalance));

@@ -32,6 +32,8 @@
     "test:emails": "tsx scripts/test-emails.ts",
     "audit:qa-exposure": "tsx scripts/audit-qa-exposure.ts",
     "erase-test-accounts": "tsx scripts/erase-test-accounts.ts",
+    "db:backfill-settlement": "tsx src/scripts/backfill-settlement-settled-at.ts",
+    "db:backfill-settlement:dry": "tsx src/scripts/backfill-settlement-settled-at.ts --dry-run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\""

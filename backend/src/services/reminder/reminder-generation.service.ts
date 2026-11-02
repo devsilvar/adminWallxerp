@@ -43,6 +43,7 @@ export type ReminderType =
   | 'payout_rejected'
   | 'payout_completed'
   | 'payout_failed'
+  | 'advance_withdrawal'
   | 'credit_overdue'
   | 'pnl_statement_ready';
 

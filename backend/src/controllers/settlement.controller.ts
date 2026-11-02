@@ -4,8 +4,8 @@ import { config } from '@/config';
 import * as settlementService from '@/services/settlement.service';
 import {
   withdrawBalanceSchema,
-  toggleAutoSplitSchema,
   toggleAutoPayoutSchema,
+  advanceRequestSchema,
   payoutHistoryQuerySchema,
   connectSettlementSchema,
   resolveSettlementSchema,
@@ -52,7 +52,7 @@ export async function withdrawBalance(req: AuthenticatedRequest, res: Response) 
 }
 
 export async function toggleAutoSplit(req: AuthenticatedRequest, res: Response) {
-  const input = toggleAutoSplitSchema.parse(req.body);
+  const input = toggleAutoPayoutSchema.parse(req.body);
   const result = await settlementService.toggleAutoSplit(
     req.user!.userId,
     req.params.businessId,
@@ -79,6 +79,41 @@ export async function toggleAutoPayout(req: AuthenticatedRequest, res: Response)
 export async function listPayoutHistory(req: AuthenticatedRequest, res: Response) {
   const query = payoutHistoryQuerySchema.parse(req.query);
   const result = await settlementService.listPayoutHistory(
+    req.user!.userId,
+    req.params.businessId,
+    query
+  );
+  res.json({ success: true, data: result.items, pagination: result.pagination });
+}
+
+export async function getAdvancePreview(req: AuthenticatedRequest, res: Response) {
+  const result = await settlementService.getAdvancePreview(
+    req.user!.userId,
+    req.params.businessId
+  );
+  res.json({
+    success: true,
+    data: result,
+  });
+}
+
+export async function requestAdvance(req: AuthenticatedRequest, res: Response) {
+  const input = advanceRequestSchema.parse(req.body);
+  const result = await settlementService.requestAdvance(
+    req.user!.userId,
+    req.params.businessId,
+    input
+  );
+  res.status(201).json({
+    success: true,
+    data: result,
+    message: result.message,
+  });
+}
+
+export async function listAdvanceHistory(req: AuthenticatedRequest, res: Response) {
+  const query = payoutHistoryQuerySchema.parse(req.query);
+  const result = await settlementService.listAdvanceHistory(
     req.user!.userId,
     req.params.businessId,
     query

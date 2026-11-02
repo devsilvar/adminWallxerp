@@ -6,6 +6,7 @@ export type RealtimeEvent =
   | { type: 'broadcast_email_progress'; broadcastId: string; totalRecipients: number; sent: number; failed: number; skipped: number; pending: number; totalProcessed: number; timestamp: string }
   | { type: 'broadcast_email_completed'; broadcastId: string; totalRecipients: number; sent: number; failed: number; skipped: number; pending: number; status: 'sent'; deliveryStats: { total: number; sent: number; failed: number; skipped: number; pending: number }; timestamp: string }
   | { type: 'withdrawal_created'; withdrawalId: string; businessId: string; businessName: string; amount: number; timestamp: string }
+  | { type: 'advance_created'; withdrawalId: string; businessId: string; businessName: string; amount: number; timestamp: string }
   | { type: 'withdrawal_status_changed'; withdrawalId: string; businessId: string; businessName: string; status: 'pending'|'processing'|'completed'|'failed'; amount: number; failureReason?: string; timestamp: string }
   | { type: 'unverified_inflow_created'; saleId: string; businessId: string; businessName: string; amount: number; referenceId?: string; timestamp: string }
   | { type: 'unverified_inflow_verified'; saleId: string; businessId: string; timestamp: string }
@@ -20,6 +21,7 @@ export const REALTIME_EVENT_TYPES = [
   'broadcast_email_progress',
   'broadcast_email_completed',
   'withdrawal_created',
+  'advance_created',
   'withdrawal_status_changed',
   'unverified_inflow_created',
   'unverified_inflow_verified',

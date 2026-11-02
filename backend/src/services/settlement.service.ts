@@ -3,8 +3,12 @@
  * Domain implementation moved to `@/services/settlement/settlement.service`.
  */
 import * as settlementImpl from './settlement/settlement.service';
+import * as advanceImpl from './settlement/advance.service';
 
 export const getPayoutPreview = settlementImpl.getPayoutPreview;
+export const getAdvancePreview = advanceImpl.getAdvancePreview;
+export const requestAdvance = advanceImpl.requestAdvance;
+export const listAdvanceHistory = advanceImpl.listAdvanceHistory;
 export const toggleAutoSplit = settlementImpl.toggleAutoSplit;
 export const resolveSettlementAccount = settlementImpl.resolveSettlementAccount;
 export const connectSettlementBank = settlementImpl.connectSettlementBank;

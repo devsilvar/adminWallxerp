@@ -1,0 +1,139 @@
+/* ─── Self-hosted fonts — zero CDN, zero network dependency ─────────────────
+   @fontsource packages bundle the actual woff2/woff files into node_modules
+   and Vite/Astro copies them into the build output automatically.
+   Only the exact weights used by the design are imported to keep bundle tight.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Inter — body text (400 regular, 500 medium, 600 semibold, 700 bold) */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+
+/* Montserrat — headings (600 semibold, 700 bold, 800 extrabold) */
+@import '@fontsource/montserrat/600.css';
+@import '@fontsource/montserrat/700.css';
+@import '@fontsource/montserrat/800.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── WallX Brand Design Tokens ──────────────────────────────────────────────
+   These HSL variable names are kept so all existing `text-muted-foreground`,
+   `border-border`, `bg-card` etc. classes continue to resolve — but the
+   underlying values are now WallX purple brand instead of shadcn blue defaults.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  :root {
+    /* ── Neutral surface ── */
+    --background: 0 0% 100%;               /* #ffffff */
+    --foreground: 220 26% 7%;              /* #0f1115 — WallX ink */
+    --card: 0 0% 100%;                     /* #ffffff */
+    --card-foreground: 220 26% 7%;         /* #0f1115 */
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 26% 7%;
+
+    /* ── WallX Primary = Brand Purple (#352778 dark / #7c3aed mid / #a855f7 bright) ── */
+    --primary: 263 73% 50%;                /* #7c3aed — WallX purple-600 */
+    --primary-foreground: 0 0% 100%;       /* #ffffff */
+
+    /* ── Secondary / Muted surfaces ── */
+    --secondary: 220 14% 96%;              /* #f3f4f6 gray-100 */
+    --secondary-foreground: 220 26% 14%;   /* #1f2937 gray-800 */
+    --muted: 220 14% 96%;                  /* #f3f4f6 */
+    --muted-foreground: 220 9% 46%;        /* #6b7280 gray-500 */
+
+    /* ── Accent (light purple tint for hover states) ── */
+    --accent: 270 100% 97%;                /* #faf5ff purple-50 */
+    --accent-foreground: 263 73% 36%;      /* #352778 WallX dark purple */
+
+    /* ── Destructive ── */
+    --destructive: 0 84% 60%;              /* #ef4444 */
+    --destructive-foreground: 0 0% 100%;
+
+    /* ── Borders & inputs ── */
+    --border: 220 13% 91%;                 /* #e5e7eb gray-200 */
+    --input: 220 13% 91%;
+    --ring: 263 73% 50%;                   /* matches primary purple */
+
+    /* ── Border radius ── */
+    --radius: 0.75rem;                     /* 12px — matches marketing rounded-xl */
+
+    /* ── WallX explicit brand tokens (used directly in classes) ── */
+    --wallx-dark: #352778;                 /* brand dark purple — pricing cards, eyebrows */
+    --wallx-purple: #7c3aed;               /* purple-600 — primary CTA */
+    --wallx-purple-light: #a855f7;         /* purple-500 — gradient end */
+    --wallx-orange: #E85918;               /* discount badges, accent CTA */
+    --wallx-emerald: #16a34a;              /* WhatsApp green */
+    --wallx-emerald-light: #22c55e;        /* emerald-500 */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-feature-settings: 'rlig' 1, 'calt' 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* ── Montserrat for all headings — matches marketing pages ── */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Montserrat', 'Inter', -apple-system, sans-serif;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+}
+
+/* ─── Animations matching WallX marketing pages ──────────────────────────── */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bounce-gentle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-in { animation: fade-in 0.4s ease-out both; }
+.animate-slide-up { animation: slide-up 0.5s ease-out both; }
+.animate-bounce-gentle { animation: bounce-gentle 3s ease-in-out infinite; }
+
+/* ─── Dot-grid background patterns (avoids Astro inline SVG parser bug) ──── */
+.bg-dot-grid-purple {
+  background-image: url("data:image/svg+xml,%3Csvg width='52' height='52' viewBox='0 0 52 52' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='2' cy='2' r='1.5' fill='%237c3aed'/%3E%3C/svg%3E");
+  background-size: 52px 52px;
+}
+
+.bg-dot-grid-white {
+  background-image: url("data:image/svg+xml,%3Csvg width='52' height='52' viewBox='0 0 52 52' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='2' cy='2' r='1.5' fill='%23ffffff'/%3E%3C/svg%3E");
+  background-size: 52px 52px;
+}
+
+/* ─── Scrollbar polish ─────────────────────────────────────────────────────── */
+.overflow-y-auto {
+  scrollbar-width: thin;
+  scrollbar-color: #9ca3af #f3f4f6;
+}
+.overflow-y-auto::-webkit-scrollbar { width: 6px; }
+.overflow-y-auto::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 100px; }
+.overflow-y-auto::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 100px; }
+.overflow-y-auto::-webkit-scrollbar-thumb:hover { background: #6b7280; }

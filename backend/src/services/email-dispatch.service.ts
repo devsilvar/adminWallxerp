@@ -33,6 +33,12 @@ import {
   generateWithdrawalFailedText,
 } from '@/lib/email/templates/withdrawal-failed';
 import {
+  generateAdvanceWithdrawalHtml,
+  generateAdvanceWithdrawalText,
+  AdvanceWithdrawalEmailData,
+} from '@/lib/email/templates/advance-withdrawal';
+import { getAdvancePreview } from '@/services/settlement/payout-preview.service';
+import {
   generatePaymentFailedHtml,
   generatePaymentFailedText,
 } from '@/lib/email/templates/payment-failed';
@@ -211,6 +217,68 @@ export async function dispatchWithdrawalRequestedEmail(payoutId: string): Promis
   }
 }
 
+// ─── 1b. Settlement Advance Approved ──────────────────────────
+
+export async function dispatchAdvanceWithdrawalEmail(payoutId: string): Promise<void> {
+  try {
+    const payout = await prisma.settlementPayout.findUnique({
+      where: { id: payoutId },
+      include: {
+        business: {
+          include: {
+            user: { select: { id: true, email: true, fullName: true } },
+          },
+        },
+      },
+    });
+
+    const recipientEmail = payout?.business?.user?.email;
+    if (!payout || !recipientEmail) return;
+
+    let remainingPendingFormatted: string | undefined;
+    try {
+      if (payout.business?.userId) {
+        const preview = await getAdvancePreview(payout.business.userId, payout.businessId);
+        remainingPendingFormatted = formatNaira(preview.pendingSettlement);
+      }
+    } catch {
+      // Non-critical fallback if preview cannot be recalculated
+    }
+
+    const requested = toNumber(payout.netAmount) > 0 ? toNumber(payout.netAmount) : Math.max(0, toNumber(payout.amount) - toNumber(payout.fee));
+    const fee = toNumber(payout.fee);
+    const totalDebit = toNumber(payout.amount);
+    const requestedFormatted = formatNaira(requested);
+
+    const data: AdvanceWithdrawalEmailData = {
+      ownerName: payout.business.ownerName || payout.business.user?.fullName || 'Business Owner',
+      businessName: payout.business.businessName,
+      totalDebitFormatted: formatNaira(totalDebit),
+      requestedFormatted,
+      feeFormatted: formatNaira(fee),
+      destinationBankName: payout.destinationBankName,
+      accountNumberMasked: maskAccountNumber(payout.destinationAccountNum),
+      destinationAccountName: payout.destinationAccountName,
+      transferReference: payout.transferReference,
+      requestDate: formatHumanDateTime(payout.initiatedAt),
+      remainingPendingFormatted,
+      historyLink: `${getFrontendBaseUrl()}/account?tab=settlement`,
+    };
+
+    await sendEmail({
+      to: recipientEmail,
+      subject: `Settlement Advance Approved: ${requestedFormatted} Sent to Bank — WallX ERP`,
+      html: generateAdvanceWithdrawalHtml(data),
+      text: generateAdvanceWithdrawalText(data),
+    });
+  } catch (err) {
+    logger.warn('Failed to dispatch advance withdrawal email (non-critical)', {
+      payoutId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 // ─── 2. Withdrawal Completed ────────────────────────────────
 
 export async function dispatchWithdrawalCompletedEmail(payoutId: string): Promise<void> {
@@ -301,10 +369,12 @@ export async function dispatchWithdrawalFailedEmail(
       payoutSettingsLink: `${getFrontendBaseUrl()}/account?tab=withdrawals`,
     };
 
-    const subjectPrefix = isRejection ? 'Withdrawal Declined' : 'Withdrawal Unsuccessful';
+    const subject = isRejection
+      ? `Withdrawal Declined: ${amountFormatted} Restored to Wallet — WallX ERP`
+      : `Withdrawal Unsuccessful: ${amountFormatted} Held Pending Review — WallX ERP`;
     await sendEmail({
       to: recipientEmail,
-      subject: `${subjectPrefix}: ${amountFormatted} Restored to Wallet — WallX ERP`,
+      subject,
       html: generateWithdrawalFailedHtml(data),
       text: generateWithdrawalFailedText(data),
     });

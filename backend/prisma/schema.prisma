@@ -138,6 +138,7 @@ model Business {
   expenses                Expense[]
   invoices                Invoice[]
   taxReports              MonthlyTaxReport[]
+  taxProfile              BusinessTaxProfile?
   reminders               Reminder[]
   sales                   SalesTransaction[]
   payments                TaxPayment[]
@@ -204,6 +205,7 @@ model SalesTransaction {
   isTaxable           Boolean                    @default(true) @map("is_taxable")
   classificationId    String?                    @map("classification_id")
   dvaOrigin           Boolean                    @default(false) @map("dva_origin")
+  settledAt           DateTime?                  @map("settled_at")
   invoice             Invoice?
   walletTx            WalletTransaction?
   creditPayment       CreditPayment?             @relation("CreditPaymentSale")
@@ -802,7 +804,10 @@ model SettlementPayout {
   initiatedAt            DateTime           @default(now()) @map("initiated_at")
   completedAt            DateTime?          @map("completed_at")
   failureReason          String?            @map("failure_reason")
+  needsReconciliation    Boolean            @default(false) @map("needs_reconciliation")
+  reconciliationReason   String?            @map("reconciliation_reason")
   narration              String?
+  isAdvance              Boolean            @default(false) @map("is_advance")
   adminApprovedBy        String?            @map("admin_approved_by")
   adminApprovedAt        DateTime?          @map("admin_approved_at")
   createdAt              DateTime           @default(now()) @map("created_at")
@@ -813,6 +818,8 @@ model SettlementPayout {
   @@index([businessId])
   @@index([transferReference])
   @@index([status])
+  @@index([businessId, isAdvance, status])
+  @@index([isAdvance, status, createdAt(sort: Desc)])
   @@map("settlement_payouts")
 }
 
@@ -822,6 +829,7 @@ enum WalletTxType {
   payout
   fee
   reversal
+  advance
 }
 
 /// Central User Wallet - pooled treasury across all businesses owned by the user
@@ -878,8 +886,13 @@ model PlatformFeeConfig {
   withdrawalFeePct    Decimal  @default(1.00) @map("withdrawal_fee_pct") @db.Decimal(5, 2)
   withdrawalFeeCap    Decimal  @default(300.00) @map("withdrawal_fee_cap") @db.Decimal(10, 2)
   minWithdrawalAmount Decimal  @default(1000.00) @map("min_withdrawal_amount") @db.Decimal(10, 2)
+  advanceFeePct       Decimal  @default(1.00) @map("advance_fee_pct") @db.Decimal(5, 2)
+  advanceFeeCap       Decimal  @default(500.00) @map("advance_fee_cap") @db.Decimal(10, 2)
+  maxAdvancePct       Decimal  @default(30.00) @map("max_advance_pct") @db.Decimal(5, 2)
+  minAdvanceAmount    Decimal  @default(1000.00) @map("min_advance_amount") @db.Decimal(10, 2)
   autoSweepEnabled    Boolean  @default(false) @map("auto_sweep_enabled")
   autoSweepThreshold  Decimal  @default(1000.00) @map("auto_sweep_threshold") @db.Decimal(10, 2)
+  maxDailyPayout      Decimal  @default(500000.00) @map("max_daily_payout") @db.Decimal(10, 2)
   updatedAt           DateTime @updatedAt @map("updated_at")
   updatedBy           String?  @map("updated_by")
 
@@ -1184,4 +1197,22 @@ model UserMessage {
   @@map("user_messages")
 }
 
+/// Tax profile generated from the 10-question compliance wizard
+model BusinessTaxProfile {
+  id                String    @id @default(uuid())
+  businessId        String    @unique @map("business_id")
+  quizAnswers       Json      @default("{}") @map("quiz_answers")
+  computedConfig    Json      @default("{}") @map("computed_config")
+  completedAt       DateTime? @map("completed_at")
+  lastReviewedAt    DateTime? @map("last_reviewed_at")
+  needsManualReview Boolean   @default(false) @map("needs_manual_review")
+  reviewReasons     String[]  @default([]) @map("review_reasons")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
+  business          Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([needsManualReview])
+  @@map("business_tax_profiles")
+}

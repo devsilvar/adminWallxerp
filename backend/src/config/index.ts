@@ -236,6 +236,7 @@ export const config = {
     maxRate: parseFloat(process.env.TAX_MAX_RATE || '50'),
     currency: process.env.TAX_CURRENCY || 'NGN',
     taxAuthority: process.env.TAX_AUTHORITY || 'NRS',
+    useProfiledCalculation: process.env.TAX_USE_PROFILED_CALCULATION !== 'false',
   },
 
   // Rate Limiting

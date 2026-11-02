@@ -9,6 +9,12 @@ import { TransactionStatus } from '@prisma/client';
 export const SETTLED_SALE_STATUSES: TransactionStatus[] = ['confirmed', 'completed'];
 
 /**
+ * Canonical live sale status literals (excludes reversed and disputed sales).
+ * Represents transactions that have arrived and not been cancelled or charged back.
+ */
+export const LIVE_SALE_STATUSES: TransactionStatus[] = ['pending', 'confirmed', 'completed'];
+
+/**
  * Canonical WHERE predicate for taxable settled sales transactions.
  * Used across tax calculations and revenue analytics.
  */

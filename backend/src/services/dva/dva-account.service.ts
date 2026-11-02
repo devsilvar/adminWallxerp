@@ -650,12 +650,33 @@ export async function getDVATransactions(
         verifiedAt: true,
         createdAt: true,
         metadata: true,
+        walletTx: {
+          select: {
+            createdAt: true,
+          },
+        },
       },
     }),
   ]);
 
+  const mappedTransactions = transactions.map((sale: any) => ({
+    id: sale.id,
+    amount: sale.amount,
+    status: sale.status,
+    referenceId: sale.referenceId,
+    customerName: sale.customerName,
+    customerHint: sale.customerHint,
+    transactionDate: sale.transactionDate,
+    needsVerification: sale.needsVerification,
+    verifiedAt: sale.verifiedAt,
+    createdAt: sale.createdAt,
+    metadata: sale.metadata,
+    released: Boolean(sale.walletTx),
+    releasedAt: sale.walletTx?.createdAt?.toISOString() ?? null,
+  }));
+
   return {
-    transactions,
+    transactions: mappedTransactions,
     pagination: {
       page,
       limit,

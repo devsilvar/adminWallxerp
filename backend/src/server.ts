@@ -12,6 +12,7 @@ import config from './config';
 import logger from './lib/logger';
 import prisma from './lib/prisma';
 import { registerReminderCron } from './jobs/reminders.cron';
+import { registerSettlementReleaseCron } from './jobs/settlement-release.cron';
 import { registerWalletReconciliationCron } from './jobs/wallet-reconciliation.cron';
 import { registerPayoutReconciliationCron } from './jobs/payout-reconciliation.cron';
 import { registerSubscriptionExpiryCron } from './jobs/subscription-expiry.cron';
@@ -47,6 +48,7 @@ const startServer = async () => {
       // cron registration failure cannot crash the API.
       try {
         registerReminderCron();
+        registerSettlementReleaseCron();
         registerWalletReconciliationCron();
         registerPayoutReconciliationCron();
         registerSubscriptionExpiryCron();
