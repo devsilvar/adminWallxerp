@@ -731,17 +731,14 @@ export interface AdminUserDetail extends AdminUser {
 
 export interface AdminBusiness {
   id: string;
-  merchantId?: string;
   businessName: string;
   ownerName: string;
   taxId?: string;
   businessType: string;
-  address?: string;
   state?: string;
   city?: string;
-  isActive?: boolean;
   createdAt: string;
-  user: { id: string; email: string; isActive?: boolean };
+  user: { id: string; email: string };
 }
 
 export interface AuditLog {
@@ -1002,7 +999,6 @@ export interface TreasuryKPIs {
   floatNaira: number | null;
   expectedFeeFloatNaira: number;
   floatStatus: 'healthy' | 'expected' | 'deficit' | 'unknown';
-  // Reconciliation (optional)
   paystackGlobalBalance?: number | null;
   reconciliationVariance?: number | null;
 }
@@ -1069,6 +1065,10 @@ export interface PlatformFeeConfig {
   withdrawalFeePct: number;
   withdrawalFeeCap: number;
   minWithdrawalAmount: number;
+  advanceFeePct?: number;
+  advanceFeeCap?: number;
+  maxAdvancePct?: number;
+  minAdvanceAmount?: number;
   autoSweepEnabled?: boolean;
   autoSweepThreshold?: number;
   maxDailyPayout?: number;
@@ -1173,7 +1173,7 @@ export interface RegulatoryMeta {
   partnerPSPLicense: string;
   partnerBanks: string;
   governingLaw: string;
-  custodyNotice: string;
+  nonCustodialNotice: string;
   termsVersion: string;
 }
 
@@ -1354,5 +1354,66 @@ export interface BroadcastStats {
   sentEmailCount: number;
   failedEmailCount: number;
 }
+
+// ─── Marketplace Admin Moderation Types ─────────────────────────────────────
+
+export type AdminProductListingStatus =
+  | 'draft'
+  | 'pending_approval'
+  | 'approved'
+  | 'rejected'
+  | 'archived';
+
+export interface AdminMarketplaceProduct {
+  id: string;
+  businessId: string;
+  name: string;
+  slug: string;
+  productType: 'physical' | 'service';
+  category: string;
+  description: string;
+  price: number | string;
+  compareAtPrice?: number | string | null;
+  currency: string;
+  stockQuantity?: number | null;
+  trackInventory: boolean;
+  attributes?: Record<string, any> | null;
+  images: string[];
+  contactPhone?: string | null;
+  contactWhatsapp?: string | null;
+  purchaseUrl?: string | null;
+  status: AdminProductListingStatus;
+  rejectionReason?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  business?: {
+    id: string;
+    businessName: string;
+    city?: string | null;
+    state?: string | null;
+    isVerified?: boolean;
+    taxId?: string | null;
+    logoUrl?: string | null;
+    ownerName?: string | null;
+    user?: {
+      email?: string | null;
+      phone?: string | null;
+      isVerified?: boolean;
+    };
+  };
+}
+
+export interface AdminMarketplaceQueueResponse {
+  data: AdminMarketplaceProduct[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
 
 

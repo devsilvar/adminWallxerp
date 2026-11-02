@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Bot,
   CreditCard,
+  Package,
   Star,
   Megaphone,
 } from 'lucide-react';
@@ -76,6 +77,7 @@ export default function AdminSidebar({
     { to: '/admin/users', label: 'Users', icon: Users },
     { to: '/admin/businesses', label: 'Businesses', icon: Building2 },
     { to: '/admin/subscriptions', label: 'Subscriptions', icon: CreditCard },
+    { to: '/admin/marketplace', label: 'Marketplace', icon: Package },
     { to: '/admin/withdrawals', label: 'Withdrawals', icon: Wallet },
     { to: '/admin/transactions', label: 'Transactions', icon: ArrowLeftRight },
     { to: '/admin/unverified-inflows', label: 'Unverified Inflows', icon: ArrowDownLeft },

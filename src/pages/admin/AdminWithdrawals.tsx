@@ -153,7 +153,7 @@ export default function AdminWithdrawals() {
     }
 
     // The SLA banner lives on this page but its counts come from
-    // /admin/dashboard — shared with the sidebar so only one fires.
+    // /admin/dashboard â€” shared with the sidebar so only one fires.
     useAdminStatsStore.getState().fetchStats();
   }, [pagination.page, pagination.limit, statusFilter, search, hasLoadedOnce, start, finish]);
 
@@ -377,7 +377,7 @@ export default function AdminWithdrawals() {
     if (isStale(withdrawal)) {
       return (
         <StatusPill tone='warning' icon={<AlertTriangle className='h-3 w-3' />}>
-          Stale — re-query pending
+          Stale â€” re-query pending
         </StatusPill>
       );
     }
@@ -415,7 +415,7 @@ export default function AdminWithdrawals() {
 
   return (
     <div className='space-y-6'>
-      {/* Header — Subscriptions desk pattern */}
+      {/* Header â€” Subscriptions desk pattern */}
       <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
         <div>
           <div className='flex items-center gap-2'>
@@ -466,7 +466,7 @@ export default function AdminWithdrawals() {
                 <>
                   <p className='text-xs font-semibold text-ink'>
                     <span>{disputeStats.count}</span> failed withdrawal
-                    {disputeStats.count === 1 ? ' is' : 's are'} waiting for a dispute decision — oldest at{' '}
+                    {disputeStats.count === 1 ? ' is' : 's are'} waiting for a dispute decision â€” oldest at{' '}
                     {disputeStats.oldestHours}h. The money is held; the merchant has not been refunded.
                   </p>
                   {slaStats && slaStats.breachedCount > 0 && (
@@ -480,7 +480,7 @@ export default function AdminWithdrawals() {
                 <>
                   <p className='text-xs font-semibold text-ink'>
                     <span>{slaStats.breachedCount}</span> withdrawal
-                    {slaStats.breachedCount === 1 ? ' has' : 's have'} been pending over 24 hours — oldest at{' '}
+                    {slaStats.breachedCount === 1 ? ' has' : 's have'} been pending over 24 hours â€” oldest at{' '}
                     {slaStats.oldestPendingHours}h.
                   </p>
                   <p className='mt-0.5 text-[11px] text-ink-muted'>
@@ -503,7 +503,7 @@ export default function AdminWithdrawals() {
           <p className='mt-2 text-2xl font-bold tabular-nums text-amber-600'>
             {slaStats?.pendingCount ?? pendingCount}
           </p>
-          <p className='mt-0.5 text-[11px] text-ink-subtle'>Gateway short — fund and release</p>
+          <p className='mt-0.5 text-[11px] text-ink-subtle'>Gateway short â€” fund and release</p>
         </div>
 
         <div className='rounded-xl border border-hairline bg-panel p-4 shadow-2xs'>
@@ -527,7 +527,7 @@ export default function AdminWithdrawals() {
           </p>
           <p className='mt-0.5 text-[11px] text-ink-subtle'>
             {disputeStats && disputeStats.count > 0 
-              ? `₦${disputeStats.valueNaira.toLocaleString()} held — oldest ${disputeStats.oldestHours}h` 
+              ? `â‚¦${disputeStats.valueNaira.toLocaleString()} held â€” oldest ${disputeStats.oldestHours}h` 
               : 'No active disputes'}
           </p>
         </div>
@@ -544,7 +544,7 @@ export default function AdminWithdrawals() {
         </div>
       </div>
 
-      {/* Filter Tabs & Search — Subscriptions desk pattern */}
+      {/* Filter Tabs & Search â€” Subscriptions desk pattern */}
       <div className='flex flex-col justify-between gap-3 border-b border-hairline pb-4 sm:flex-row sm:items-center'>
         <div className='flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0'>
           {STATUS_OPTIONS.map((opt) => (
@@ -657,7 +657,7 @@ export default function AdminWithdrawals() {
                     <td className='whitespace-nowrap px-4 py-3.5'>
                       <span className='font-medium text-ink'>{w.destinationBankName}</span>
                       <span className='ml-2 font-mono text-[10px] text-ink-subtle'>
-                        •••• {w.destinationAccountNum.slice(-4)}
+                        â€¢â€¢â€¢â€¢ {w.destinationAccountNum.slice(-4)}
                       </span>
                     </td>
 
@@ -773,7 +773,7 @@ export default function AdminWithdrawals() {
                 <div className='flex items-center justify-between py-2'>
                   <dt className='text-[11px] text-ink-muted'>Paystack transfer fee</dt>
                   <dd className='font-mono text-xs text-ink-muted'>
-                    −{formatNaira(selectedWithdrawal.fee)}
+                    âˆ’{formatNaira(selectedWithdrawal.fee)}
                   </dd>
                 </div>
               )}
@@ -789,7 +789,7 @@ export default function AdminWithdrawals() {
                   {selectedWithdrawal.destinationBankName}
                 </dd>
                 <dd className='font-mono text-[11px] text-ink-muted'>
-                  •••• {selectedWithdrawal.destinationAccountNum.slice(-4)} ·{' '}
+                  â€¢â€¢â€¢â€¢ {selectedWithdrawal.destinationAccountNum.slice(-4)} Â·{' '}
                   {selectedWithdrawal.destinationAccountName}
                 </dd>
               </div>
@@ -823,7 +823,7 @@ export default function AdminWithdrawals() {
         }
         subtitle={
           selectedWithdrawal?.status === 'failed' && selectedWithdrawal?.needsReconciliation
-            ? `The transfer failed. ₦${selectedWithdrawal.amount.toLocaleString()} is held in the merchant's wallet and has NOT been returned to them. Decide what happens next.`
+            ? `The transfer failed. â‚¦${selectedWithdrawal.amount.toLocaleString()} is held in the merchant's wallet and has NOT been returned to them. Decide what happens next.`
             : selectedWithdrawal?.status === 'processing'
               ? 'Cancel transfer and return funds to merchant wallet balance'
               : 'Provide a reason for rejection'
@@ -936,10 +936,10 @@ export default function AdminWithdrawals() {
                 onChange={(e) => setRejectReason(e.target.value)}
                 placeholder={
                   selectedWithdrawal.status === 'failed' && selectedWithdrawal.needsReconciliation
-                    ? 'e.g. NIBSS switch down, merchant confirmed offline payment received, genuine gateway failure…'
+                    ? 'e.g. NIBSS switch down, merchant confirmed offline payment received, genuine gateway failureâ€¦'
                     : selectedWithdrawal.status === 'processing'
-                      ? 'e.g. Transfer not found on Paystack, gateway timeout, cancelled at merchant request…'
-                      : 'e.g. Insufficient verification documents, suspicious activity…'
+                      ? 'e.g. Transfer not found on Paystack, gateway timeout, cancelled at merchant requestâ€¦'
+                      : 'e.g. Insufficient verification documents, suspicious activityâ€¦'
                 }
                 rows={4}
                 maxLength={500}
@@ -1035,7 +1035,7 @@ export default function AdminWithdrawals() {
                 type='text'
                 value={manualSessionRef}
                 onChange={(e) => setManualSessionRef(e.target.value)}
-                placeholder='e.g. 000013260910123456789012345678 or GTB-TXN-…'
+                placeholder='e.g. 000013260910123456789012345678 or GTB-TXN-â€¦'
                 required
                 className='h-8 w-full rounded border border-hairline-strong bg-panel px-2.5 font-mono text-xs text-ink placeholder:text-ink-subtle focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 focus:outline-none'
               />
@@ -1142,7 +1142,7 @@ export default function AdminWithdrawals() {
                   <div className='flex items-center justify-between'>
                     <dt className='text-[11px] text-ink-muted'>Paystack transfer fee</dt>
                     <dd className='font-mono text-xs text-ink-muted'>
-                      −{formatNaira(detailWithdrawal.fee)}
+                      âˆ’{formatNaira(detailWithdrawal.fee)}
                     </dd>
                   </div>
                 )}

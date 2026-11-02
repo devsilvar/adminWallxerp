@@ -32,6 +32,7 @@ const AdminSubscriptions = lazy(
 );
 const AdminReviews = lazy(() => import('@/pages/admin/AdminReviews.tsx'));
 const AdminBroadcasts = lazy(() => import('@/pages/admin/AdminBroadcasts.tsx'));
+const AdminMarketplace = lazy(() => import('@/pages/admin/AdminMarketplace.tsx'));
 const NotFound = lazy(() => import('@/pages/NotFound.tsx'));
 
 function AppShell() {
@@ -39,23 +40,6 @@ function AppShell() {
   const user = useAuthStore((s) => s.user);
   const fetchMe = useAuthStore((s) => s.fetchMe);
   const [bootReady, setBootReady] = useState(false);
-
-  // Admin security: Force fresh login on every page load by clearing any existing tokens.
-  // This prevents stale token issues where the app gets stuck on "Verifying session..."
-  // for minutes when old tokens exist in localStorage. Admins MUST login fresh each time.
-  useEffect(() => {
-    const hasToken = !!localStorage.getItem('accessToken');
-    if (hasToken) {
-      // Clear tokens silently without triggering navigation or API calls
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-      // Reset auth state to force login screen
-      useAuthStore.setState({ user: null, isAuthenticated: false });
-      setBootReady(true);
-    } else {
-      setBootReady(true);
-    }
-  }, []); // Only run once on mount
 
   useEffect(() => {
     let cancelled = false;
@@ -121,6 +105,7 @@ function AppShell() {
                 <Route path='/admin/audit-logs' element={<AdminAuditLogs />} />
                 <Route path='/admin/ai-settings' element={<AdminAISettings />} />
                 <Route path='/admin/subscriptions' element={<AdminSubscriptions />} />
+                <Route path='/admin/marketplace' element={<AdminMarketplace />} />
                 <Route path='/admin/reviews' element={<AdminReviews />} />
                 <Route path='/admin/broadcasts' element={<AdminBroadcasts />} />
               </Route>

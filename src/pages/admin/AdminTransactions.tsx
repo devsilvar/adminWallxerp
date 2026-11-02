@@ -50,7 +50,7 @@ const RowStatus = ({ row }: { row: AdminTransactionRow }) => {
     case 'withdrawal':
       switch (row.status) {
         case 'pending':
-          return <StatusPill tone='warning'>Awaiting funding</StatusPill>;
+          return <StatusPill tone='warning'>Awaiting approval</StatusPill>;
         case 'processing':
           return (
             <StatusPill tone='info' icon={<Loader2 className='h-3 w-3 animate-spin' />}>
