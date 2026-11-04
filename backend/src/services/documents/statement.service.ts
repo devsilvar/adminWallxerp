@@ -13,6 +13,12 @@ import { getUnifiedLedger } from '@/services/ledger.service';
 import { sendEmail } from '@/lib/email';
 import { generateStatementHtml, generateStatementText } from '@/lib/email/templates/statement';
 import { toNumber, TAXABLE_SALES_WHERE } from '@/shared/helpers';
+import { calculateTaxWithStrategy } from '@/services/tax/tax-calculation-strategy';
+import {
+  resolveTaxPolicy,
+  paymentBasisForPolicy,
+  isTaxProfileComplete,
+} from '@/services/tax/tax-policy.service';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -495,12 +501,20 @@ export async function getPnlStatementData(
 
   const grossProfit = Math.max(totalSales - deductibleExpenses, 0);
   const profitMargin = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
-  const taxRate = existingReport ? toNumber(existingReport.taxRate) : config.tax.defaultRate;
-  const taxPayable = existingReport
-    ? toNumber(existingReport.taxPayable)
-    : grossProfit > 0
-    ? (grossProfit * taxRate) / 100
-    : 0;
+  let taxRate = existingReport ? toNumber(existingReport.taxRate) : config.tax.defaultRate;
+  let taxPayable = existingReport ? toNumber(existingReport.taxPayable) : 0;
+  if (!existingReport) {
+    const strategyResult = await calculateTaxWithStrategy({
+      businessId,
+      month,
+      year,
+      totalSales,
+      totalExpenses: deductibleExpenses,
+      grossProfit,
+    });
+    taxRate = strategyResult.taxRate;
+    taxPayable = strategyResult.taxPayable;
+  }
   const netProfitAfterTax = Math.max(totalSales - totalExpenses - taxPayable, 0);
 
   const reportStatus: PnlStatementPdfOptions['summary']['reportStatus'] =
@@ -516,6 +530,14 @@ export async function getPnlStatementData(
   const paddedMonth = String(month).padStart(2, '0');
   const statementRef = `PNL-${business.merchantId}-${year}${paddedMonth}`;
   const filename = `pnl-statement-${business.merchantId}-${year}-${paddedMonth}.pdf`;
+
+  const [taxPolicy, taxProfile] = await Promise.all([
+    resolveTaxPolicy(businessId),
+    prisma.businessTaxProfile.findUnique({
+      where: { businessId },
+      select: { completedAt: true, computedConfig: true },
+    }),
+  ]);
 
   const pdfOptions: PnlStatementPdfOptions = {
     business: {
@@ -547,6 +569,8 @@ export async function getPnlStatementData(
       taxRate,
       taxPayable: Number(taxPayable.toFixed(2)),
       reportStatus,
+      taxBasis: paymentBasisForPolicy(taxPolicy),
+      needsManualReview: !isTaxProfileComplete(taxProfile),
     },
   };
 

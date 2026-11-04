@@ -5,12 +5,17 @@ import {
   extractVatFromInclusive,
   computeCitBase,
   applyPitBands,
+  isVatBearingExpense,
 } from '@/shared/helpers/tax';
 
 export interface ProfiledTaxResult {
   taxPayable: number;
   taxRate: number;
   grossProfit: number;
+  /** True when the profile configuration is incomplete; caller must not auto-remit. */
+  needsManualReview?: boolean;
+  /** Human-readable reason for the manual review flag. */
+  reviewReason?: string;
   breakdown: {
     vatPayable: number;
     citPayable: number;
@@ -41,10 +46,30 @@ export function calculateProfiledTax(
   year: number,
   sales: number,
   expenses: number,
-  profile: { computedConfig: TaxProfileConfiguration }
+  profile: { computedConfig: TaxProfileConfiguration },
+  expensesByCategory?: Record<string, number>
 ): ProfiledTaxResult {
   const config = profile.computedConfig;
   const grossProfit = Math.max(0, toNumber(sales - expenses));
+
+  /**
+   * Compute VAT-bearing input total.
+   * When expensesByCategory is provided, only sum categories that statutorily
+   * bear VAT (per isVatBearingExpense — excludes salaries, depreciation, etc.).
+   * When absent, fall back to total expenses (today's behaviour, conservative).
+   */
+  const vatBearingExpenses: number = (() => {
+    if (!expensesByCategory || Object.keys(expensesByCategory).length === 0) {
+      return expenses; // no breakdown available — conservative: all expenses bear VAT
+    }
+    const bearing = Object.entries(expensesByCategory)
+      .filter(([cat]) => isVatBearingExpense(cat))
+      .reduce((sum, [, amt]) => sum + toNumber(amt), 0);
+    // Never claim more Input VAT than the deductible expense total actually
+    // recorded — the category breakdown and the aggregate can be filtered
+    // differently by different callers.
+    return Math.min(bearing, Math.max(0, toNumber(expenses)));
+  })();
 
   // ═══════════════════════════════════════════════════════════
   // SCENARIO 1: Free Trade Zone (100% Tax Exemption)
@@ -93,7 +118,7 @@ export function calculateProfiledTax(
   // ═══════════════════════════════════════════════════════════
   if (!config.vatExempt && config.citRate === 0 && config.isCorporate) {
     const outputVat = extractVatFromInclusive(sales, STATUTORY_TAX_CONSTANTS.VAT.RATE);
-    const inputVat = extractVatFromInclusive(expenses, STATUTORY_TAX_CONSTANTS.VAT.RATE);
+    const inputVat = extractVatFromInclusive(vatBearingExpenses, STATUTORY_TAX_CONSTANTS.VAT.RATE);
     const netVat = Math.max(0, toNumber(outputVat - inputVat));
 
     return {
@@ -120,7 +145,7 @@ export function calculateProfiledTax(
   // ═══════════════════════════════════════════════════════════
   if (config.citRate === 30 && config.isCorporate) {
     const outputVat = config.vatExempt ? 0 : extractVatFromInclusive(sales, STATUTORY_TAX_CONSTANTS.VAT.RATE);
-    const inputVat = config.vatExempt ? 0 : extractVatFromInclusive(expenses, STATUTORY_TAX_CONSTANTS.VAT.RATE);
+    const inputVat = config.vatExempt ? 0 : extractVatFromInclusive(vatBearingExpenses, STATUTORY_TAX_CONSTANTS.VAT.RATE);
     const netVat = Math.max(0, toNumber(outputVat - inputVat));
 
     const citBase = computeCitBase(sales, expenses, config.vatExempt);
@@ -155,7 +180,7 @@ export function calculateProfiledTax(
   // ═══════════════════════════════════════════════════════════
   if (config.incomeTaxType === 'PIT') {
     const outputVat = config.vatExempt ? 0 : extractVatFromInclusive(sales, STATUTORY_TAX_CONSTANTS.VAT.RATE);
-    const inputVat = config.vatExempt ? 0 : extractVatFromInclusive(expenses, STATUTORY_TAX_CONSTANTS.VAT.RATE);
+    const inputVat = config.vatExempt ? 0 : extractVatFromInclusive(vatBearingExpenses, STATUTORY_TAX_CONSTANTS.VAT.RATE);
     const netVat = Math.max(0, toNumber(outputVat - inputVat));
 
     const pitEstimate = applyPitBands(grossProfit);
@@ -181,21 +206,23 @@ export function calculateProfiledTax(
     };
   }
 
-  // Fallback safe default (7.5% standard)
-  const defaultPayable = grossProfit > 0 ? toNumber((grossProfit * 7.5) / 100) : 0;
+  // Fallback: tax profile configuration is incomplete or unrecognised scenario.
+  // Do NOT silently apply any rate. Signal for manual review.
   return {
-    taxPayable: defaultPayable,
-    taxRate: 7.5,
+    taxPayable: 0,
+    taxRate: 0,
     grossProfit,
     breakdown: {
       vatPayable: 0,
       citPayable: 0,
       devLevyPayable: 0,
       pitPayable: 0,
-      totalPayable: defaultPayable,
+      totalPayable: 0,
     },
     advisory: {
-      note: 'Standard tax assessment (7.5% default rate).',
+      note: 'Tax profile configuration is incomplete or unrecognised. Manual review required before remittance.',
     },
+    needsManualReview: true,
+    reviewReason: 'Tax profile incomplete or missing: no matching statutory scenario found.',
   };
 }

@@ -2,7 +2,7 @@
 import Layout from '@/layouts/Layout.astro';
 import ProductCard from '@/components/ProductCard';
 import { getProducts } from '@/lib/api';
-import { MARKETPLACE_CATEGORIES, CATEGORY_LABELS } from '@/types';
+import { MARKETPLACE_CATEGORIES, CATEGORY_LABELS, type Product } from '@/types';
 import { 
   ShieldCheck, 
   MessageSquare, 
@@ -23,9 +23,16 @@ import {
   LayoutGrid,
 } from 'lucide-react';
 
-const response = await getProducts({ limit: 12 });
-const products = response.data || [];
-const totalCount = response.pagination?.total || products.length;
+let products: Product[] = [];
+let totalCount = 0;
+
+try {
+  const response = await getProducts({ limit: 12 });
+  products = response.data || [];
+  totalCount = response.pagination?.total || products.length;
+} catch (error) {
+  console.warn('[index.astro] Live products feed unavailable during build:', error);
+}
 
 const statStrip = [
   { value: '100%', label: 'Verified Merchants', detail: 'Admin identity-vetted' },

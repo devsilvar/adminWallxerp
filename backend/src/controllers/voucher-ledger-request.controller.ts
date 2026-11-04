@@ -25,7 +25,8 @@ export const create = asyncHandler(
           bonusPct: data.bonusPct,
           notes: data.notes,
           receiptDate: data.receiptDate,
-        }
+        },
+        { origin: req.get('origin') }
       );
       res.status(201).json({
         success: true,
@@ -68,7 +69,8 @@ export const createTopUp = asyncHandler(
       req.user!.userId,
       req.params.businessId,
       customerId,
-      data
+      data,
+      { origin: req.get('origin') }
     );
     res.status(201).json({
       success: true,
@@ -133,7 +135,7 @@ export const authorize = asyncHandler(
       req.user!.userId,
       req.params.businessId,
       req.params.id,
-      req.body
+      { bypassReason: req.body?.bypassReason, origin: req.get('origin') }
     );
     res.status(200).json({
       success: true,
@@ -164,7 +166,8 @@ export const resend = asyncHandler(
     const result = await voucherLedgerRequestService.resendVerification(
       req.user!.userId,
       req.params.businessId,
-      req.params.id
+      req.params.id,
+      { origin: req.get('origin') }
     );
     res.status(200).json({
       success: true,

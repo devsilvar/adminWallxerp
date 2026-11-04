@@ -3,6 +3,12 @@ import { authenticate } from '@/middleware/auth';
 import { requireActiveSubscription } from '@/middleware/subscription';
 import * as taxProfileController from '@/controllers/tax-profile.controller';
 
+// 1. Separate router for tax-policy: authenticate only (works during subscription grace period)
+export const taxPolicyRouter = Router({ mergeParams: true });
+taxPolicyRouter.use(authenticate);
+taxPolicyRouter.get('/', taxProfileController.getTaxPolicy);
+
+// 2. Standard router for tax-profile: requires active subscription
 const router = Router({ mergeParams: true });
 
 router.use(authenticate);

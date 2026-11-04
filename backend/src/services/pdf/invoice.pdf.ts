@@ -417,10 +417,12 @@ export async function buildInvoicePdf(
       y += 18;
     }
 
-    doc.fillColor(COLORS.body);
-    doc.text(`VAT (${vatRate}%)`, totalsLabelX, y, { width: totalsLabelWidth, align: 'right' });
-    doc.text(formatMoney(vatAmount, invoice.currency), totalsValueX, y, { width: totalsWidth, align: 'right' });
-    y += 16;
+    if (vatAmount > 0) {
+      doc.fillColor(COLORS.body);
+      doc.text(`VAT (${vatRate}%)`, totalsLabelX, y, { width: totalsLabelWidth, align: 'right' });
+      doc.text(formatMoney(vatAmount, invoice.currency), totalsValueX, y, { width: totalsWidth, align: 'right' });
+      y += 16;
+    }
 
     const totalPanelY = y;
     const totalPanelHeight = 36;

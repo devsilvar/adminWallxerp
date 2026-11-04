@@ -2,8 +2,12 @@
 import Layout from '@/layouts/Layout.astro';
 import ProductCard from '@/components/ProductCard';
 import { getProducts } from '@/lib/api';
-import { MARKETPLACE_CATEGORIES, CATEGORY_LABELS } from '@/types';
-import { Search, X, ChevronLeft, ChevronRight, PackageOpen, SlidersHorizontal, MapPin } from 'lucide-react';
+import { MARKETPLACE_CATEGORIES, CATEGORY_LABELS, type Product, type PaginationMeta } from '@/types';
+import { Search, X, ChevronLeft, ChevronRight, PackageOpen, SlidersHorizontal, MapPin, AlertCircle, RefreshCw } from 'lucide-react';
+
+export const prerender = false;
+
+Astro.response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
 
 const url = new URL(Astro.request.url);
 const search = url.searchParams.get('search') || undefined;
@@ -14,9 +18,19 @@ const sort = url.searchParams.get('sort') || 'newest';
 const page = Math.max(Number(url.searchParams.get('page')) || 1, 1);
 const limit = 16;
 
-const response = await getProducts({ search, category, type, page, limit });
-const rawProducts = response.data || [];
-const pagination = response.pagination || { page: 1, limit: 16, total: rawProducts.length, totalPages: 1 };
+let rawProducts: Product[] = [];
+let pagination: PaginationMeta = { page: 1, limit: 16, total: 0, totalPages: 1 };
+let isUnavailable = false;
+
+try {
+  const response = await getProducts({ search, category, type, page, limit });
+  rawProducts = response.data || [];
+  pagination = response.pagination || { page: 1, limit: 16, total: rawProducts.length, totalPages: 1 };
+} catch (error) {
+  console.error('[products.astro] Failed to load marketplace products:', error);
+  Astro.response.status = 503;
+  isUnavailable = true;
+}
 
 // Filter by Nigerian state if selected
 const filteredProducts = stateFilter
@@ -35,7 +49,7 @@ const displayProducts = [...filteredProducts].sort((a, b) => {
   return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
 });
 
-function buildFilterUrl(params: Record<string, string | number | undefined | null>) {
+function buildFilterUrl(params: Record<string, string | number | undefined | null>): string {
   const p = new URLSearchParams(url.searchParams);
   Object.entries(params).forEach(([k, v]) => {
     if (v === undefined || v === null || v === '') p.delete(k);
@@ -64,278 +78,292 @@ const NG_STATES = [
   description="Discover quality products and services offered directly by verified Nigerian SMEs."
 >
 
-  <!-- ── Page Header ── -->
-  <div class="border-b border-gray-200 bg-gray-50/80">
-    <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-9">
-      <h1 class="text-2xl sm:text-[1.75rem] font-extrabold tracking-tight text-gray-900">
-        {activeCategoryLabel ? activeCategoryLabel : 'All Products & Services'}
-      </h1>
-      <p class="mt-1 text-[13px] text-gray-400">
-        {pagination.total} approved {pagination.total === 1 ? 'listing' : 'listings'} across Nigeria
+  {isUnavailable ? (
+    <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-20 text-center">
+      <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+        <AlertCircle className="h-8 w-8" client:load />
+      </div>
+      <h1 class="text-2xl font-extrabold text-gray-900">Marketplace Temporarily Unavailable</h1>
+      <p class="mt-2 text-[14px] text-gray-500 max-w-md mx-auto">
+        We're currently unable to load live listings. Our systems are reconnecting, please try again in a few moments.
       </p>
-
-      <!-- Search bar -->
-      <form method="GET" action="/products" class="mt-5 flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center max-w-[560px]">
-        {category && <input type="hidden" name="category" value={category} />}
-        {type && <input type="hidden" name="type" value={type} />}
-
-        <div class="relative flex-1">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[15px] w-[15px] text-gray-400" client:load />
-          <input
-            type="search"
-            name="search"
-            value={search || ''}
-            placeholder="Search products, businesses..."
-            class="w-full rounded-full border border-gray-200 bg-white pl-10 pr-4 py-2.5 text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/20 focus:border-[#7c3aed]"
-          />
-        </div>
-        <div class="flex gap-2">
-          <button type="submit" class="rounded-full bg-[#352778] px-5 py-2.5 text-[13px] font-bold text-white hover:bg-[#2a1f5e] transition-colors">
-            Search
-          </button>
-          {(search || category || type || stateFilter) && (
-            <a href="/products">
-              <button type="button" class="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-4 py-2.5 text-[13px] font-medium text-gray-600 hover:border-gray-300 hover:text-gray-900 transition-colors">
-                <X className="h-3.5 w-3.5" client:load /> Clear
-              </button>
-            </a>
-          )}
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- ── Jiji-style Location Filter Bar ── -->
-  <div class="border-b border-gray-100 bg-white sticky top-[64px] z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.04)]">
-    <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-3 flex items-center gap-3 overflow-x-auto scrollbar-none">
-      <MapPin className="h-4 w-4 text-[#7c3aed] shrink-0" client:load />
-      <span class="text-[12px] font-bold text-gray-500 shrink-0">State:</span>
-
-      <!-- All Nigeria pill -->
-      <a
-        href={buildFilterUrl({ state: undefined, page: 1 })}
-        class={`shrink-0 inline-flex items-center rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition-colors ${
-          !stateFilter
-            ? 'bg-[#352778] text-white border-[#352778]'
-            : 'bg-white text-gray-600 border-gray-200 hover:border-[#7c3aed] hover:text-[#352778]'
-        }`}
-      >
-        All Nigeria
-      </a>
-
-      <!-- Top states as quick pills (most populous first) -->
-      {['Lagos','Abuja','Rivers','Kano','Oyo','Delta','Anambra','Edo','Ogun','Kaduna'].map((st) => (
+      <div class="mt-7 flex items-center justify-center gap-3">
+        <button
+          onclick="window.location.reload()"
+          class="inline-flex items-center gap-2 rounded-full bg-[#352778] px-6 py-2.5 text-[13px] font-bold text-white hover:bg-[#2a1f5e] transition-colors"
+        >
+          <RefreshCw className="h-4 w-4" client:load />
+          Retry Now
+        </button>
         <a
-          href={buildFilterUrl({ state: st, page: 1 })}
-          class={`shrink-0 inline-flex items-center rounded-full px-3.5 py-1.5 text-[12px] font-semibold border transition-colors ${
-            stateFilter === st
-              ? 'bg-[#352778] text-white border-[#352778]'
-              : 'bg-white text-gray-600 border-gray-200 hover:border-[#7c3aed] hover:text-[#352778]'
-          }`}
+          href="/"
+          class="inline-flex items-center rounded-full border border-gray-200 px-6 py-2.5 text-[13px] font-semibold text-gray-700 hover:border-gray-300 hover:bg-gray-50 transition-colors"
         >
-          {st}
+          Return Home
         </a>
-      ))}
-
-      <!-- Divider + full state dropdown -->
-      <span class="text-gray-200 shrink-0">|</span>
-      <form method="GET" action="/products" class="shrink-0">
-        {search && <input type="hidden" name="search" value={search} />}
-        {category && <input type="hidden" name="category" value={category} />}
-        {type && <input type="hidden" name="type" value={type} />}
-        <select
-          name="state"
-          onchange="this.form.submit()"
-          class="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/20 focus:border-[#7c3aed] cursor-pointer"
-        >
-          <option value="">More states...</option>
-          {NG_STATES.map((st) => (
-            <option value={st} selected={stateFilter === st}>{st}</option>
-          ))}
-        </select>
-      </form>
+      </div>
     </div>
-  </div>
+  ) : (
+    <div>
+      <div class="border-b border-gray-200 bg-gray-50/80">
+        <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-9">
+          <h1 class="text-2xl sm:text-[1.75rem] font-extrabold tracking-tight text-gray-900">
+            {activeCategoryLabel ? activeCategoryLabel : 'All Products & Services'}
+          </h1>
+          <p class="mt-1 text-[13px] text-gray-400">
+            {pagination.total} approved {pagination.total === 1 ? 'listing' : 'listings'} across Nigeria
+          </p>
 
-  <!-- ── Main Layout: Sidebar + Grid ── -->
-  <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-8">
-    <div class="flex flex-col lg:flex-row gap-7">
+          <form method="GET" action="/products" class="mt-5 flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center max-w-[560px]">
+            {category && <input type="hidden" name="category" value={category} />}
+            {type && <input type="hidden" name="type" value={type} />}
 
-      <!-- ── Sidebar ── -->
-      <aside class="w-full lg:w-52 xl:w-56 shrink-0">
-        <div class="sticky top-[72px] rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_1px_4px_0_rgba(0,0,0,0.05)]">
-
-          <!-- Categories -->
-          <div class="mb-5">
-            <div class="flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-widest text-gray-400 mb-2.5">
-              <SlidersHorizontal className="h-3.5 w-3.5" client:load />
-              <span>Categories</span>
+            <div class="relative flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-[15px] w-[15px] text-gray-400" client:load />
+              <input
+                type="search"
+                name="search"
+                value={search || ''}
+                placeholder="Search products, businesses..."
+                class="w-full rounded-full border border-gray-200 bg-white pl-10 pr-4 py-2.5 text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/20 focus:border-[#7c3aed]"
+              />
             </div>
-            <ul class="space-y-0.5">
-              <li>
-                <a
-                  href={buildFilterUrl({ category: undefined, page: 1 })}
-                  class={`flex items-center justify-between rounded-xl px-3 py-2 text-[13px] font-medium transition-colors ${
-                    !category
-                      ? 'bg-purple-50 text-[#352778] font-bold border-l-[3px] border-[#352778] pl-[9px]'
-                      : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
-                  }`}
-                >
-                  All Categories
+            <div class="flex gap-2">
+              <button type="submit" class="rounded-full bg-[#352778] px-5 py-2.5 text-[13px] font-bold text-white hover:bg-[#2a1f5e] transition-colors">
+                Search
+              </button>
+              {(search || category || type || stateFilter) && (
+                <a href="/products">
+                  <button type="button" class="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-4 py-2.5 text-[13px] font-medium text-gray-600 hover:border-gray-300 hover:text-gray-900 transition-colors">
+                    <X className="h-3.5 w-3.5" client:load /> Clear
+                  </button>
                 </a>
-              </li>
-              {MARKETPLACE_CATEGORIES.map((cat) => (
-                <li>
-                  <a
-                    href={buildFilterUrl({ category: cat, page: 1 })}
-                    class={`flex items-center justify-between rounded-xl px-3 py-2 text-[13px] font-medium transition-colors ${
-                      category === cat
-                        ? 'bg-purple-50 text-[#352778] font-bold border-l-[3px] border-[#352778] pl-[9px]'
-                        : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
-                    }`}
-                  >
-                    {CATEGORY_LABELS[cat]}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <!-- Listing Type -->
-          <div class="border-t border-gray-100 pt-4">
-            <div class="text-[10.5px] font-bold uppercase tracking-widest text-gray-400 mb-2.5">Listing Type</div>
-            <div class="flex flex-wrap gap-1.5">
-              {[
-                { label: 'All', value: undefined },
-                { label: 'Physical', value: 'physical' },
-                { label: 'Services', value: 'service' },
-              ].map(({ label, value }) => (
-                <a
-                  href={buildFilterUrl({ type: value, page: 1 })}
-                  class={`rounded-full px-3 py-1 text-[11.5px] font-bold border transition-colors ${
-                    type === value || (!type && !value)
-                      ? 'bg-[#352778] text-white border-transparent'
-                      : 'border-gray-200 text-gray-500 hover:border-[#352778] hover:text-[#352778]'
-                  }`}
-                >
-                  {label}
-                </a>
-              ))}
+              )}
             </div>
-          </div>
+          </form>
         </div>
-      </aside>
+      </div>
 
-      <!-- ── Main Content ── -->
-      <main class="flex-1 min-w-0">
+      <div class="border-b border-gray-100 bg-white sticky top-[64px] z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.04)]">
+        <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-3 flex items-center gap-3 overflow-x-auto scrollbar-none">
+          <MapPin className="h-4 w-4 text-[#7c3aed] shrink-0" client:load />
+          <span class="text-[12px] font-bold text-gray-500 shrink-0">State:</span>
 
-        <!-- Active filter chips -->
-        {(search || category || type || stateFilter) && (
-          <div class="mb-5 flex flex-wrap items-center gap-2">
-            <span class="text-[11.5px] text-gray-400 font-medium">Filtered by:</span>
-            {category && (
-              <a href={buildFilterUrl({ category: undefined, page: 1 })} class="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-3 py-0.5 text-[11.5px] font-bold text-[#352778] hover:bg-purple-100">
-                {activeCategoryLabel} <X className="h-3 w-3" client:load />
-              </a>
-            )}
-            {search && (
-              <a href={buildFilterUrl({ search: undefined, page: 1 })} class="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-3 py-0.5 text-[11.5px] font-bold text-[#352778] hover:bg-purple-100">
-                "{search}" <X className="h-3 w-3" client:load />
-              </a>
-            )}
-            {type && (
-              <a href={buildFilterUrl({ type: undefined, page: 1 })} class="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-3 py-0.5 text-[11.5px] font-bold text-[#352778] hover:bg-purple-100">
-                {type} <X className="h-3 w-3" client:load />
-              </a>
-            )}
-            {stateFilter && (
-              <a href={buildFilterUrl({ state: undefined, page: 1 })} class="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-3 py-0.5 text-[11.5px] font-bold text-[#352778] hover:bg-purple-100">
-                State: {stateFilter} <X className="h-3 w-3" client:load />
-              </a>
-            )}
-            <a href="/products" class="text-[11.5px] text-gray-400 underline hover:text-[#352778] ml-1">
-              Reset all
-            </a>
-          </div>
-        )}
+          <a
+            href={buildFilterUrl({ state: undefined, page: 1 })}
+            class={`shrink-0 inline-flex items-center rounded-full px-3.5 py-1.5 text-[12px] font-bold border transition-colors ${
+              !stateFilter
+                ? 'bg-[#352778] text-white border-[#352778]'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-[#7c3aed] hover:text-[#352778]'
+            }`}
+          >
+            All Nigeria
+          </a>
 
-        <!-- Results count & Sorting toolbar -->
-        <div class="flex items-center justify-between mb-5 pb-3 border-b border-gray-100">
-          <span class="text-[13px] font-medium text-gray-500">
-            Showing <strong class="text-gray-900 font-bold">{displayProducts.length}</strong> {displayProducts.length === 1 ? 'item' : 'items'}
-          </span>
-          <div class="flex items-center gap-2">
-            <label for="sort-select" class="text-[12px] font-medium text-gray-400 hidden sm:inline">Sort by:</label>
-            <select
-              id="sort-select"
-              onchange="window.location.href = this.value"
-              class="rounded-full border border-gray-200 bg-white px-3 py-1 text-[12px] font-semibold text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#7c3aed] cursor-pointer"
+          {['Lagos','Abuja','Rivers','Kano','Oyo','Delta','Anambra','Edo','Ogun','Kaduna'].map((st) => (
+            <a
+              href={buildFilterUrl({ state: st, page: 1 })}
+              class={`shrink-0 inline-flex items-center rounded-full px-3.5 py-1.5 text-[12px] font-semibold border transition-colors ${
+                stateFilter === st
+                  ? 'bg-[#352778] text-white border-[#352778]'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-[#7c3aed] hover:text-[#352778]'
+              }`}
             >
-              <option value={buildFilterUrl({ sort: 'newest' })} selected={sort === 'newest'}>Newest First</option>
-              <option value={buildFilterUrl({ sort: 'price-asc' })} selected={sort === 'price-asc'}>Price: Low to High</option>
-              <option value={buildFilterUrl({ sort: 'price-desc' })} selected={sort === 'price-desc'}>Price: High to Low</option>
-            </select>
-          </div>
-        </div>
+              {st}
+            </a>
+          ))}
 
-        {displayProducts.length > 0 ? (
-          <div>
-            <!-- 3-col grid within the ~840px content area -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {displayProducts.map((product) => (
-                <ProductCard product={product} client:load />
+          <span class="text-gray-200 shrink-0">|</span>
+          <form method="GET" action="/products" class="shrink-0">
+            {search && <input type="hidden" name="search" value={search} />}
+            {category && <input type="hidden" name="category" value={category} />}
+            {type && <input type="hidden" name="type" value={type} />}
+            <select
+              name="state"
+              onchange="this.form.submit()"
+              class="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-[12px] font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/20 focus:border-[#7c3aed] cursor-pointer"
+            >
+              <option value="">More states...</option>
+              {NG_STATES.map((st) => (
+                <option value={st} selected={stateFilter === st}>{st}</option>
               ))}
+            </select>
+          </form>
+        </div>
+      </div>
+
+      <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-8">
+        <div class="flex flex-col lg:flex-row gap-7">
+
+          <aside class="w-full lg:w-52 xl:w-56 shrink-0">
+            <div class="sticky top-[72px] rounded-2xl border border-gray-200 bg-white p-5 shadow-[0_1px_4px_0_rgba(0,0,0,0.05)]">
+
+              <div class="mb-5">
+                <div class="flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-widest text-gray-400 mb-2.5">
+                  <SlidersHorizontal className="h-3.5 w-3.5" client:load />
+                  <span>Categories</span>
+                </div>
+                <ul class="space-y-0.5">
+                  <li>
+                    <a
+                      href={buildFilterUrl({ category: undefined, page: 1 })}
+                      class={`flex items-center justify-between rounded-xl px-3 py-2 text-[13px] font-medium transition-colors ${
+                        !category
+                          ? 'bg-purple-50 text-[#352778] font-bold border-l-[3px] border-[#352778] pl-[9px]'
+                          : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                      }`}
+                    >
+                      All Categories
+                    </a>
+                  </li>
+                  {MARKETPLACE_CATEGORIES.map((cat) => (
+                    <li>
+                      <a
+                        href={buildFilterUrl({ category: cat, page: 1 })}
+                        class={`flex items-center justify-between rounded-xl px-3 py-2 text-[13px] font-medium transition-colors ${
+                          category === cat
+                            ? 'bg-purple-50 text-[#352778] font-bold border-l-[3px] border-[#352778] pl-[9px]'
+                            : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                        }`}
+                      >
+                        {CATEGORY_LABELS[cat]}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div class="border-t border-gray-100 pt-4">
+                <div class="text-[10.5px] font-bold uppercase tracking-widest text-gray-400 mb-2.5">Listing Type</div>
+                <div class="flex flex-wrap gap-1.5">
+                  {[
+                    { label: 'All', value: undefined },
+                    { label: 'Physical', value: 'physical' },
+                    { label: 'Services', value: 'service' },
+                  ].map(({ label, value }) => (
+                    <a
+                      href={buildFilterUrl({ type: value, page: 1 })}
+                      class={`rounded-full px-3 py-1 text-[11.5px] font-bold border transition-colors ${
+                        type === value || (!type && !value)
+                          ? 'bg-[#352778] text-white border-transparent'
+                          : 'border-gray-200 text-gray-500 hover:border-[#352778] hover:text-[#352778]'
+                      }`}
+                    >
+                      {label}
+                    </a>
+                  ))}
+                </div>
+              </div>
             </div>
+          </aside>
 
-            <!-- Pagination -->
-            {pagination.totalPages > 1 && (
-              <div class="mt-12 flex items-center justify-center gap-3">
-                {pagination.page > 1 ? (
-                  <a href={buildFilterUrl({ page: pagination.page - 1 })}>
-                    <button class="inline-flex items-center gap-1.5 rounded-full border-2 border-gray-200 px-4 py-2 text-[13px] font-bold text-gray-600 hover:border-[#352778] hover:text-[#352778] transition-all">
-                      <ChevronLeft className="h-4 w-4" client:load /> Prev
-                    </button>
+          <main class="flex-1 min-w-0">
+
+            {(search || category || type || stateFilter) && (
+              <div class="mb-5 flex flex-wrap items-center gap-2">
+                <span class="text-[11.5px] text-gray-400 font-medium">Filtered by:</span>
+                {category && (
+                  <a href={buildFilterUrl({ category: undefined, page: 1 })} class="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-3 py-0.5 text-[11.5px] font-bold text-[#352778] hover:bg-purple-100">
+                    {activeCategoryLabel} <X className="h-3 w-3" client:load />
                   </a>
-                ) : (
-                  <button disabled class="inline-flex items-center gap-1.5 rounded-full border-2 border-gray-100 px-4 py-2 text-[13px] font-bold text-gray-300 cursor-not-allowed">
-                    <ChevronLeft className="h-4 w-4" client:load /> Prev
-                  </button>
                 )}
-
-                <span class="rounded-full bg-[#352778] text-white px-5 py-2 text-[13px] font-bold">
-                  {pagination.page} / {pagination.totalPages}
-                </span>
-
-                {pagination.page < pagination.totalPages ? (
-                  <a href={buildFilterUrl({ page: pagination.page + 1 })}>
-                    <button class="inline-flex items-center gap-1.5 rounded-full border-2 border-gray-200 px-4 py-2 text-[13px] font-bold text-gray-600 hover:border-[#352778] hover:text-[#352778] transition-all">
-                      Next <ChevronRight className="h-4 w-4" client:load />
-                    </button>
+                {search && (
+                  <a href={buildFilterUrl({ search: undefined, page: 1 })} class="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-3 py-0.5 text-[11.5px] font-bold text-[#352778] hover:bg-purple-100">
+                    "{search}" <X className="h-3 w-3" client:load />
                   </a>
-                ) : (
-                  <button disabled class="inline-flex items-center gap-1.5 rounded-full border-2 border-gray-100 px-4 py-2 text-[13px] font-bold text-gray-300 cursor-not-allowed">
-                    Next <ChevronRight className="h-4 w-4" client:load />
-                  </button>
                 )}
+                {type && (
+                  <a href={buildFilterUrl({ type: undefined, page: 1 })} class="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-3 py-0.5 text-[11.5px] font-bold text-[#352778] hover:bg-purple-100">
+                    {type} <X className="h-3 w-3" client:load />
+                  </a>
+                )}
+                {stateFilter && (
+                  <a href={buildFilterUrl({ state: undefined, page: 1 })} class="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-3 py-0.5 text-[11.5px] font-bold text-[#352778] hover:bg-purple-100">
+                    State: {stateFilter} <X className="h-3 w-3" client:load />
+                  </a>
+                )}
+                <a href="/products" class="text-[11.5px] text-gray-400 underline hover:text-[#352778] ml-1">
+                  Reset all
+                </a>
               </div>
             )}
-          </div>
-        ) : (
-          <div class="rounded-2xl border border-dashed border-gray-300 bg-gray-50/60 py-16 text-center">
-            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-50">
-              <PackageOpen className="h-7 w-7 text-purple-300" client:load />
+
+            <div class="flex items-center justify-between mb-5 pb-3 border-b border-gray-100">
+              <span class="text-[13px] font-medium text-gray-500">
+                Showing <strong class="text-gray-900 font-bold">{displayProducts.length}</strong> {displayProducts.length === 1 ? 'item' : 'items'}
+              </span>
+              <div class="flex items-center gap-2">
+                <label for="sort-select" class="text-[12px] font-medium text-gray-400 hidden sm:inline">Sort by:</label>
+                <select
+                  id="sort-select"
+                  onchange="window.location.href = this.value"
+                  class="rounded-full border border-gray-200 bg-white px-3 py-1 text-[12px] font-semibold text-gray-700 focus:outline-none focus:ring-1 focus:ring-[#7c3aed] cursor-pointer"
+                >
+                  <option value={buildFilterUrl({ sort: 'newest' })} selected={sort === 'newest'}>Newest First</option>
+                  <option value={buildFilterUrl({ sort: 'price-asc' })} selected={sort === 'price-asc'}>Price: Low to High</option>
+                  <option value={buildFilterUrl({ sort: 'price-desc' })} selected={sort === 'price-desc'}>Price: High to Low</option>
+                </select>
+              </div>
             </div>
-            <h3 class="text-[15px] font-bold text-gray-900">No matching products found</h3>
-            <p class="mt-1.5 text-[13px] text-gray-400 max-w-xs mx-auto">
-              Try adjusting your search keywords or category filters.
-            </p>
-            <a href="/products" class="mt-5 inline-flex items-center rounded-full border-2 border-[#352778] px-5 py-2 text-[13px] font-bold text-[#352778] hover:bg-[#352778] hover:text-white transition-all">
-              Reset Filters
-            </a>
-          </div>
-        )}
-      </main>
+
+            {displayProducts.length > 0 ? (
+              <div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {displayProducts.map((product) => (
+                    <ProductCard product={product} client:load />
+                  ))}
+                </div>
+
+                {pagination.totalPages > 1 && (
+                  <div class="mt-12 flex items-center justify-center gap-3">
+                    {pagination.page > 1 ? (
+                      <a href={buildFilterUrl({ page: pagination.page - 1 })}>
+                        <button class="inline-flex items-center gap-1.5 rounded-full border-2 border-gray-200 px-4 py-2 text-[13px] font-bold text-gray-600 hover:border-[#352778] hover:text-[#352778] transition-all">
+                          <ChevronLeft className="h-4 w-4" client:load /> Prev
+                        </button>
+                      </a>
+                    ) : (
+                      <button disabled class="inline-flex items-center gap-1.5 rounded-full border-2 border-gray-100 px-4 py-2 text-[13px] font-bold text-gray-300 cursor-not-allowed">
+                        <ChevronLeft className="h-4 w-4" client:load /> Prev
+                      </button>
+                    )}
+
+                    <span class="rounded-full bg-[#352778] text-white px-5 py-2 text-[13px] font-bold">
+                      {pagination.page} / {pagination.totalPages}
+                    </span>
+
+                    {pagination.page < pagination.totalPages ? (
+                      <a href={buildFilterUrl({ page: pagination.page + 1 })}>
+                        <button class="inline-flex items-center gap-1.5 rounded-full border-2 border-gray-200 px-4 py-2 text-[13px] font-bold text-gray-600 hover:border-[#352778] hover:text-[#352778] transition-all">
+                          Next <ChevronRight className="h-4 w-4" client:load />
+                        </button>
+                      </a>
+                    ) : (
+                      <button disabled class="inline-flex items-center gap-1.5 rounded-full border-2 border-gray-100 px-4 py-2 text-[13px] font-bold text-gray-300 cursor-not-allowed">
+                        Next <ChevronRight className="h-4 w-4" client:load />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div class="rounded-2xl border border-dashed border-gray-300 bg-gray-50/60 py-16 text-center">
+                <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-50">
+                  <PackageOpen className="h-7 w-7 text-purple-300" client:load />
+                </div>
+                <h3 class="text-[15px] font-bold text-gray-900">No matching products found</h3>
+                <p class="mt-1.5 text-[13px] text-gray-400 max-w-xs mx-auto">
+                  Try adjusting your search keywords or category filters.
+                </p>
+                <a href="/products" class="mt-5 inline-flex items-center rounded-full border-2 border-[#352778] px-5 py-2 text-[13px] font-bold text-[#352778] hover:bg-[#352778] hover:text-white transition-all">
+                  Reset Filters
+                </a>
+              </div>
+            )}
+          </main>
+        </div>
+      </div>
     </div>
-  </div>
+  )}
 
 </Layout>

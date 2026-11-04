@@ -8,6 +8,10 @@ import { getPaymentProvider } from '@/lib/payment';
 import { verifyBusinessOwnership, verifyBusinessAccess } from '@/lib/ownership';
 import { createReminderOnce } from '@/services/reminder.service';
 import { formatNaira, formatTaxMonth } from '@/lib/format';
+import {
+  resolveTaxPolicy,
+  paymentBasisForPolicy,
+} from '@/services/tax/tax-policy.service';
 import { dispatchPaymentFailedEmail } from '@/services/email-dispatch.service';
 
 // Fire a `payment_successful` reminder outside the caller's transaction.
@@ -153,8 +157,21 @@ export async function initiatePayment(
     : Number(report.taxPayable);
 
   if (amount <= 0) {
-    throw new AppError(400, 'No tax payable for this report', 'ZERO_TAX');
+    const policy = await resolveTaxPolicy(businessId);
+    throw new AppError(
+      400,
+      policy.vat.chargeable
+        ? 'No tax payable for this report: the calculated amount is zero, so there is nothing to remit.'
+        : `No tax payable for this report: VAT is not chargeable on this business's tax profile${
+            policy.vat.reason ? ` (${policy.vat.reason})` : ''
+          } and the calculated liability is zero.`,
+      'ZERO_TAX',
+    );
   }
+
+  // What this charge settles. Derived, never persisted — MonthlyTaxReport has
+  // no basis column, and the modal must be able to name the obligation.
+  const taxBasis = paymentBasisForPolicy(await resolveTaxPolicy(businessId));
 
   // Idempotency: if an open pending or failed payment already exists for this
   // report, reuse it instead of spawning a second Paystack transaction. This
@@ -302,6 +319,7 @@ export async function initiatePayment(
     reference,
     authorizationUrl: result.authorizationUrl,
     accessCode: result.accessCode,
+    taxBasis,
   };
 }
 

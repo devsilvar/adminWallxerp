@@ -371,7 +371,10 @@ describe('Customer 360 Core Service Unit Tests', () => {
       jest.spyOn(prisma.invoice, 'count').mockResolvedValue(0);
       jest.spyOn(prisma.customerCredit, 'count').mockResolvedValue(0);
       jest.spyOn(prisma.customerCard, 'count').mockResolvedValue(0);
+      jest.spyOn(prisma.customerCardLedger, 'count').mockResolvedValue(0);
+      jest.spyOn(prisma.customerCard, 'deleteMany').mockResolvedValue({ count: 0 } as any);
       jest.spyOn(prisma.customer, 'delete').mockResolvedValue({} as any);
+      jest.spyOn(prisma, '$transaction').mockImplementation(async (cb: any) => cb(prisma));
 
       const result = await customerService.deleteCustomer(userId, businessId, customerId);
       expect(result.success).toBe(true);

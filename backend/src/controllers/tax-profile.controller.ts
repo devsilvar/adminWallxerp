@@ -59,3 +59,15 @@ export const downloadObligationReportPdf = asyncHandler(async (req: Authenticate
   res.setHeader('Content-Disposition', `attachment; filename="tax-obligation-report-${businessId}.pdf"`);
   res.send(pdfBuffer);
 });
+
+export const getTaxPolicy = asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user!.userId;
+  const businessId = req.params.businessId;
+
+  const policy = await taxProfileService.getTaxPolicy(userId, businessId);
+
+  res.status(200).json({
+    success: true,
+    data: policy,
+  });
+});

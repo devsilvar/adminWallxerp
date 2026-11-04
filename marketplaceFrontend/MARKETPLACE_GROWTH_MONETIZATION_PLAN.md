@@ -6,6 +6,27 @@
 > **Status:** plan only. Nothing here is implemented.
 > **Verified against source on 2026-10-31** — every claim below cites a file/line that was read, not remembered.
 
+> **Execution plan:** `MARKETPLACE_GROWTH_PHASES.md` turns this document into 18 ordered, one-PR-at-a-time
+> phases for a single junior engineer (files, exact steps, edge cases, checks, rollback). This file explains
+> *why*; that file says *in what order* and *how not to break production*. Read the phases file before coding.
+
+> **Corrections verified against source on 2026-11-03** (the phases file assumes all of these):
+> 1. The 3-product cap counts **every** status except `archived` (`marketplace.service.ts:104`), so `rejected`
+>    listings currently consume a slot. §2.1's claim that this "matches the current count" is wrong — excluding
+>    `rejected` is a deliberate behaviour change that gives merchants capacity back.
+> 2. The UI already emits `sort=price-asc` / `price-desc` (hyphenated). §1.1 specifies `price_asc` / `price_desc`.
+>    The phases file normalises both and emits one.
+> 3. There are **five** hardcoded `localhost:5173` links, not six — `Footer.tsx:3` already reads `PUBLIC_APP_URL`
+>    and only falls back to localhost.
+> 4. Boost impressions cannot be counted server-side: the feed is edge-cached for 300s
+>    (`public-marketplace.controller.ts:11-12`), so a cached render sends no request. Impressions must come from
+>    a client beacon; §2.4's "increment each time a boosted listing is rendered" needs that qualifier.
+> 5. `BoostStatus` has no waitlisted state, but §2.4 promises a waitlist. `SlotPurchaseStatus` has no rejected
+>    state, but §2.7 requires rejecting proofs. Both enums need one more member.
+> 6. `Business` has no `slug` column (only `merchantId`), so §1.4's `/s/[slug]` needs the §12.4 decision first.
+> 7. The public feed is mounted **twice** (`public.routes.ts:42-54` and `index.ts:65-74`); any new public
+>    endpoint must be added to both or it 404s on one path.
+
 ---
 
 ## 1. The one-paragraph summary

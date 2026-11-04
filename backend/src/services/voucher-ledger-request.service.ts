@@ -4,6 +4,7 @@ import logger from '@/lib/logger';
 import { AppError } from '@/middleware/errorHandler';
 import { logAudit } from '@/lib/audit';
 import { verifyBusinessAccess } from '@/lib/ownership';
+import { buildVoucherVerifyUrl } from '@/lib/public-origin';
 import { toNumber } from '@/shared/helpers';
 import config from '@/config';
 import {
@@ -61,7 +62,8 @@ export async function createTopUpRequest(
   userId: string,
   businessId: string,
   customerId: string,
-  input: RequestTopUpInput
+  input: RequestTopUpInput,
+  opts?: { origin?: string | null }
 ) {
   const { role } = await verifyBusinessAccess(userId, businessId, 'customers.manage');
 
@@ -149,7 +151,7 @@ export async function createTopUpRequest(
 
   // If fast-lane owner/manager created, dispatch verification link
   if (isManagerOrOwner && rawToken && customer.email) {
-    const verifyUrl = `${config.publicUrls.apiBase}/verify-voucher/${request.id}?token=${rawToken}`;
+    const verifyUrl = buildVoucherVerifyUrl(request.id, rawToken, opts?.origin);
     void dispatchVoucherVerificationEmail({
       businessId,
       customerId,
@@ -262,7 +264,7 @@ export async function authorizeRequest(
   userId: string,
   businessId: string,
   requestId: string,
-  opts?: { bypassReason?: string }
+  opts?: { bypassReason?: string; origin?: string | null }
 ) {
   const { role } = await verifyBusinessAccess(userId, businessId);
   if (role !== 'owner' && role !== 'manager') {
@@ -334,7 +336,7 @@ export async function authorizeRequest(
       },
     });
 
-    const verifyUrl = `${config.publicUrls.apiBase}/verify-voucher/${req.id}?token=${rawToken}`;
+    const verifyUrl = buildVoucherVerifyUrl(req.id, rawToken, opts?.origin);
 
     void dispatchVoucherVerificationEmail({
       businessId,
@@ -557,7 +559,8 @@ export async function rejectRequest(
 export async function resendVerification(
   userId: string,
   businessId: string,
-  requestId: string
+  requestId: string,
+  opts?: { origin?: string | null }
 ) {
   const { role } = await verifyBusinessAccess(userId, businessId);
   if (role !== 'owner' && role !== 'manager') {
@@ -588,7 +591,7 @@ export async function resendVerification(
     },
   });
 
-  const verifyUrl = `${config.publicUrls.apiBase}/verify-voucher/${req.id}?token=${rawToken}`;
+  const verifyUrl = buildVoucherVerifyUrl(req.id, rawToken, opts?.origin);
 
   void dispatchVoucherVerificationEmail({
     businessId,

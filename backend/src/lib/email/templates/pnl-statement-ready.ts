@@ -90,7 +90,7 @@ export function generatePnlStatementReadyHtml(data: PnlStatementReadyEmailData):
                   <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 13px; font-weight: 600; text-align: right;">${data.profitMarginFormatted}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; color: #64748b; font-size: 13px;">Estimated Tax (7.5%)</td>
+                  <td style="padding: 12px 16px; color: #64748b; font-size: 13px;">Estimated Tax</td>
                   <td style="padding: 12px 16px; color: #0f172a; font-size: 13px; font-weight: 700; text-align: right;">${data.taxPayableFormatted}</td>
                 </tr>
               </table>
@@ -144,7 +144,7 @@ P&L SUMMARY:
 - Total Operating Expenses: ${data.totalExpensesFormatted}
 - Gross Profit: ${data.grossProfitFormatted}
 - Profit Margin: ${data.profitMarginFormatted}
-- Estimated Tax (7.5%): ${data.taxPayableFormatted}
+- Estimated Tax: ${data.taxPayableFormatted}
 
 Download your P&L Statement:
 ${data.downloadLink}

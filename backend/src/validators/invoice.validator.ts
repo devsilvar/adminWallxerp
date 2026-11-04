@@ -22,7 +22,7 @@ export const createInvoiceSchema = z
     dueDate: z.coerce.date(),
 
     // Money — VAT exclusive (shown separately per NRS standard)
-    vatRate: z.number().min(0).max(100).default(7.5),
+    vatRate: z.number().min(0).max(100).optional(),
     discount: z.number().nonnegative().default(0),
     currency: z.string().length(3).default('NGN'),
 

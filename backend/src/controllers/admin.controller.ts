@@ -160,12 +160,18 @@ export const listWithdrawalRequests = asyncHandler(
     const page = req.query.page ? Number(req.query.page) : undefined;
     const limit = req.query.limit ? Number(req.query.limit) : undefined;
     const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+    const needsReconciliation = req.query.needsReconciliation === 'true'
+      ? true
+      : req.query.needsReconciliation === 'false'
+      ? false
+      : undefined;
 
     const result = await settlementService.adminListWithdrawalRequests({
       status,
       search,
       page,
       limit,
+      needsReconciliation,
     });
 
     res.status(200).json({

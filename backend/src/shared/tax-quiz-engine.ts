@@ -82,9 +82,12 @@ export function evaluateTaxConfig(answers: QuizAnswers): TaxProfileConfiguration
     config.vatExempt = false;
     config.mustChargeVat = true;
     config.reviewReasons.push(
-      `Must charge 7.5% VAT: Annual turnover meets or exceeds ₦${(STATUTORY_TAX_CONSTANTS.VAT.EXEMPT_TURNOVER_LIMIT / 1_000_000).toFixed(0)}M threshold`
+      `Must charge ${STATUTORY_TAX_CONSTANTS.VAT.RATE}% VAT: Annual turnover meets or exceeds ₦${(STATUTORY_TAX_CONSTANTS.VAT.EXEMPT_TURNOVER_LIMIT / 1_000_000).toFixed(0)}M threshold`
     );
   }
+
+  // Enforce consistency: UNKNOWN turnover cannot leave both flags false
+  config.mustChargeVat = !config.vatExempt;
 
   // ═══════════════════════════════════════════════════════════
   // PRIORITY 4: Small Company 0% CIT (₦100M Turnover + ₦250M Assets) — NTA 2025 s56(6)

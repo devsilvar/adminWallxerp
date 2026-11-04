@@ -87,8 +87,10 @@ export async function withdrawBalance(
     );
   }
 
-  const isAutoPayout = Boolean(business.user.autoPayoutEnabled);
-  const initialStatus = isAutoPayout ? 'processing' : 'pending';
+  // Fintech rule: PIN is the approval. No admin gate — every PIN-verified
+  // request goes straight to Paystack. Admin is read-only (requery/manualSettle for exceptions).
+  const isAutoPayout = true;
+  const initialStatus = 'processing';
 
   // 4. Atomic request creation with triple-fence protection
   const payout = await prisma.$transaction(async (tx) => {
@@ -195,85 +197,7 @@ export async function withdrawBalance(
     return payoutRecord;
   }, { maxWait: 20000, timeout: 60000 });
 
-  // PATH A: Manual Admin Review (autoPayoutEnabled === false)
-  if (!isAutoPayout) {
-    logAudit({
-      userId,
-      businessId,
-      action: 'settlement.payout_requested',
-      resourceType: 'settlement_payout',
-      resourceId: payout.id,
-      newData: {
-        amount: quote.amount,
-        fee: quote.fee,
-        netAmount: quote.netAmount,
-        transferReference,
-        destinationBank: settlementBankName,
-        accountLast4: settlementAccountNumber.slice(-4),
-        mode: 'manual_approval',
-      },
-    });
-
-    logger.info('Withdrawal request submitted (awaiting admin approval)', {
-      businessId,
-      payoutId: payout.id,
-      amount: quote.amount,
-      fee: quote.fee,
-      netAmount: quote.netAmount,
-      reference: transferReference,
-    });
-
-    void createReminderOnce({
-      businessId,
-      reminderType: 'payout_requested',
-      scheduledDate: new Date(),
-      message: `Withdrawal request of ${formatNaira(quote.netAmount)}${
-        quote.fee > 0 ? ` (fee ${formatNaira(quote.fee)}, total debited ${formatNaira(quote.amount)})` : ''
-      } received (ref ${transferReference}). We'll notify you once it's reviewed — usually within 1–2 business hours.`,
-      referenceType: 'settlement_payout',
-      referenceId: payout.id,
-    }).catch((err) =>
-      logger.warn('Failed to create payout_requested reminder', {
-        payoutId: payout.id,
-        err: err instanceof Error ? err.message : err,
-      })
-    );
-
-    void dispatchWithdrawalRequestedEmail(payout.id);
-
-    void emitToAdmins({
-      type: 'withdrawal_created',
-      withdrawalId: payout.id,
-      businessId,
-      businessName: business.businessName,
-      amount: toNumber(payout.amount),
-      timestamp: new Date().toISOString(),
-    }).catch((err) =>
-      logger.warn('Failed to emit withdrawal_created to admins', { payoutId: payout.id, err })
-    );
-
-    return {
-      id: payout.id,
-      amount: toNumber(payout.amount),
-      fee: toNumber(payout.fee),
-      netAmount: toNumber(payout.netAmount),
-      transferReference: payout.transferReference,
-      status: payout.status,
-      destinationBankName: payout.destinationBankName,
-      destinationAccountNum: payout.destinationAccountNum,
-      destinationAccountName: payout.destinationAccountName,
-      initiatedAt: payout.initiatedAt,
-      completedAt: payout.completedAt,
-      message:
-        toNumber(payout.fee) > 0
-          ? `Withdrawal request for ${formatNaira(toNumber(payout.netAmount))} submitted (fee ${formatNaira(
-              toNumber(payout.fee)
-            )}, total debited ${formatNaira(toNumber(payout.amount))}). It will be processed once approved by an admin.`
-          : 'Withdrawal request submitted. It will be processed once approved by an admin.',
-    };
-  }
-
-  // PATH B: Instant Payout (autoPayoutEnabled === true)
+  // PATH B: Instant Payout (PIN-verified → straight to Paystack)
   const provider = getPaymentProvider();
   try {
     const recipient = await provider.createTransferRecipient({

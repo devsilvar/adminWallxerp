@@ -9,8 +9,9 @@
 import { Router } from 'express';
 import * as invoiceController from '@/controllers/invoice.controller';
 import { publicVoucherController } from '@/controllers/public-voucher.controller';
+import * as publicMarketplaceController from '@/controllers/public-marketplace.controller';
 import { SUBSCRIPTION_PLANS } from '@/config/subscription-plans';
-import { verificationRateLimiter } from '@/middleware/security';
+import { verificationRateLimiter, publicMarketplaceRateLimiter } from '@/middleware/security';
 
 const router = Router();
 
@@ -38,5 +39,17 @@ router.post(
   publicVoucherController.confirmVoucherVerify
 );
 
-export default router;
+// Public marketplace catalog feed and product detail
+router.get(
+  '/marketplace/products',
+  publicMarketplaceRateLimiter,
+  publicMarketplaceController.listFeed
+);
 
+router.get(
+  '/marketplace/products/:slug',
+  publicMarketplaceRateLimiter,
+  publicMarketplaceController.getBySlug
+);
+
+export default router;

@@ -200,6 +200,7 @@ describe('Customer Revenue Capture & Debtors Lock-Isolation Unit Tests', () => {
       jest.spyOn(prisma, '$transaction').mockImplementation(async (callback: any) => {
         const mockTx: any = {
           customer: { findFirst: jest.fn() },
+          businessTaxProfile: { findUnique: jest.fn().mockResolvedValue(null) },
           invoice: {
             findFirst: jest.fn().mockResolvedValue(null),
             create: jest.fn().mockResolvedValue(mockInvoice),
@@ -224,6 +225,7 @@ describe('Customer Revenue Capture & Debtors Lock-Isolation Unit Tests', () => {
       jest.spyOn(prisma, '$transaction').mockImplementation(async (callback: any) => {
         const mockTx: any = {
           customer: { findFirst: jest.fn().mockResolvedValue(null) },
+          businessTaxProfile: { findUnique: jest.fn().mockResolvedValue(null) },
           invoice: { findFirst: jest.fn().mockResolvedValue(null) },
         };
         return callback(mockTx);

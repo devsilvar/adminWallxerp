@@ -40,6 +40,8 @@ export interface TaxPaymentReceiptData {
     grossProfit: number;
     taxRate: number;
     taxPayable: number;
+    /** What the payment settled — resolved from the business tax policy. */
+    taxBasis: 'vat' | 'cit-provision' | 'pit-provision';
   };
 }
 
@@ -162,11 +164,20 @@ export async function buildTaxPaymentReceiptPdf(data: TaxPaymentReceiptData): Pr
     doc.y = tableY + 22;
 
     const taxMonthLabel = new Date(data.taxReport.taxMonth).toLocaleDateString('en-NG', { month: 'long', year: 'numeric' });
+    const vatBasis = data.taxReport.taxBasis === 'vat';
     const rows = [
       { label: `Gross Sales Revenue (${taxMonthLabel})`, basis: 'Direct sales & invoices', amount: data.taxReport.totalSales },
       { label: `Allowable Business Expenses`, basis: 'Tax deductible operating costs', amount: data.taxReport.totalExpenses },
-      { label: `Net Assessable Gross Profit`, basis: 'Sales minus Deductible Expenses', amount: data.taxReport.grossProfit },
-      { label: `Statutory SME Tax Liability`, basis: `${data.taxReport.taxRate}% of Gross Profit`, amount: data.taxReport.taxPayable },
+      {
+        label: vatBasis ? 'Gross Profit (Reference)' : 'Gross Profit (Annual Income-Tax Base)',
+        basis: vatBasis ? 'Not the VAT base' : 'Sales minus Deductible Expenses',
+        amount: data.taxReport.grossProfit,
+      },
+      {
+        label: vatBasis ? 'Net VAT Liability (Monthly)' : 'Monthly Remittance (VAT-exempt)',
+        basis: vatBasis ? 'Output VAT minus input VAT' : 'VAT not chargeable on this tax profile',
+        amount: data.taxReport.taxPayable,
+      },
     ];
 
     rows.forEach((r, idx) => {

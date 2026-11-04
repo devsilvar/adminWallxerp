@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import request from 'supertest';
 import express from 'express';
 
-// Mock auth & subscription middleware to pass transparently
+// Mock auth & subscription middleware
 jest.mock('@/middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
     req.user = { userId: 'usr_test_123', email: 'test@example.com' };
@@ -10,20 +10,22 @@ jest.mock('@/middleware/auth', () => ({
   },
 }));
 
+const mockRequireActiveSubscription = jest.fn((_req: any, _res: any, next: any) => next());
 jest.mock('@/middleware/subscription', () => ({
-  requireActiveSubscription: (_req: any, _res: any, next: any) => next(),
+  requireActiveSubscription: (req: any, res: any, next: any) => mockRequireActiveSubscription(req, res, next),
 }));
 
 jest.mock('@/services/tax/tax-profile.service', () => ({
   getTaxProfile: jest.fn(),
+  getTaxPolicy: jest.fn(),
   saveTaxProfile: jest.fn(),
   deleteTaxProfile: jest.fn(),
   getObligationReportPdf: jest.fn(),
 }));
 
 import * as taxProfileService from '@/services/tax/tax-profile.service';
-import taxProfileRoutes from '@/routes/tax-profile.routes';
-import { errorHandler } from '@/middleware/errorHandler';
+import taxProfileRoutes, { taxPolicyRouter } from '@/routes/tax-profile.routes';
+import { errorHandler, AppError } from '@/middleware/errorHandler';
 
 describe('Tax Profile Routes — API Unit Tests', () => {
   let app: express.Express;
@@ -33,6 +35,7 @@ describe('Tax Profile Routes — API Unit Tests', () => {
     jest.clearAllMocks();
     app = express();
     app.use(express.json());
+    app.use('/businesses/:businessId/tax-policy', taxPolicyRouter);
     app.use('/businesses/:businessId/tax-profile', taxProfileRoutes);
     app.use(errorHandler);
   });
@@ -123,5 +126,54 @@ describe('Tax Profile Routes — API Unit Tests', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toBe('application/pdf');
     expect(res.headers['content-disposition']).toContain(`tax-obligation-report-${businessId}.pdf`);
+  });
+
+  describe('GET /businesses/:businessId/tax-policy', () => {
+    it('returns resolved policy for owner/authorized user with 200', async () => {
+      const mockPolicy = {
+        source: 'PROFILE',
+        vat: { chargeable: false, rate: 0, reason: 'VAT Exempt: Annual turnover under ₦25M' },
+        incomeTax: { type: 'CIT', rate: 0, devLevyRate: 0 },
+      };
+      (taxProfileService.getTaxPolicy as any).mockResolvedValue(mockPolicy);
+
+      const res = await request(app).get(`/businesses/${businessId}/tax-policy`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toEqual(mockPolicy);
+      expect(taxProfileService.getTaxPolicy).toHaveBeenCalledWith('usr_test_123', businessId);
+      expect(mockRequireActiveSubscription).not.toHaveBeenCalled();
+    });
+
+    it('returns 403 when user has no access or lacks tax.read permission', async () => {
+      (taxProfileService.getTaxPolicy as any).mockRejectedValue(
+        new AppError(403, 'You do not have permission to perform this action', 'PERMISSION_DENIED')
+      );
+
+      const res = await request(app).get(`/businesses/${businessId}/tax-policy`);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('PERMISSION_DENIED');
+    });
+
+    it('returns 200 even when subscription is lapsed because requireActiveSubscription is bypassed', async () => {
+      mockRequireActiveSubscription.mockImplementation((_req: any, _res: any, next: any) => {
+        next(new AppError(403, 'Subscription expired', 'SUBSCRIPTION_EXPIRED'));
+      });
+
+      const mockDefaultPolicy = {
+        source: 'DEFAULT',
+        vat: { chargeable: true, rate: 7.5, reason: null },
+        incomeTax: { type: 'CIT', rate: 7.5, devLevyRate: 0 },
+      };
+      (taxProfileService.getTaxPolicy as any).mockResolvedValue(mockDefaultPolicy);
+
+      const res = await request(app).get(`/businesses/${businessId}/tax-policy`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual(mockDefaultPolicy);
+      expect(mockRequireActiveSubscription).not.toHaveBeenCalled();
+    });
   });
 });

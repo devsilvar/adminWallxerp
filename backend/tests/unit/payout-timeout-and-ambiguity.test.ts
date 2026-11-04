@@ -307,7 +307,13 @@ describe('Blockers 1 & 2: Payout Ambiguity & Transport Timeout Handling', () => 
 
       expect(result.status).toBe('failed');
       expect(mockUpdateMany).toHaveBeenCalledWith({
-        where: { id: 'payout-pending-reject', status: 'pending' },
+        where: {
+          id: 'payout-pending-reject',
+          OR: [
+            { status: 'pending' },
+            { status: 'failed', needsReconciliation: true },
+          ],
+        },
         data: expect.objectContaining({
           status: 'failed',
           failureReason: expect.stringContaining('Rejected by admin'),

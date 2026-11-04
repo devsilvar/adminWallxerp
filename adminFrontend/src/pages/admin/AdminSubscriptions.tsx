@@ -14,6 +14,8 @@ import {
   Building2,
   Mail,
   Loader2,
+  FileText,
+  Copy,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api, { getErrorMessage } from '@/lib/axios.ts';
@@ -172,12 +174,38 @@ export default function AdminSubscriptions() {
     }
   };
 
-  const isPdf = inspectingSub?.receiptMime?.includes('pdf') ||
-    inspectingSub?.receiptFileName?.toLowerCase().endsWith('.pdf');
+  const getReceiptUrl = (sub: SubscriptionSubmission | null): string => {
+    if (!sub) return '';
+    // If it's already a full public URL (e.g. Cloudinary HTTPS link), use it directly
+    if (sub.receiptUrl && (sub.receiptUrl.startsWith('http://') || sub.receiptUrl.startsWith('https://'))) {
+      return sub.receiptUrl;
+    }
 
-  const receiptStreamUrl = inspectingSub
-    ? `${api.defaults.baseURL || '/api/v1'}/admin/subscriptions/${inspectingSub.id}/receipt`
-    : '';
+    const token = localStorage.getItem('accessToken') || '';
+    const base = (api.defaults.baseURL || '/api/v1').replace(/\/+$/, '');
+
+    let url = sub.receiptUrl || `/admin/subscriptions/${sub.id}/receipt`;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      if (url.startsWith('/api/v1')) {
+        url = base.startsWith('http') ? `${base.replace(/\/api\/v1$/, '')}${url}` : url;
+      } else {
+        url = `${base}${url.startsWith('/') ? '' : '/'}${url}`;
+      }
+    }
+
+    if (token) {
+      const sep = url.includes('?') ? '&' : '?';
+      url = `${url}${sep}token=${encodeURIComponent(token)}`;
+    }
+    return url;
+  };
+
+  const isPdf =
+    inspectingSub?.receiptMime?.toLowerCase().includes('pdf') ||
+    inspectingSub?.receiptFileName?.toLowerCase().endsWith('.pdf') ||
+    inspectingSub?.receiptUrl?.toLowerCase().includes('.pdf');
+
+  const resolvedReceiptUrl = getReceiptUrl(inspectingSub);
 
   return (
     <div className='space-y-6'>
@@ -251,7 +279,7 @@ export default function AdminSubscriptions() {
             <CreditCard className='h-4 w-4 text-primary-500' />
           </div>
           <p className='mt-2 text-2xl font-bold text-primary-700 tabular-nums'>
-            ₦{counts.totalRevenueApproved.toLocaleString()}
+            â‚¦{counts.totalRevenueApproved.toLocaleString()}
           </p>
           <p className='text-[11px] text-ink-subtle mt-0.5'>Cumulative subscription volume</p>
         </div>
@@ -294,7 +322,7 @@ export default function AdminSubscriptions() {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder='Search customer, email, business…'
+            placeholder='Search customer, email, businessâ€¦'
             className='w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-hairline bg-panel text-ink placeholder:text-ink-subtle focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500'
           />
         </div>
@@ -319,7 +347,7 @@ export default function AdminSubscriptions() {
                 <tr>
                   <td colSpan={6} className='py-12 text-center text-ink-subtle'>
                     <RefreshCw className='mx-auto h-6 w-6 animate-spin mb-2 text-primary-600' />
-                    Loading submissions queue…
+                    Loading submissions queueâ€¦
                   </td>
                 </tr>
               ) : submissions.length === 0 ? (
@@ -360,6 +388,14 @@ export default function AdminSubscriptions() {
                                 <span>{sub.businessName}</span>
                               </p>
                             )}
+                            {(sub.receiptFileName || sub.receiptUrl) && (
+                              <div className='flex items-center gap-1 mt-1'>
+                                <span className='inline-flex items-center gap-1 text-[10px] text-primary-700 bg-primary-50 px-1.5 py-0.2 rounded border border-primary-200/60 max-w-[190px] truncate'>
+                                  <FileText className='h-2.5 w-2.5 shrink-0' />
+                                  <span className='truncate'>{sub.receiptFileName || 'Proof Document'}</span>
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -373,7 +409,7 @@ export default function AdminSubscriptions() {
 
                       <td className='py-3.5 px-4'>
                         <span className='font-bold text-ink tabular-nums text-sm'>
-                          ₦{Number(sub.amount).toLocaleString()}
+                          â‚¦{Number(sub.amount).toLocaleString()}
                         </span>
                       </td>
 
@@ -399,17 +435,31 @@ export default function AdminSubscriptions() {
                       </td>
 
                       <td className='py-3.5 px-4 text-right'>
-                        <button
-                          type='button'
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setInspectingSub(sub);
-                          }}
-                          className='inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-panel px-3 py-1.5 text-xs font-semibold text-primary-700 hover:bg-primary-50 transition-colors shadow-2xs'
-                        >
-                          <Eye className='h-3.5 w-3.5' />
-                          <span>View Proof</span>
-                        </button>
+                        <div className='inline-flex items-center justify-end gap-1.5'>
+                          <button
+                            type='button'
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setInspectingSub(sub);
+                            }}
+                            className='inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-panel px-3 py-1.5 text-xs font-semibold text-primary-700 hover:bg-primary-50 transition-colors shadow-2xs'
+                          >
+                            <Eye className='h-3.5 w-3.5' />
+                            <span>View Proof</span>
+                          </button>
+                          {(sub.receiptUrl || sub.receiptFileName) && (
+                            <a
+                              href={getReceiptUrl(sub)}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              onClick={(e) => e.stopPropagation()}
+                              title='Open receipt directly in new tab'
+                              className='p-1.5 rounded-lg border border-hairline bg-panel text-ink-muted hover:text-primary-700 hover:bg-primary-50 transition-colors shadow-2xs'
+                            >
+                              <ExternalLink className='h-3.5 w-3.5' />
+                            </a>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -449,39 +499,77 @@ export default function AdminSubscriptions() {
         )}
       </div>
 
-      {/* ── Receipt Inspector Modal ── */}
+      {/* â”€â”€ Receipt Inspector Modal â”€â”€ */}
       {inspectingSub && (
         <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150'>
           <div className='relative w-full max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl bg-panel border border-hairline shadow-2xl flex flex-col md:flex-row'>
             {/* Left: Document View (Image or PDF) */}
             <div className='md:w-3/5 bg-gray-900 flex flex-col items-center justify-center p-4 min-h-[320px] md:min-h-[500px] border-b md:border-b-0 md:border-r border-hairline overflow-auto'>
-              {isPdf ? (
-                <iframe
-                  src={receiptStreamUrl}
-                  title='Receipt PDF Preview'
-                  className='w-full h-full min-h-[420px] rounded-lg bg-white border-0'
-                />
+              {!resolvedReceiptUrl ? (
+                <div className='text-center p-8 text-gray-400'>
+                  <FileText className='mx-auto h-12 w-12 opacity-30 mb-2' />
+                  <p className='text-sm font-medium'>No receipt document uploaded</p>
+                </div>
+              ) : isPdf ? (
+                <div className='w-full h-full min-h-[420px] flex flex-col'>
+                  <iframe
+                    src={resolvedReceiptUrl}
+                    title='Receipt PDF Preview'
+                    className='w-full flex-1 min-h-[420px] rounded-lg bg-white border-0 shadow-md'
+                  />
+                </div>
               ) : (
                 <div className='relative max-w-full max-h-full flex items-center justify-center'>
                   <img
-                    src={receiptStreamUrl}
+                    src={resolvedReceiptUrl}
                     alt='Payment proof receipt'
                     className='max-w-full max-h-[480px] object-contain rounded-lg shadow-md'
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      target.style.display = 'none';
+                      const parent = target.parentElement;
+                      if (parent && !parent.querySelector('.img-fallback')) {
+                        const fallback = document.createElement('div');
+                        fallback.className = 'img-fallback text-center p-6 text-gray-300';
+                        fallback.innerHTML = `
+                          <p class="text-xs text-gray-400 mb-2">Image preview could not be rendered directly in window.</p>
+                          <a href="${resolvedReceiptUrl}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-600 text-white text-xs font-semibold hover:bg-primary-700">
+                            Open Uploaded Document
+                          </a>
+                        `;
+                        parent.appendChild(fallback);
+                      }
+                    }}
                   />
                 </div>
               )}
 
-              <div className='mt-3 flex items-center gap-2'>
-                <a
-                  href={receiptStreamUrl}
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  className='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors'
-                >
-                  <ExternalLink className='h-3.5 w-3.5' />
-                  <span>Open Full Size</span>
-                </a>
-              </div>
+              {resolvedReceiptUrl && (
+                <div className='mt-3 flex flex-wrap items-center justify-center gap-2'>
+                  <a
+                    href={resolvedReceiptUrl}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors shadow-xs'
+                  >
+                    <ExternalLink className='h-3.5 w-3.5' />
+                    <span>Open Full Size / Download</span>
+                  </a>
+                  {inspectingSub?.receiptUrl && (
+                    <button
+                      type='button'
+                      onClick={() => {
+                        navigator.clipboard.writeText(inspectingSub.receiptUrl!);
+                        toast.success('Receipt link copied to clipboard!');
+                      }}
+                      className='inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-colors shadow-xs'
+                    >
+                      <Copy className='h-3.5 w-3.5' />
+                      <span>Copy Direct Link</span>
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Right: Customer & Action Panel */}
@@ -555,8 +643,28 @@ export default function AdminSubscriptions() {
                   <div className='flex items-center justify-between'>
                     <span className='text-ink-muted'>Claimed Amount:</span>
                     <span className='font-extrabold text-primary-700 text-sm'>
-                      ₦{Number(inspectingSub.amount).toLocaleString()}
+                      â‚¦{Number(inspectingSub.amount).toLocaleString()}
                     </span>
+                  </div>
+
+                  <div className='flex items-center justify-between border-t border-hairline pt-2'>
+                    <span className='text-ink-muted flex items-center gap-1'>
+                      <FileText className='h-3 w-3' /> Proof Document:
+                    </span>
+                    {resolvedReceiptUrl ? (
+                      <a
+                        href={resolvedReceiptUrl}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        className='font-semibold text-primary-700 hover:underline flex items-center gap-1 max-w-[200px] truncate'
+                        title={inspectingSub.receiptFileName || inspectingSub.receiptUrl || 'View receipt'}
+                      >
+                        <span className='truncate'>{inspectingSub.receiptFileName || 'View Receipt File'}</span>
+                        <ExternalLink className='h-3 w-3 shrink-0' />
+                      </a>
+                    ) : (
+                      <span className='text-ink-subtle italic'>Not provided</span>
+                    )}
                   </div>
 
                   {inspectingSub.notes && (
@@ -601,7 +709,7 @@ export default function AdminSubscriptions() {
                       className='w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50'
                     >
                       <CheckCircle2 className='h-4 w-4' />
-                      <span>{actionLoading ? 'Activating…' : 'Approve & Activate Plan'}</span>
+                      <span>{actionLoading ? 'Activatingâ€¦' : 'Approve & Activate Plan'}</span>
                     </button>
 
                     <button
@@ -626,7 +734,7 @@ export default function AdminSubscriptions() {
         </div>
       )}
 
-      {/* ── Rejection Reason Modal ── */}
+      {/* â”€â”€ Rejection Reason Modal â”€â”€ */}
       {rejectModalOpen && inspectingSub && (
         <div className='fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150'>
           <div className='w-full max-w-md rounded-2xl bg-panel border border-hairline p-6 shadow-2xl space-y-4'>
@@ -667,7 +775,7 @@ export default function AdminSubscriptions() {
                 onClick={handleRejectSubmit}
                 className='px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold disabled:opacity-50'
               >
-                {actionLoading ? 'Rejecting…' : 'Confirm Rejection'}
+                {actionLoading ? 'Rejectingâ€¦' : 'Confirm Rejection'}
               </button>
             </div>
           </div>

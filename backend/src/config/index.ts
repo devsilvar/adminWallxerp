@@ -65,11 +65,11 @@ const parsePort = (raw: string | undefined): number => {
 };
 
 /**
- * ERASE_TEST_ACCOUNTS toggle — one-shot sweep of throwaway test accounts
+ * ERASE_TEST_ACCOUNTS toggle â€” one-shot sweep of throwaway test accounts
  * at server startup (src/scripts/erase-test-accounts.ts).
- *   unset / false / 0 / no / off  → disabled
- *   true / 1 / yes / apply        → delete matching accounts on startup
- *   anything else                 → 'dry' (logs what WOULD be deleted), so a
+ *   unset / false / 0 / no / off  â†’ disabled
+ *   true / 1 / yes / apply        â†’ delete matching accounts on startup
+ *   anything else                 â†’ 'dry' (logs what WOULD be deleted), so a
  *     typo still produces visible log output instead of silently doing nothing.
  */
 const parseEraseToggle = (raw: string | undefined): false | 'dry' | 'apply' => {
@@ -77,6 +77,19 @@ const parseEraseToggle = (raw: string | undefined): false | 'dry' | 'apply' => {
   if (!v || v === 'false' || v === '0' || v === 'no' || v === 'off') return false;
   if (v === 'true' || v === '1' || v === 'yes' || v === 'apply') return 'apply';
   return 'dry';
+};
+
+/**
+ * First usable URL from a possibly comma-separated list.
+ * FRONTEND_URL is a CORS allowlist (`http://localhost:5173,https://app.example.com`),
+ * so it must never be interpolated into a link wholesale — only its first entry.
+ */
+const firstUrl = (raw: string | undefined, fallback: string): string => {
+  const candidate = (raw ?? '')
+    .split(',')
+    .map((u) => u.trim().replace(/\/+$/, ''))
+    .find((u) => /^https?:\/\//i.test(u));
+  return candidate || fallback;
 };
 
 export const config = {
@@ -121,7 +134,7 @@ export const config = {
   // Paystack
   //
   // `preferredBank` is the DVA-creation bank slug Paystack expects on
-  // POST /dedicated_account. Test mode REQUIRES `test-bank` — `wema-bank`
+  // POST /dedicated_account. Test mode REQUIRES `test-bank` â€” `wema-bank`
   // returns a 400 with test keys. Live mode accepts `wema-bank` (default),
   // `titan-paystack`, etc. We auto-pick based on the secret-key prefix so
   // local dev with test keys just works; explicit env var overrides if you
@@ -137,17 +150,17 @@ export const config = {
         : 'wema-bank'),
     // DEV/TEST-ONLY fixture switch. When true (or when NODE_ENV=test), failed
     // Paystack name-enquiry (/bank/resolve) and subaccount-creation calls fall
-    // back to a local fixture instead of surfacing the error — lets devs and
+    // back to a local fixture instead of surfacing the error â€” lets devs and
     // CI exercise settlement connect without real bank resolution.
     // NEVER set this in production; see paystack.provider.ts shouldUseBankFixture().
     mockBankResolution: process.env.PAYSTACK_MOCK_BANK_RESOLUTION === 'true',
     
     // Paystack's published pricing. Rules, worked examples and the source URL
-    // for every number live in src/lib/paystack-fees.ts — read that first.
+    // for every number live in src/lib/paystack-fees.ts â€” read that first.
     // These are the defaults as published on paystack.com/pricing and
     // support.paystack.com on 2026-09-03; override via env if Paystack moves.
     fees: {
-      // DVA inflow: 1% per transfer, capped at ₦300, deducted from the
+      // DVA inflow: 1% per transfer, capped at â‚¦300, deducted from the
       // merchant's settlement (the sender is NOT charged extra).
       dvaPct: Number(process.env.PAYSTACK_DVA_FEE_PCT ?? 1),
       dvaCap: Number(process.env.PAYSTACK_DVA_FEE_CAP ?? 300),
@@ -159,8 +172,8 @@ export const config = {
       transferMidMax: Number(process.env.PAYSTACK_TRANSFER_FEE_MID_MAX ?? 50000),
       transferHigh: Number(process.env.PAYSTACK_TRANSFER_FEE_HIGH ?? 50),
 
-      // Nigeria Tax Act 2025 stamp duty, live since 18 Feb 2026: flat ₦50 on
-      // every transfer of ₦10,000+ out of a Paystack balance, on top of the
+      // Nigeria Tax Act 2025 stamp duty, live since 18 Feb 2026: flat â‚¦50 on
+      // every transfer of â‚¦10,000+ out of a Paystack balance, on top of the
       // transfer fee. Set to 0 only if the business is a registered payroll
       // merchant (the only exemption Paystack documents).
       stampDuty: Number(process.env.PAYSTACK_STAMP_DUTY ?? 50),
@@ -216,17 +229,24 @@ export const config = {
     frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
   },
 
-  // App URLs — used in outbound links (WhatsApp messages, emails) where the
+  // App URLs â€” used in outbound links (WhatsApp messages, emails) where the
   // customer (not the SME) is the recipient. Distinct from `cors.frontendUrl`
   // because the SME-facing app and the public-PDF host might diverge in prod
   // (e.g. app.paymytax.com vs api.paymytax.com). Defaults assume single-host
   // dev where the frontend proxies /api to the backend.
   publicUrls: {
     // Base for /api/v1/public/* links (customer hits this directly, no proxy).
-    apiBase:
-      process.env.PUBLIC_API_URL ||
-      process.env.FRONTEND_URL ||
+    apiBase: firstUrl(
+      process.env.PUBLIC_API_URL || process.env.FRONTEND_URL,
       'http://localhost:5173',
+    ),
+    // Base for customer-facing *frontend* routes in outbound links
+    // (/verify-voucher/:id, /reset-password…). Never the API host — those are
+    // React routes. In tests this is rewritten per-suite via PUBLIC_APP_URL.
+    appBase: firstUrl(
+      process.env.PUBLIC_APP_URL || process.env.FRONTEND_URL,
+      'http://localhost:5173',
+    ),
   },
 
   // Tax
@@ -236,7 +256,17 @@ export const config = {
     maxRate: parseFloat(process.env.TAX_MAX_RATE || '50'),
     currency: process.env.TAX_CURRENCY || 'NGN',
     taxAuthority: process.env.TAX_AUTHORITY || 'NRS',
-    useProfiledCalculation: process.env.TAX_USE_PROFILED_CALCULATION !== 'false',
+  },
+
+  // FX Display Rates (display-only; no schema or ledger involvement)
+  fx: {
+    provider: process.env.FX_PROVIDER || 'er-api',
+    displayCurrencies: (process.env.FX_DISPLAY_CURRENCIES || 'USD,GBP,EUR,CAD')
+      .split(',')
+      .map((c) => c.trim().toUpperCase())
+      .filter(Boolean),
+    maxAgeMs: parseInt(process.env.FX_MAX_AGE_MS || '21600000', 10), // 6h
+    timeoutMs: parseInt(process.env.FX_TIMEOUT_MS || '5000', 10),
   },
 
   // Rate Limiting
@@ -261,7 +291,7 @@ export const config = {
     attemptWindowHours: Number(process.env.PIN_ATTEMPT_WINDOW_HOURS ?? 24),
   },
 
-  // Voucher bonus & ledger requests — merchant-funded extra % on top-ups and verification defaults
+  // Voucher bonus & ledger requests â€” merchant-funded extra % on top-ups and verification defaults
   voucher: {
     maxBonusPct: Number(process.env.VOUCHER_MAX_BONUS_PCT ?? 10),
     verificationExpiryHours: Number(process.env.VOUCHER_VERIFICATION_EXPIRY_HOURS ?? 24),

@@ -9,6 +9,8 @@ interface RenderSealOptions {
   isPaid: boolean;
   slipNumber: string;
   generatedAt: Date;
+  /** Statutory basis the assessment was computed under, stated verbatim. */
+  taxBasisText: string;
   colors: {
     hairline: string;
     muted: string;
@@ -28,6 +30,8 @@ export function drawTaxSlipVerificationSeal(options: RenderSealOptions): void {
 
   const fontBold = fonts?.bold || FONT.bold;
   const fontRegular = fonts?.regular || FONT.regular;
+
+  const formulaText = options.taxBasisText;
 
   const remainingSpace = 795 - y;
   if (remainingSpace <= 50) return;
@@ -54,7 +58,7 @@ export function drawTaxSlipVerificationSeal(options: RenderSealOptions): void {
       .font(fontRegular)
       .fontSize(6.5)
       .text(
-        `This Monthly Tax Assessment Slip is electronically compiled and certified by WallXERP by WallX in compliance with the Federal Inland Revenue Service (NRS) SME Taxation Framework. Computations are based on reconciled business records for the specified month. Tax Formula: Tax Payable = 7.5% * (Total Sales - Allowable Expenses). Valid without physical signature under the Electronic Transactions Act. Verification Ref: ${slipNumber}. Generated on ${generatedAt.toISOString()}.`,
+        `This Monthly Tax Assessment Slip is electronically compiled and certified by WallXERP by WallX in compliance with the Federal Inland Revenue Service (NRS) SME Taxation Framework. Computations are based on reconciled business records for the specified month. ${formulaText} Valid without physical signature under the Electronic Transactions Act. Verification Ref: ${slipNumber}. Generated on ${generatedAt.toISOString()}.`,
         left,
         y,
         { width: textWidth, align: 'justify', lineGap: 1.5 }
@@ -128,7 +132,7 @@ export function drawTaxSlipVerificationSeal(options: RenderSealOptions): void {
       .font(fontRegular)
       .fontSize(6.5)
       .text(
-        `This Monthly Tax Assessment Slip is electronically compiled and certified by WallXERP by WallX in compliance with the Federal Inland Revenue Service (NRS) SME Taxation Framework. Computations are based on reconciled business records for the specified month. Tax Formula: Tax Payable = 7.5% * (Total Sales - Allowable Expenses). Valid without physical signature under the Electronic Transactions Act. Verification Ref: ${slipNumber}. Generated on ${generatedAt.toISOString()}.`,
+        `This Monthly Tax Assessment Slip is electronically compiled and certified by WallXERP by WallX in compliance with the Federal Inland Revenue Service (NRS) SME Taxation Framework. Computations are based on reconciled business records for the specified month. ${formulaText} Valid without physical signature under the Electronic Transactions Act. Verification Ref: ${slipNumber}. Generated on ${generatedAt.toISOString()}.`,
         left,
         y,
         { width: pageWidth, align: 'justify', lineGap: 1.5 }

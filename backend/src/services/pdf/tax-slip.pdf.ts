@@ -66,6 +66,10 @@ export interface TaxSlipData {
     taxRate: number;
     taxPayable: number;
     profitMargin?: number | null;
+    /** What the monthly charge settles — resolved from the business tax policy. */
+    taxBasis: 'vat' | 'cit-provision' | 'pit-provision';
+    /** True when no completed tax profile exists; the assessment cannot be stated. */
+    needsManualReview?: boolean;
   };
   payment?: {
     paymentReference: string;
@@ -77,11 +81,33 @@ export interface TaxSlipData {
 }
 
 /**
+ * The statutory basis this assessment was computed under. This is the only
+ * place the slip is allowed to describe the computation — it must match the
+ * engine, not the retired "rate × gross profit" shortcut.
+ */
+function assessmentBasisStatement(assessment: TaxSlipData['assessment']): string {
+  if (assessment.needsManualReview) {
+    return 'Pending tax-profile review — no statutory rate has been applied';
+  }
+  if (assessment.taxBasis === 'vat') {
+    return `Net VAT = Output VAT − Input VAT (${assessment.taxRate}% standard rate)`;
+  }
+  if (assessment.taxBasis === 'pit-provision') {
+    return 'VAT-exempt — monthly remittance is ₦0; PIT is assessed annually by the State IRS';
+  }
+  return 'VAT-exempt — monthly remittance is ₦0; CIT is assessed annually';
+}
+
+/**
  * Builds an official, publication-quality 1-page A4 PDF Monthly Tax Assessment Slip.
  * Crafted with sharp 90° architectural geometry and Montserrat typography.
  */
 export async function buildTaxSlipPdf(data: TaxSlipData): Promise<Buffer> {
   const logoBuffer = data.business.logoUrl ? await fetchLogoForPdf(data.business.logoUrl) : null;
+  const basisStatement = assessmentBasisStatement(data.assessment);
+  const needsReview = Boolean(data.assessment.needsManualReview);
+  const vatBasis = !needsReview && data.assessment.taxBasis === 'vat';
+  const pitBasis = !needsReview && data.assessment.taxBasis === 'pit-provision';
 
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
@@ -271,7 +297,7 @@ export async function buildTaxSlipPdf(data: TaxSlipData): Promise<Buffer> {
 
     const rightDetails = [
       `Tax Jurisdiction: Nigeria (NRS)`,
-      `Statutory Formula: 7.5% * (Sales - Expenses)`,
+      `Assessment Basis: ${basisStatement}`,
       `Assessment Status: ${isPaid ? 'Paid & Compliant' : isFinalized ? 'Finalized' : 'Draft Assessment'}`,
       `Due Date: 21st of ${new Date(new Date(data.taxMonth).setMonth(new Date(data.taxMonth).getMonth() + 1)).toLocaleDateString('en-NG', { month: 'short', year: 'numeric' })}`,
     ];
@@ -327,18 +353,40 @@ export async function buildTaxSlipPdf(data: TaxSlipData): Promise<Buffer> {
         isNegative: true,
       },
       {
-        title: 'Gross Profit (Taxable Surplus)',
-        subtitle: 'Net assessment base subject to statutory SME tax',
-        basis: 'Taxable Income (A - B)',
+        title: needsReview
+          ? 'Gross Profit (Reference)'
+          : vatBasis
+          ? 'Gross Profit (Reference)'
+          : 'Gross Profit (Annual Income-Tax Base)',
+        subtitle: needsReview
+          ? 'Complete the tax profile to determine the assessment basis'
+          : vatBasis
+          ? 'Not the VAT base — VAT is charged on taxable sales'
+          : 'CIT/PIT is assessed annually, not monthly',
+        basis: 'Sales − Expenses',
         amount: formatMoney(data.assessment.grossProfit),
         isBold: true,
       },
-      {
-        title: 'Statutory SME Tax Rate',
-        subtitle: 'Federal Inland Revenue Service prescribed SME rate',
-        basis: 'Fixed Statutory Rate',
-        amount: `${data.assessment.taxRate.toFixed(2)}%`,
-      },
+      needsReview
+        ? {
+            title: 'Statutory Rate',
+            subtitle: 'Tax profile incomplete',
+            basis: 'Not determined',
+            amount: '—',
+          }
+        : vatBasis
+        ? {
+            title: 'Standard VAT Rate',
+            subtitle: 'Applied to taxable sales and VAT-bearing expenses',
+            basis: 'Statutory VAT Rate',
+            amount: `${data.assessment.taxRate}%`,
+          }
+        : {
+            title: 'Monthly VAT',
+            subtitle: 'VAT is not chargeable on this tax profile',
+            basis: 'NTA 2025 — VAT exemption',
+            amount: formatMoney(0),
+          },
     ];
 
     rows.forEach((row, i) => {
@@ -399,13 +447,33 @@ export async function buildTaxSlipPdf(data: TaxSlipData): Promise<Buffer> {
       .fillColor(COLORS.accentDark)
       .font(fonts.bold)
       .fontSize(9.5)
-      .text('TOTAL TAX PAYABLE / ASSESSED', colItemX, y + 11, { characterSpacing: 0.3 });
+      .text(
+        needsReview
+          ? 'ASSESSMENT PENDING — TAX PROFILE REQUIRED'
+          : vatBasis
+          ? 'NET VAT PAYABLE — MONTHLY REMITTANCE'
+          : 'MONTHLY REMITTANCE — NO VAT DUE',
+        colItemX,
+        y + 11,
+        { characterSpacing: 0.3 }
+      );
 
     doc
       .fillColor(COLORS.muted)
       .font(fonts.regular)
       .fontSize(7.5)
-      .text('Statutory obligation due to Federal Inland Revenue Service (NRS)', colItemX, y + 24);
+      .text(
+        needsReview
+          ? 'Complete the Tax Profile Quiz before this period can be remitted to the NRS.'
+          : vatBasis
+          ? 'Net VAT due — output VAT minus input VAT'
+          : pitBasis
+          ? 'VAT-exempt. Personal Income Tax is assessed annually with your State IRS.'
+          : 'VAT-exempt. Corporate Income Tax and Development Levy are assessed annually.',
+        colItemX,
+        y + 24,
+        { width: PAGE_WIDTH - 240 }
+      );
 
     const payableW = 200;
     const payableX = RIGHT - INNER_PAD - payableW;
@@ -486,6 +554,7 @@ export async function buildTaxSlipPdf(data: TaxSlipData): Promise<Buffer> {
       isPaid,
       slipNumber: data.slipNumber,
       generatedAt: data.generatedAt,
+      taxBasisText: `Tax Basis: ${basisStatement}.`,
       colors: {
         hairline: COLORS.hairline,
         muted: COLORS.muted,

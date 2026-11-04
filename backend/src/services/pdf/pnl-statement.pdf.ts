@@ -57,6 +57,10 @@ export interface PnlStatementPdfOptions {
     taxRate: number;
     taxPayable: number;
     reportStatus: 'Paid & Locked' | 'Finalized' | 'Calculated (Draft)' | 'Live Snapshot';
+    /** What the monthly charge settles — resolved from the business tax policy. */
+    taxBasis: 'vat' | 'cit-provision' | 'pit-provision';
+    /** True when no completed tax profile exists; no statutory rate applies. */
+    needsManualReview?: boolean;
   };
 }
 
@@ -405,7 +409,10 @@ export async function buildPnlStatementPdf(options: PnlStatementPdfOptions): Pro
             ]
           : []),
         {
-          label: 'Gross Profit (Taxable Base = Revenue - Deductible Expenses)',
+          label:
+            summary.taxBasis === 'vat'
+              ? 'Gross Profit (Revenue - Deductible Expenses)'
+              : 'Gross Profit (Annual Income-Tax Base = Revenue - Deductible Expenses)',
           value: formatMoney(summary.grossProfit),
           bold: true,
           highlight: true,
@@ -415,7 +422,11 @@ export async function buildPnlStatementPdf(options: PnlStatementPdfOptions): Pro
           value: `${summary.profitMargin.toFixed(2)}%`,
         },
         {
-          label: `Estimated NRS Tax Payable (${summary.taxRate}% of Gross Profit)`,
+          label: summary.needsManualReview
+            ? 'Monthly Tax Payable (Pending Review — tax profile incomplete)'
+            : summary.taxBasis === 'vat'
+            ? 'Net VAT Payable (Output VAT − Input VAT)'
+            : 'Monthly Remittance (VAT-exempt)',
           value: formatMoney(summary.taxPayable),
           bold: true,
         },

@@ -926,13 +926,15 @@ export async function topUpCard(
   businessId: string,
   customerId: string,
   input: TopUpCardInput,
-  opts?: { direct?: boolean }
+  opts?: { direct?: boolean; origin?: string | null }
 ) {
   const { role } = await verifyBusinessAccess(userId, businessId, 'customers.manage');
 
   if (role === 'sales_staff') {
     const { createTopUpRequest } = await import('@/services/voucher-ledger-request.service');
-    const request = await createTopUpRequest(userId, businessId, customerId, input);
+    const request = await createTopUpRequest(userId, businessId, customerId, input, {
+      origin: opts?.origin,
+    });
     return {
       request,
       status: 'pending',

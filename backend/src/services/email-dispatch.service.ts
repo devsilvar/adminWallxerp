@@ -105,6 +105,12 @@ import {
   generateBroadcastHtml,
   generateBroadcastText,
 } from '@/lib/email/templates/broadcast';
+import {
+  renderMarketplaceProductApprovedEmail,
+} from '@/lib/email/templates/marketplace-product-approved';
+import {
+  renderMarketplaceProductRejectedEmail,
+} from '@/lib/email/templates/marketplace-product-rejected';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -1898,6 +1904,104 @@ export async function dispatchVoucherAdjustmentNotificationEmail(
 }
 
 
+// ─── 25. Marketplace Product Approved ───────────────────────────
 
+export async function dispatchProductApprovedEmail(
+  productId: string
+): Promise<void> {
+  try {
+    const product = await prisma.marketplaceProduct.findUnique({
+      where: { id: productId },
+      include: {
+        business: {
+          select: {
+            businessName: true,
+            user: { select: { email: true, fullName: true } },
+          },
+        },
+      },
+    });
 
+    if (!product || !product.business.user?.email) return;
 
+    const baseUrl = getFrontendBaseUrl();
+    const recipientEmail = product.business.user.email;
+    const recipientName =
+      product.business.user.fullName || product.business.businessName;
+
+    const emailContent = renderMarketplaceProductApprovedEmail({
+      recipientName,
+      businessName: product.business.businessName,
+      productName: product.name,
+      category: product.category,
+      priceFormatted: formatNaira(Number(product.price)),
+      productSlug: product.slug,
+      productUrl: `${baseUrl}/marketplace/products/${product.slug}`,
+      dashboardLink: `${baseUrl}/inventory`,
+      approvalDate: formatHumanDateTime(product.approvedAt || new Date()),
+    });
+
+    await sendEmail({
+      to: recipientEmail,
+      subject: emailContent.subject,
+      html: emailContent.html,
+      text: emailContent.text,
+    });
+  } catch (err) {
+    logger.warn('Failed to dispatch marketplace product approved email (non-critical)', {
+      productId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// ─── 26. Marketplace Product Rejected ───────────────────────────
+
+export async function dispatchProductRejectedEmail(
+  productId: string,
+  reason: string
+): Promise<void> {
+  try {
+    const product = await prisma.marketplaceProduct.findUnique({
+      where: { id: productId },
+      include: {
+        business: {
+          select: {
+            businessName: true,
+            user: { select: { email: true, fullName: true } },
+          },
+        },
+      },
+    });
+
+    if (!product || !product.business.user?.email) return;
+
+    const baseUrl = getFrontendBaseUrl();
+    const recipientEmail = product.business.user.email;
+    const recipientName =
+      product.business.user.fullName || product.business.businessName;
+
+    const emailContent = renderMarketplaceProductRejectedEmail({
+      recipientName,
+      businessName: product.business.businessName,
+      productName: product.name,
+      category: product.category,
+      priceFormatted: formatNaira(Number(product.price)),
+      rejectionReason: reason,
+      dashboardLink: `${baseUrl}/inventory`,
+      reviewDate: formatHumanDateTime(),
+    });
+
+    await sendEmail({
+      to: recipientEmail,
+      subject: emailContent.subject,
+      html: emailContent.html,
+      text: emailContent.text,
+    });
+  } catch (err) {
+    logger.warn('Failed to dispatch marketplace product rejected email (non-critical)', {
+      productId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+}

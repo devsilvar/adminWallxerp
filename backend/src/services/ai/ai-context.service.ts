@@ -1,6 +1,8 @@
 import prisma from '@/lib/prisma';
 import { verifyBusinessAccess } from '@/lib/ownership';
 import { toNumber, TAXABLE_SALES_WHERE } from '@/shared/helpers';
+import { calculateTaxWithStrategy } from '@/services/tax/tax-calculation-strategy';
+import { resolveTaxPolicy } from '@/services/tax/tax-policy.service';
 
 /**
  * Financial domains the calling member is allowed to see. `ai.use` only grants
@@ -34,6 +36,8 @@ export interface BusinessFinancialContext {
     isOperatingLoss: boolean | null;
     taxPayable: number | null;
     taxRatePercent: number | null;
+    vatChargeable: boolean | null;
+    vatReason: string | null;
     isFinalized: boolean | null;
     paymentStatus: string | null;
   };
@@ -184,7 +188,32 @@ export async function buildBusinessFinancialContext(
   const rawExpenses = scope.expenses ? toNumber(expenseAgg._sum.amount) : null;
   const rawGrossProfit = scope.sales && scope.expenses && rawExpenses !== null ? rawSales - rawExpenses : null;
   const rawMargin = scope.sales && scope.expenses && rawGrossProfit !== null && rawSales > 0 ? (rawGrossProfit / rawSales) * 100 : null;
-  const taxRate = currentReport ? toNumber(currentReport.taxRate) : 7.5;
+
+  let computedTaxRate = currentReport ? toNumber(currentReport.taxRate) : 0;
+  let computedTaxPayable = currentReport ? toNumber(currentReport.taxPayable) : 0;
+
+  if (scope.tax) {
+    if (currentReport) {
+      computedTaxRate = toNumber(currentReport.taxRate);
+      computedTaxPayable = toNumber(currentReport.taxPayable);
+    } else {
+      const gross = rawGrossProfit !== null ? Math.max(0, rawGrossProfit) : 0;
+      const strategyResult = await calculateTaxWithStrategy({
+        businessId,
+        month: now.getUTCMonth() + 1,
+        year: now.getUTCFullYear(),
+        totalSales: rawSales,
+        totalExpenses: rawExpenses ?? 0,
+        grossProfit: gross,
+      });
+      computedTaxRate = strategyResult.taxRate;
+      computedTaxPayable = strategyResult.taxPayable;
+    }
+  }
+
+  // Statutory classification for this business. Without it the model sees a
+  // rate with no context and advises VAT to merchants who cannot charge it.
+  const taxPolicy = scope.tax ? await resolveTaxPolicy(businessId) : null;
 
   // Top expense drivers with % share
   const topExpenseDrivers = scope.expenses && rawExpenses !== null
@@ -319,9 +348,11 @@ export async function buildBusinessFinancialContext(
       profitMarginPercent: scope.expenses && rawMargin !== null ? Number(rawMargin.toFixed(1)) : null,
       isOperatingLoss: scope.expenses && rawGrossProfit !== null ? rawGrossProfit < 0 : null,
       taxPayable: scope.tax && rawGrossProfit !== null
-        ? Number(((rawGrossProfit >= 0 ? rawGrossProfit : 0) * (taxRate / 100)).toFixed(2))
+        ? Number(computedTaxPayable.toFixed(2))
         : null,
-      taxRatePercent: scope.tax ? taxRate : null,
+      taxRatePercent: scope.tax ? computedTaxRate : null,
+      vatChargeable: scope.tax ? taxPolicy?.vat.chargeable ?? null : null,
+      vatReason: scope.tax ? taxPolicy?.vat.reason ?? null : null,
       isFinalized: scope.tax ? currentReport?.isFinalized ?? false : null,
       paymentStatus: scope.tax ? currentReport?.paymentStatus ?? 'pending' : null,
     },
@@ -348,10 +379,15 @@ export async function buildBusinessFinancialContext(
     );
   }
   if (scope.tax) {
-    const payable = rawGrossProfit !== null && rawGrossProfit >= 0 ? rawGrossProfit * (taxRate / 100) : 0;
+    const vatLine = taxPolicy
+      ? taxPolicy.vat.chargeable
+        ? `VAT: chargeable at ${taxPolicy.vat.rate}%`
+        : `VAT: not chargeable on this business's tax profile${taxPolicy.vat.reason ? ` (${taxPolicy.vat.reason})` : ''}`
+      : `VAT: unknown`;
     currentMonthLines.push(
-      `Tax Rate: ${taxRate}% (NRS Standard: 7.5% of Gross Profit)`,
-      `Estimated Tax Payable: ${naira(payable, 2)}`,
+      vatLine,
+      `Applicable Rate: ${computedTaxRate}%`,
+      `Estimated Tax Payable: ${naira(computedTaxPayable, 2)}`,
       `Report Status: ${currentReport?.isFinalized ? 'Finalized' : 'Draft / Live In-Progress'}`,
       `Payment Status: ${currentReport?.paymentStatus ?? 'Pending'}`
     );

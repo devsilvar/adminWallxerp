@@ -222,7 +222,7 @@ export default function AdminUserDetail() {
               {user.isVerified ? 'Email Verified' : 'Email Unverified'}
             </StatusPill>
             <StatusPill tone={user.autoPayoutEnabled ? 'success' : 'neutral'}>
-              {user.autoPayoutEnabled ? '⚡ Auto Transfers' : '🔒 Manual Review'}
+              {user.autoPayoutEnabled ? 'âš¡ Auto Transfers' : 'ðŸ”’ Manual Review'}
             </StatusPill>
             <StatusPill tone={getPlanBadge(user.subscriptionTier).tone}>
               {getPlanBadge(user.subscriptionTier).label}
@@ -231,7 +231,7 @@ export default function AdminUserDetail() {
         </div>
       </div>
 
-      {/* Top Action Command Bar — Subscriptions desk pattern */}
+      {/* Top Action Command Bar â€” Subscriptions desk pattern */}
       <Panel className='p-3 bg-panel-subtle border-hairline-strong shadow-2xs rounded-xl'>
         <div className='flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3'>
           <div className='flex items-center gap-2 text-xs text-ink-muted'>
@@ -304,7 +304,7 @@ export default function AdminUserDetail() {
         </div>
       </Panel>
 
-      {/* KPI Overview Grid — Subscriptions desk pattern */}
+      {/* KPI Overview Grid â€” Subscriptions desk pattern */}
       <div className='grid grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-4'>
         {/* Wallet Balance Card */}
         <Panel className='p-4 space-y-2 shadow-2xs rounded-xl'>
@@ -356,7 +356,7 @@ export default function AdminUserDetail() {
             {user.businesses.length}
           </div>
           <div className='text-[11px] text-ink-subtle'>
-            {totalSalesCount} sales · {totalInvoicesCount} invoices recorded
+            {totalSalesCount} sales Â· {totalInvoicesCount} invoices recorded
           </div>
         </Panel>
 
@@ -379,6 +379,104 @@ export default function AdminUserDetail() {
       <div className='grid grid-cols-1 gap-6 lg:grid-cols-3 items-start'>
         {/* Left Column: Businesses & Operational Information */}
         <div className='lg:col-span-2 space-y-6'>
+          {/* Wallet Breakdown Panel */}
+          {user.walletBreakdown && user.walletBreakdown.totalBalance > 0 && (
+            <Panel>
+              <PanelHeader
+                title='Wallet Breakdown by Business'
+                hint='Shows how each business contributes to the pooled wallet balance.'
+              />
+              <div className='p-4 space-y-4'>
+                {/* Summary Stats */}
+                <div className='grid grid-cols-3 gap-3 p-3 bg-panel-subtle rounded-lg border border-hairline'>
+                  <div>
+                    <div className='text-[10px] text-ink-muted font-medium uppercase tracking-wide'>Total Balance</div>
+                    <div className='text-sm font-bold font-mono text-ink mt-0.5'>
+                      {formatNaira(user.walletBreakdown.totalBalance)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className='text-[10px] text-ink-muted font-medium uppercase tracking-wide'>Locked</div>
+                    <div className='text-sm font-bold font-mono text-amber-700 mt-0.5'>
+                      {formatNaira(user.walletBreakdown.lockedBalance)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className='text-[10px] text-ink-muted font-medium uppercase tracking-wide'>Available</div>
+                    <div className='text-sm font-bold font-mono text-success-700 mt-0.5'>
+                      {formatNaira(user.walletBreakdown.availableBalance)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Per-Business Breakdown */}
+                <div className='space-y-2'>
+                  {user.walletBreakdown.businesses.map((biz) => (
+                    <div key={biz.businessId} className='p-3 border border-hairline rounded-lg hover:bg-panel-subtle/50 transition-colors'>
+                      <div className='flex items-start justify-between gap-3 mb-2'>
+                        <div className='flex items-center gap-2 min-w-0'>
+                          <Building2 className='h-4 w-4 text-primary-600 shrink-0' />
+                          <div className='min-w-0'>
+                            <div className='text-sm font-semibold text-ink truncate'>{biz.businessName}</div>
+                            <div className='text-[11px] text-ink-muted'>
+                              {biz.transactionCount} transaction{biz.transactionCount !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                        </div>
+                        <div className='text-right shrink-0'>
+                          <div className={`text-sm font-bold font-mono ${biz.netContribution >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                            {biz.netContribution >= 0 ? '+' : ''}{formatNaira(biz.netContribution)}
+                          </div>
+                          <div className='text-[10px] text-ink-subtle font-medium'>
+                            {biz.percentageOfTotal.toFixed(1)}% of total
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* In/Out breakdown */}
+                      <div className='flex items-center gap-4 text-[11px] text-ink-muted pl-6'>
+                        <span className='flex items-center gap-1'>
+                          <span className='text-success-600'>â†“</span> In: {formatNaira(biz.creditTotal)}
+                        </span>
+                        <span className='flex items-center gap-1'>
+                          <span className='text-danger-600'>â†‘</span> Out: {formatNaira(biz.debitTotal)}
+                        </span>
+                      </div>
+
+                      {/* Progress bar */}
+                      <div className='mt-2 h-1.5 bg-panel-subtle rounded-full overflow-hidden'>
+                        <div
+                          className='h-full bg-primary-600 rounded-full transition-all'
+                          style={{ width: `${Math.min(100, Math.max(0, biz.percentageOfTotal))}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Unattributed Balance */}
+                  {user.walletBreakdown.unattributedBalance !== 0 && (
+                    <div className='p-3 border border-dashed border-hairline rounded-lg bg-panel-subtle/30'>
+                      <div className='flex items-start justify-between gap-3'>
+                        <div className='flex items-center gap-2'>
+                          <Wallet className='h-4 w-4 text-ink-muted shrink-0' />
+                          <div>
+                            <div className='text-sm font-medium text-ink-muted'>Not tied to a business</div>
+                            <div className='text-[11px] text-ink-subtle'>
+                              Includes deleted businesses, legacy transactions, or reconciliations
+                            </div>
+                          </div>
+                        </div>
+                        <div className='text-sm font-bold font-mono text-ink-muted shrink-0'>
+                          {formatNaira(user.walletBreakdown.unattributedBalance)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Panel>
+          )}
+
           {/* Registered Businesses Section */}
           <Panel>
             <PanelHeader
@@ -404,7 +502,7 @@ export default function AdminUserDetail() {
                         <div>
                           <h3 className='text-sm font-bold text-ink'>{b.businessName}</h3>
                           <p className='text-xs text-ink-muted'>
-                            Owned by <span className='font-medium text-ink'>{b.ownerName}</span> · Registered {formatDate(b.createdAt)}
+                            Owned by <span className='font-medium text-ink'>{b.ownerName}</span> Â· Registered {formatDate(b.createdAt)}
                           </p>
                         </div>
                       </div>
@@ -533,7 +631,7 @@ export default function AdminUserDetail() {
                         </span>
                       </div>
                       <p className='text-[11px] text-ink-muted'>
-                        Cycle: <span className='capitalize font-medium'>{sub.billingCycle}</span> · Submitted {formatDate(sub.createdAt)}
+                        Cycle: <span className='capitalize font-medium'>{sub.billingCycle}</span> Â· Submitted {formatDate(sub.createdAt)}
                       </p>
                       {sub.notes && (
                         <p className='text-[11px] text-ink-subtle italic'>
@@ -687,7 +785,7 @@ export default function AdminUserDetail() {
               <div className='flex items-center justify-between'>
                 <span className='text-ink-muted text-[11px]'>Settlement Mode</span>
                 <StatusPill tone={user.autoPayoutEnabled ? 'success' : 'neutral'}>
-                  {user.autoPayoutEnabled ? '⚡ Automatic Transfers' : '🔒 Manual Review'}
+                  {user.autoPayoutEnabled ? 'âš¡ Automatic Transfers' : 'ðŸ”’ Manual Review'}
                 </StatusPill>
               </div>
 

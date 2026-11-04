@@ -152,7 +152,7 @@ describe('PayoutService Unit Suite', () => {
       expect(prisma.settlementPayout.updateMany).toHaveBeenCalledWith({
         // Narrowed from ['pending', 'processing'] by QA-01: a payout already handed
         // to Paystack cannot be recalled, so releasing its funds would double-spend.
-        where: { id: 'payout-123', status: 'pending' },
+        where: { id: 'payout-123', OR: [{ status: 'pending' }, { status: 'failed', needsReconciliation: true }] },
         data: expect.objectContaining({
           status: 'failed',
           failureReason: 'Rejected by admin: Suspicious activity on account',

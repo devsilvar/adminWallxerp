@@ -7,6 +7,9 @@ jest.mock('@/lib/prisma', () => ({
     businessTaxProfile: {
       findUnique: jest.fn(),
     },
+    expense: {
+      groupBy: jest.fn(),
+    },
   },
 }));
 
@@ -20,7 +23,7 @@ jest.mock('@/lib/logger', () => ({
 }));
 
 import prisma from '@/lib/prisma';
-import { config } from '@/config';
+import logger from '@/lib/logger';
 import { calculateTaxWithStrategy } from '@/services/tax/tax-calculation-strategy';
 import type { TaxProfileConfiguration } from '@/shared/tax-constants';
 
@@ -31,13 +34,13 @@ describe('Tax Calculation Strategy Dispatcher', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    config.tax.useProfiledCalculation = false;
-    config.tax.defaultRate = 7.5;
+    // No category breakdown by default → Input VAT falls back to total expenses.
+    (prisma.expense.groupBy as any).mockResolvedValue([]);
   });
 
-  describe('Legacy Parity (Feature flag OFF or no completed profile)', () => {
-    it('should calculate bit-exact legacy formula when flag is OFF', async () => {
-      config.tax.useProfiledCalculation = false;
+  describe('No completed tax profile → REVIEW_REQUIRED, never a flat-rate estimate', () => {
+    it('returns zero payable and a manual-review flag when the business has no profile', async () => {
+      (prisma.businessTaxProfile.findUnique as any).mockResolvedValue(null);
 
       const result = await calculateTaxWithStrategy({
         businessId,
@@ -48,68 +51,38 @@ describe('Tax Calculation Strategy Dispatcher', () => {
         grossProfit: 1000000,
       });
 
-      expect(result.strategyUsed).toBe('LEGACY');
-      expect(result.taxRate).toBe(7.5);
-      expect(result.grossProfit).toBe(1000000);
-      expect(result.taxPayable).toBe(75000); // 1,000,000 * 7.5% = 75,000
-      expect(result.breakdown?.totalPayable).toBe(75000);
-    });
-
-    it('should respect taxRateOverride in legacy mode', async () => {
-      config.tax.useProfiledCalculation = false;
-
-      const result = await calculateTaxWithStrategy({
-        businessId,
-        month,
-        year,
-        totalSales: 2000000,
-        totalExpenses: 1000000,
-        grossProfit: 1000000,
-        taxRateOverride: 10,
-      });
-
-      expect(result.strategyUsed).toBe('LEGACY');
-      expect(result.taxRate).toBe(10);
-      expect(result.taxPayable).toBe(100000);
-    });
-
-    it('should return 0 tax payable when gross profit is zero or negative', async () => {
-      config.tax.useProfiledCalculation = false;
-
-      const result = await calculateTaxWithStrategy({
-        businessId,
-        month,
-        year,
-        totalSales: 500000,
-        totalExpenses: 800000,
-        grossProfit: 0,
-      });
-
+      expect(result.strategyUsed).toBe('REVIEW_REQUIRED');
+      expect(result.needsManualReview).toBe(true);
       expect(result.taxPayable).toBe(0);
-      expect(result.strategyUsed).toBe('LEGACY');
+      expect(result.taxRate).toBe(0);
+      expect(result.reviewReason).toContain('Tax Profile Quiz');
+      // The retired legacy formula must not resurface
+      expect(result.taxPayable).not.toBe(75000);
     });
 
-    it('should fall back to legacy when flag is ON but profile is null in DB', async () => {
-      config.tax.useProfiledCalculation = true;
-      (prisma.businessTaxProfile.findUnique as any).mockResolvedValue(null);
-
-      const result = await calculateTaxWithStrategy({
-        businessId,
-        month,
-        year,
-        totalSales: 2000000,
-        totalExpenses: 1000000,
-        grossProfit: 1000000,
-      });
-
-      expect(result.strategyUsed).toBe('LEGACY');
-      expect(result.taxPayable).toBe(75000);
-    });
-
-    it('should fall back to legacy when profile exists but completedAt is null', async () => {
-      config.tax.useProfiledCalculation = true;
+    it('treats a profile with no completedAt as incomplete', async () => {
       (prisma.businessTaxProfile.findUnique as any).mockResolvedValue({
         completedAt: null,
+        computedConfig: { vatExempt: true },
+      });
+
+      const result = await calculateTaxWithStrategy({
+        businessId,
+        month,
+        year,
+        totalSales: 1000000,
+        totalExpenses: 200000,
+        grossProfit: 800000,
+      });
+
+      expect(result.strategyUsed).toBe('REVIEW_REQUIRED');
+      expect(result.taxPayable).toBe(0);
+      expect(result.taxPayable).not.toBe(60000); // 800,000 × 7.5%
+    });
+
+    it('treats an empty computedConfig as incomplete', async () => {
+      (prisma.businessTaxProfile.findUnique as any).mockResolvedValue({
+        completedAt: new Date(),
         computedConfig: {},
       });
 
@@ -122,16 +95,34 @@ describe('Tax Calculation Strategy Dispatcher', () => {
         grossProfit: 800000,
       });
 
-      expect(result.strategyUsed).toBe('LEGACY');
-      expect(result.taxPayable).toBe(60000); // 800,000 * 7.5%
+      expect(result.strategyUsed).toBe('REVIEW_REQUIRED');
+      expect(result.taxPayable).toBe(0);
+    });
+
+    it('ignores taxRateOverride instead of applying it', async () => {
+      (prisma.businessTaxProfile.findUnique as any).mockResolvedValue(null);
+
+      const result = await calculateTaxWithStrategy({
+        businessId,
+        month,
+        year,
+        totalSales: 2000000,
+        totalExpenses: 1000000,
+        grossProfit: 1000000,
+        taxRateOverride: 10,
+      });
+
+      expect(result.strategyUsed).toBe('REVIEW_REQUIRED');
+      expect(result.taxPayable).toBe(0);
+      expect(result.taxRate).toBe(0);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('taxRateOverride'),
+        expect.objectContaining({ taxRateOverride: 10 })
+      );
     });
   });
 
-  describe('Profiled Calculation (Feature flag ON and completed profile)', () => {
-    beforeEach(() => {
-      config.tax.useProfiledCalculation = true;
-    });
-
+  describe('Profiled Calculation (completed profile)', () => {
     it('Scenario 1: FTZ Exempt business -> ₦0 tax payable, 0% rate', async () => {
       const ftzConfig: TaxProfileConfiguration = {
         isFtzExempt: true,
@@ -301,6 +292,44 @@ describe('Tax Calculation Strategy Dispatcher', () => {
       expect(result.advisory?.note).toContain('Personal Income Tax (PIT)');
       // Gross profit ₦1.5M: 800k @ 0% + 700k @ 15% = 105,000
       expect(result.advisory?.annualPitEstimate).toBe(105000);
+    });
+
+    it('claims Input VAT only on VAT-bearing categories, never on salaries (TAX-09)', async () => {
+      const vatSmallCoConfig: TaxProfileConfiguration = {
+        isFtzExempt: false,
+        vatExempt: false,
+        citRate: 0,
+        incomeTaxType: 'CIT',
+        isCorporate: true,
+        requiresWhtDeduction: false,
+        requiresPayrollTax: true,
+        annualTurnoverBand: 'FROM_25M_TO_100M',
+        obligations: [],
+      };
+
+      // ₦215,000 deductible, of which ₦100,000 is salaries (no VAT).
+      (prisma.expense.groupBy as any).mockResolvedValue([
+        { category: 'salary', _sum: { amount: 100000 } },
+        { category: 'inventory', _sum: { amount: 115000 } },
+      ]);
+
+      const result = await calculateTaxWithStrategy({
+        businessId,
+        month,
+        year,
+        totalSales: 1075000,
+        totalExpenses: 215000,
+        grossProfit: 860000,
+        profile: {
+          completedAt: new Date(),
+          computedConfig: vatSmallCoConfig,
+        },
+      });
+
+      // Output VAT 75,000 − Input VAT on 115,000 only (8,023.26) = 66,976.74
+      expect(result.advisory?.outputVat).toBe(75000);
+      expect(result.advisory?.inputVat).toBeCloseTo(8023.26, 2);
+      expect(result.taxPayable).toBeCloseTo(66976.74, 2);
     });
   });
 });

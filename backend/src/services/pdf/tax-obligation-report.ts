@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { config } from '@/config';
 import { registerBrandFonts } from './receipt-common.pdf';
 import { QUIZ_LABELS } from '@/shared/tax-quiz-engine';
 import type { QuizAnswers, TaxProfileConfiguration } from '@/shared/tax-constants';
@@ -134,7 +135,7 @@ export async function generateTaxObligationReport(data: ObligationReportData): P
     const c2X = LEFT + colWidth + 6;
     doc.rect(c2X, y, colWidth, 60).fillAndStroke(COLORS.panel, COLORS.panelBorder);
     doc.fillColor(COLORS.muted).font(fonts.medium).fontSize(7.5).text('VALUE ADDED TAX (VAT)', c2X + 8, y + 8);
-    const vatTitle = data.config.vatExempt ? 'EXEMPT (0%)' : '7.5% STANDARD';
+    const vatTitle = data.config.vatExempt ? 'EXEMPT (0%)' : `${config.tax.defaultRate}% STANDARD`;
     const vatColor = data.config.vatExempt ? COLORS.success : COLORS.warning;
     doc.fillColor(vatColor).font(fonts.bold).fontSize(10).text(vatTitle, c2X + 8, y + 20);
     const vatSub = data.config.vatExempt
@@ -167,11 +168,13 @@ export async function generateTaxObligationReport(data: ObligationReportData): P
     const obligations = [
       {
         area: 'Value Added Tax',
-        badge: data.config.vatExempt ? '[OK] EXEMPT' : '[ACTION] COLLECT 7.5%',
+        badge: data.config.vatExempt
+          ? '[OK] EXEMPT'
+          : `[ACTION] COLLECT ${config.tax.defaultRate}%`,
         badgeColor: data.config.vatExempt ? COLORS.success : COLORS.warning,
         desc: data.config.vatExempt
           ? 'You do not charge VAT on invoices. No monthly VAT return is required under NTA 2025.'
-          : 'You must charge 7.5% VAT on all taxable sales and remit net VAT monthly by the 21st.',
+          : `You must charge ${config.tax.defaultRate}% VAT on all taxable sales and remit net VAT monthly by the 21st.`,
       },
       {
         area: 'Employee Payroll (PAYE)',

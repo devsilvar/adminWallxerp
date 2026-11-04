@@ -19,6 +19,7 @@ import { emitToAdmins } from '@/services/admin/realtime-admin.helper';
  */
 export async function adminListWithdrawalRequests(query: {
   status?: 'pending' | 'processing' | 'completed' | 'failed';
+  needsReconciliation?: boolean;
   search?: string;
   page?: number;
   limit?: number;
@@ -29,6 +30,9 @@ export async function adminListWithdrawalRequests(query: {
   const where: any = {};
   if (query.status) {
     where.status = query.status;
+  }
+  if (query.needsReconciliation !== undefined) {
+    where.needsReconciliation = query.needsReconciliation;
   }
   if (query.search && query.search.trim()) {
     const s = query.search.trim();
@@ -275,7 +279,7 @@ export async function adminApproveWithdrawal(adminUserId: string, payoutId: stri
         type: 'withdrawal_status_changed',
         withdrawalId: payout.id,
         businessId: payout.businessId,
-        businessName: payout.business.businessName,
+        businessName: payout.business?.businessName ?? 'Unknown Business',
         status: 'completed',
         amount: toNumber(payout.amount),
         timestamp: new Date().toISOString(),
@@ -529,6 +533,7 @@ export async function adminRejectWithdrawal(
       fee: true,
       status: true,
       transferReference: true,
+      failureReason: true,
       business: { select: { userId: true, businessName: true } },
     },
   });
@@ -549,10 +554,18 @@ export async function adminRejectWithdrawal(
   }
 
   const res = await prisma.settlementPayout.updateMany({
-    where: { id: payout.id, status: 'pending' },
+    where: {
+      id: payout.id,
+      OR: [
+        { status: 'pending' },
+        { status: 'failed', needsReconciliation: true },
+      ],
+    },
     data: {
       status: 'failed',
-      failureReason: `Rejected by admin: ${reason}`,
+      failureReason: payout.status === 'failed' ? (payout.failureReason || `Dispute resolved / funds released by admin: ${reason}`) : `Rejected by admin: ${reason}`,
+      needsReconciliation: false,
+      reconciliationReason: `Dispute resolved by admin (funds released): ${reason}`,
     },
   });
 
@@ -740,7 +753,7 @@ export async function adminRequeryWithdrawal(adminUserId: string, payoutId: stri
         type: 'withdrawal_status_changed',
         withdrawalId: payout.id,
         businessId: payout.businessId,
-        businessName: payout.business.businessName,
+        businessName: payout.business?.businessName ?? 'Unknown Business',
         status: 'completed',
         amount: toNumber(payout.amount),
         timestamp: new Date().toISOString(),
@@ -791,7 +804,7 @@ export async function adminRequeryWithdrawal(adminUserId: string, payoutId: stri
         type: 'withdrawal_status_changed',
         withdrawalId: payout.id,
         businessId: payout.businessId,
-        businessName: payout.business.businessName,
+        businessName: payout.business?.businessName ?? 'Unknown Business',
         status: 'failed',
         amount: toNumber(payout.amount),
         failureReason: result.gatewayResponse || 'Transfer failed at bank/Paystack',
@@ -868,7 +881,7 @@ export async function adminRequeryWithdrawal(adminUserId: string, payoutId: stri
         type: 'withdrawal_status_changed',
         withdrawalId: payout.id,
         businessId: payout.businessId,
-        businessName: payout.business.businessName,
+        businessName: payout.business?.businessName ?? 'Unknown Business',
         status: 'failed',
         amount: toNumber(payout.amount),
         failureReason: `Transfer not found on Paystack: ${err.message}`,
@@ -1062,6 +1075,8 @@ export async function adminManualSettleWithdrawal(
         adminApprovedAt: new Date(),
         paystackTransferCode: `MANUAL:${params.sessionReference.trim()}`,
         failureReason: null,
+        needsReconciliation: false,
+        reconciliationReason: `Settled offline by admin: ${params.sessionReference.trim()}`,
         narration: params.notes ? `${payout.narration ? payout.narration + ' | ' : ''}Manual Settle: ${params.notes.trim()}` : payout.narration,
       },
     });

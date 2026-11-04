@@ -266,7 +266,7 @@ function drawReceipt(
   // ── Totals ──
   pairMoney('Subtotal', data.subtotal);
   if (data.discount && data.discount > 0) pairMoney('Discount', data.discount, 8, false, '-');
-  if (data.vatAmount && data.vatAmount > 0) pairMoney(`VAT (${data.vatRate || 7.5}%)`, data.vatAmount);
+  if (data.vatAmount && data.vatAmount > 0) pairMoney(`VAT (${data.vatRate ?? 0}%)`, data.vatAmount);
 
   solidRule(2);
   y += 8;

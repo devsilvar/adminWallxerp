@@ -68,7 +68,7 @@ export function generateWelcomeHtml(data: WelcomeEmailData): string {
                   <li>Complete your business profile with your CAC and Tax ID (TIN)</li>
                   <li>Activate your Dedicated Virtual Account (DVA) for auto-captured payments</li>
                   <li>Issue professional invoices or record your sales and expenses</li>
-                  <li>Let WallX ERP automate your monthly 7.5% gross profit tax filing</li>
+                  <li>Let WallX ERP automate your monthly tax compliance and filing</li>
                 </ul>
               </div>
 
@@ -116,7 +116,7 @@ QUICK START CHECKLIST:
 - Complete your business profile with your CAC and Tax ID (TIN)
 - Activate your Dedicated Virtual Account (DVA) for auto-captured payments
 - Issue professional invoices or record your sales and expenses
-- Let WallX ERP automate your monthly 7.5% gross profit tax filing
+- Let WallX ERP automate your monthly tax compliance and filing
 
 Best regards,
 The WallX ERP Team

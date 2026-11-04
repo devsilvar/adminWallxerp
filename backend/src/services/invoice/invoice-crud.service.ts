@@ -12,6 +12,7 @@ import {
   dispatchInvoiceOverdueEmail,
 } from '@/services/email-dispatch.service';
 import { findOrCreateCustomerByIdentity } from '@/services/customer-resolver.service';
+import { resolveTaxPolicy } from '@/services/tax/tax-policy.service';
 import {
   CreateInvoiceInput,
   UpdateInvoiceInput,
@@ -149,7 +150,16 @@ export async function createInvoice(
   return prisma.$transaction(async (tx) => {
     await verifyBusinessAccess(userId, businessId, 'invoices.create', tx);
 
-    const vatRate = input.vatRate ?? 7.5;
+    const policy = await resolveTaxPolicy(businessId, tx);
+    if (!policy.vat.chargeable && input.vatRate !== undefined && input.vatRate > 0) {
+      throw new AppError(
+        422,
+        policy.vat.reason || 'This business is exempt from charging VAT',
+        'VAT_EXEMPT_BUSINESS',
+      );
+    }
+
+    const vatRate = policy.vat.chargeable ? (input.vatRate ?? policy.vat.rate) : 0;
     const discount = input.discount ?? 0;
     const { enrichedLines, subtotal, vatAmount, total } = computeTotals(
       input.lines,
@@ -380,11 +390,26 @@ export async function updateInvoice(
       data.customerId = input.customerId || null;
     }
 
-    const vatRateChanged = input.vatRate !== undefined;
+    // Matching the stored rate is not a change — forward-only, not frozen.
+    const vatRateChanged =
+      input.vatRate !== undefined && input.vatRate !== toNumber(existing.vatRate);
     const discountChanged = input.discount !== undefined;
     const linesChanged = input.lines !== undefined;
 
     if (vatRateChanged || discountChanged || linesChanged) {
+      const policy = await resolveTaxPolicy(businessId, tx);
+      if (
+        !policy.vat.chargeable &&
+        input.vatRate !== undefined &&
+        input.vatRate > 0 &&
+        input.vatRate !== toNumber(existing.vatRate)
+      ) {
+        throw new AppError(
+          422,
+          policy.vat.reason || 'This business is exempt from charging VAT',
+          'VAT_EXEMPT_BUSINESS',
+        );
+      }
       const lines = linesChanged
         ? input.lines!
         : existing.lines.map((l) => ({
@@ -392,7 +417,9 @@ export async function updateInvoice(
             quantity: toNumber(l.quantity),
             unitPrice: toNumber(l.unitPrice),
           }));
-      const vatRate = vatRateChanged ? input.vatRate! : toNumber(existing.vatRate);
+      const vatRate = vatRateChanged
+        ? (policy.vat.chargeable ? input.vatRate! : 0)
+        : toNumber(existing.vatRate);
       const discount = discountChanged ? input.discount! : toNumber(existing.discount);
 
       const { enrichedLines, subtotal, vatAmount, total } = computeTotals(
@@ -421,11 +448,17 @@ export async function updateInvoice(
       }
     }
 
-    const updated = await tx.invoice.update({
-      where: { id: invoiceId },
-      data,
-      include: { lines: { orderBy: { sortOrder: 'asc' } } },
-    });
+    // A request carrying only an unchanged rate yields no columns to write.
+    const updated = Object.keys(data).length
+      ? await tx.invoice.update({
+          where: { id: invoiceId },
+          data,
+          include: { lines: { orderBy: { sortOrder: 'asc' } } },
+        })
+      : await tx.invoice.findUniqueOrThrow({
+          where: { id: invoiceId },
+          include: { lines: { orderBy: { sortOrder: 'asc' } } },
+        });
 
     await logAudit(
       {

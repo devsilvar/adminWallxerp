@@ -37,7 +37,7 @@ export async function getDashboardStats() {
       }),
     ]);
 
-  const [revenueResult, pendingWithdrawals, unverifiedInflowsCount, pendingSubscriptionsCount] =
+  const [revenueResult, pendingWithdrawals, unverifiedInflowsCount, pendingSubscriptionsCount, disputedWithdrawals] =
     await Promise.all([
       prisma.monthlyTaxReport.aggregate({
         _sum: { totalSales: true },
@@ -53,6 +53,11 @@ export async function getDashboardStats() {
       prisma.subscriptionSubmission.count({
         where: { status: 'pending' },
       }),
+      prisma.settlementPayout.findMany({
+        where: { status: 'failed', needsReconciliation: true },
+        select: { amount: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }),
     ]);
 
   const now = Date.now();
@@ -62,6 +67,11 @@ export async function getDashboardStats() {
   const oldestPendingHours = pendingWithdrawals.length > 0
     ? Math.round((now - pendingWithdrawals[0].createdAt.getTime()) / (1000 * 60 * 60))
     : 0;
+
+  const oldestDisputeHours = disputedWithdrawals.length > 0
+    ? Math.round((now - disputedWithdrawals[0].createdAt.getTime()) / (1000 * 60 * 60))
+    : 0;
+  const disputeValue = disputedWithdrawals.reduce((sum, w) => sum + toNumber(w.amount), 0);
 
   return {
     totalUsers,
@@ -73,6 +83,11 @@ export async function getDashboardStats() {
       pendingCount: pendingWithdrawals.length,
       breachedCount: breachedWithdrawals.length,
       oldestPendingHours,
+    },
+    withdrawalDisputes: {
+      count: disputedWithdrawals.length,
+      valueNaira: disputeValue,
+      oldestHours: oldestDisputeHours,
     },
     unverifiedInflows: {
       count: unverifiedInflowsCount,
@@ -239,6 +254,73 @@ export async function getUserDetail(userId: string) {
     throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
   }
 
+  let walletBreakdown = undefined;
+  if (user.walletBalance) {
+    const totalBalance = toNumber(user.walletBalance.balance);
+    const lockedBalance = toNumber(user.walletBalance.lockedBalance);
+    const availableBalance = Math.max(0, totalBalance - lockedBalance);
+
+    const walletTxs = await prisma.walletTransaction.findMany({
+      where: { userId },
+      select: {
+        businessId: true,
+        type: true,
+        amount: true,
+        netAmount: true,
+      },
+    });
+
+    const bizMap = new Map<string, { creditTotal: number; debitTotal: number; count: number }>();
+    for (const b of user.businesses) {
+      bizMap.set(b.id, { creditTotal: 0, debitTotal: 0, count: 0 });
+    }
+
+    let unattributedNet = 0;
+    for (const tx of walletTxs) {
+      const isCredit = tx.type === 'credit' || tx.type === 'reversal';
+      const amt = toNumber(tx.netAmount || tx.amount);
+
+      if (tx.businessId && bizMap.has(tx.businessId)) {
+        const entry = bizMap.get(tx.businessId)!;
+        entry.count += 1;
+        if (isCredit) {
+          entry.creditTotal += amt;
+        } else {
+          entry.debitTotal += amt;
+        }
+      } else {
+        if (isCredit) {
+          unattributedNet += amt;
+        } else {
+          unattributedNet -= amt;
+        }
+      }
+    }
+
+    const businessContributions = user.businesses.map((biz) => {
+      const stats = bizMap.get(biz.id) || { creditTotal: 0, debitTotal: 0, count: 0 };
+      const netContribution = stats.creditTotal - stats.debitTotal;
+      const percentageOfTotal = totalBalance > 0 ? Math.max(0, (netContribution / totalBalance) * 100) : 0;
+      return {
+        businessId: biz.id,
+        businessName: biz.businessName,
+        netContribution,
+        creditTotal: stats.creditTotal,
+        debitTotal: stats.debitTotal,
+        transactionCount: stats.count,
+        percentageOfTotal,
+      };
+    });
+
+    walletBreakdown = {
+      totalBalance,
+      lockedBalance,
+      availableBalance,
+      businesses: businessContributions,
+      unattributedBalance: unattributedNet,
+    };
+  }
+
   return {
     ...user,
     walletBalance: user.walletBalance
@@ -248,6 +330,7 @@ export async function getUserDetail(userId: string) {
           currency: user.walletBalance.currency,
         }
       : null,
+    walletBreakdown,
     subscriptionSubmissions: user.subscriptionSubmissions.map((s) => ({
       ...s,
       amount: toNumber(s.amount),

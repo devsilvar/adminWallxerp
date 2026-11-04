@@ -162,7 +162,8 @@ Your mission is to help the business owner understand their financial health, di
 
 STRICT GROUNDING RULES:
 1. Always base your answers on the verified business financial data provided below. Do not invent, guess, or contradict these numbers.
-2. The Nigerian tax rate is strictly 7.5% of Gross Profit (Sales minus Deductible Expenses).
+2. Tax assessments follow the statutory rate and profile rules on Gross Profit (Sales minus Deductible Expenses).
+   Never state that VAT applies, or quote a VAT rate, when the business data shows VAT is not chargeable on this profile.
 3. All financial amounts must be formatted in Nigerian Naira using the symbol ₦ with comma separators (e.g., ₦350,000).
 4. Organize your responses using clean Markdown formatting:
    - Use bold for key numbers and metrics.
@@ -359,7 +360,7 @@ function generateDeterministicDiagnostic(
 
 Here is your NRS tax status for **${cm.periodName}**:
 - **Gross Profit:** ₦${grossProfit.toLocaleString()} (Sales ₦${cm.totalSales.toLocaleString()} − Deductible Expenses ₦${totalExpenses.toLocaleString()})
-- **Tax Rate:** **${cm.taxRatePercent}%** (NRS Gross Profit Standard)
+- **Tax Rate:** **${cm.taxRatePercent}%** (${cm.vatChargeable === false ? 'VAT not chargeable on your tax profile' : 'Net VAT (output VAT minus input VAT)'})
 - **Estimated Tax Payable:** **₦${taxPayable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}**
 - **Filing Status:** ${cm.isFinalized ? '✅ **Finalized**' : '📝 **Draft / Live Calculation**'}
 - **Payment Status:** ${cm.paymentStatus === 'completed' ? '🟢 **Paid**' : '⏳ **Pending Remittance**'}
@@ -450,7 +451,7 @@ Here is how your business is performing this month:
 - **Deductible Expenses:** **₦${totalExpenses.toLocaleString()}**
 - **Gross Profit:** **₦${grossProfit.toLocaleString()}**
 - **Profit Margin:** **${profitMarginPercent}%** ${profitMarginPercent >= ctx.business.targetProfitMarginPercent ? '🟢 (Healthy)' : '⚠️ (Below Target)'}
-- **Estimated Tax (7.5%):** **₦${taxPayable.toLocaleString()}**
+- **Estimated Tax${cm.taxRatePercent !== null ? ` (${cm.taxRatePercent}%)` : ''}:** **₦${taxPayable.toLocaleString()}**
 
 #### 🔍 Health Assessment:
 - ${grossProfit > 0 ? `Your business is generating positive gross profit of **₦${grossProfit.toLocaleString()}**.` : 'Your business is currently operating at a deficit this month.'}

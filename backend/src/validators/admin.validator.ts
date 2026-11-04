@@ -47,9 +47,16 @@ export const manualSettleWithdrawalSchema = z.object({
 });
 
 export const updateFeeConfigSchema = z.object({
-  withdrawalFeePct: z.number().min(0, 'Fee percentage cannot be negative').max(10, 'Fee percentage cannot exceed 10%'),
-  withdrawalFeeCap: z.number().min(0, 'Fee cap cannot be negative').max(100000, 'Fee cap cannot exceed ₦100,000'),
-  minWithdrawalAmount: z.number().min(100, 'Minimum floor must be at least ₦100').max(1000000, 'Minimum floor cannot exceed ₦1,000,000'),
+  withdrawalFeePct: z.number().min(0, 'Fee percentage cannot be negative').max(10, 'Fee percentage cannot exceed 10%').optional(),
+  withdrawalFeeCap: z.number().min(0, 'Fee cap cannot be negative').max(100000, 'Fee cap cannot exceed ₦100,000').optional(),
+  minWithdrawalAmount: z.number().min(100, 'Minimum floor must be at least ₦100').max(1000000, 'Minimum floor cannot exceed ₦1,000,000').optional(),
+  advanceFeePct: z.number().min(0, 'Advance fee percentage cannot be negative').max(20, 'Advance fee percentage cannot exceed 20%').optional(),
+  advanceFeeCap: z.number().min(0, 'Advance fee cap cannot be negative').max(100000, 'Advance fee cap cannot exceed ₦100,000').optional(),
+  maxAdvancePct: z.number().min(0, 'Max advance percentage cannot be negative').max(100, 'Max advance percentage cannot exceed 100%').optional(),
+  minAdvanceAmount: z.number().min(0, 'Min advance amount cannot be negative').max(1000000, 'Min advance amount cannot exceed ₦1,000,000').optional(),
+  autoSweepEnabled: z.boolean().optional(),
+  autoSweepThreshold: z.number().min(0, 'Auto sweep threshold cannot be negative').optional(),
+  maxDailyPayout: z.number().min(0, 'Max daily payout cap cannot be negative').optional(),
 });
 
 export const updateTaxConfigSchema = z.object({
@@ -155,4 +162,4 @@ export type ListSubscriptionsInput = z.infer<typeof listSubscriptionsSchema>;
 export type ApproveSubscriptionInput = z.infer<typeof approveSubscriptionSchema>;
 export type RejectSubscriptionInput = z.infer<typeof rejectSubscriptionSchema>;
 export type ListAdminReviewsInput = z.infer<typeof listAdminReviewsSchema>;
-export type AdminOverrideSubscriptionInput = z.infer<typeof adminOverrideSubscriptionSchema>;
+export type AdminOverrideSubscriptionInput = z.infer<typeof adminOverrideSubscriptionSchema>;

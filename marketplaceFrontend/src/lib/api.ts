@@ -85,16 +85,17 @@ export async function apiFetch<T = unknown>(
   }
 }
 
-export interface GetProductsParams {
+export type GetProductsParams = {
   page?: number;
   limit?: number;
   category?: string;
   search?: string;
   type?: string;
-}
+};
 
 /**
- * Fetches approved products from the public marketplace feed
+ * Fetches approved products from the public marketplace feed.
+ * Rethrows errors so calling pages can render proper HTTP status codes (e.g. 503).
  */
 export async function getProducts(
   params?: GetProductsParams
@@ -106,27 +107,18 @@ export async function getProducts(
     return await apiFetch<PaginatedProductsResponse>(endpoint);
   } catch (err) {
     console.warn(`[getProducts] Failed to fetch products from ${endpoint}:`, err);
-    // Return empty fallback structure so static build or initial SSR doesn't crash on network failure
-    return {
-      success: false,
-      data: [],
-      pagination: {
-        page: params?.page || 1,
-        limit: params?.limit || 24,
-        total: 0,
-        totalPages: 1,
-      },
-    };
+    throw err;
   }
 }
 
-export interface ProductDetailResult {
+export type ProductDetailResult = {
   product: Product;
   relatedProducts: RelatedProduct[];
-}
+};
 
 /**
- * Fetches a single public product by slug with related listings
+ * Fetches a single public product by slug with related listings.
+ * Returns null if the item is not found (404), or rethrows on network/server errors.
  */
 export async function getProductBySlug(
   slug: string
@@ -150,6 +142,6 @@ export async function getProductBySlug(
       return null;
     }
     console.warn(`[getProductBySlug] Error fetching product ${slug}:`, err);
-    return null;
+    throw err;
   }
 }

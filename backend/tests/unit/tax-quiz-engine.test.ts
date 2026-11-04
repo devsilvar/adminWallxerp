@@ -114,6 +114,41 @@ describe('Tax Quiz Engine — Unit Tests (Phase 1)', () => {
       expect(config.vatExempt).toBe(false);
       expect(config.mustChargeVat).toBe(true);
     });
+
+    it('requires VAT and flags for manual review when turnover is UNKNOWN', () => {
+      const config = evaluateTaxConfig({
+        ...baseAnswers,
+        annualTurnover: 'UNKNOWN',
+      });
+
+      expect(config.vatExempt).toBe(false);
+      expect(config.mustChargeVat).toBe(true);
+      expect(config.needsManualReview).toBe(true);
+      expect(config.reviewReasons).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('Annual turnover unknown'),
+        ])
+      );
+    });
+
+    it('asserts the invariant mustChargeVat === !vatExempt across all five turnover options', () => {
+      const turnovers: Array<QuizAnswers['annualTurnover']> = [
+        'UNDER_25M',
+        'M25M_TO_50M',
+        'M50M_TO_100M',
+        'ABOVE_100M',
+        'UNKNOWN',
+      ];
+
+      for (const turnover of turnovers) {
+        const config = evaluateTaxConfig({
+          ...baseAnswers,
+          annualTurnover: turnover,
+        });
+
+        expect(config.mustChargeVat).toBe(!config.vatExempt);
+      }
+    });
   });
 
   describe('Priority 4: Small Company 0% CIT (₦100M Turnover + ₦250M Assets)', () => {

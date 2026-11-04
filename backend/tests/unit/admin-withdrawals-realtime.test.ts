@@ -79,6 +79,33 @@ describe('Admin Withdrawals Realtime SSE Unit Suite (Step 3)', () => {
 
       jest.spyOn(pinService, 'verifyPin').mockResolvedValue(undefined as any);
       jest.spyOn(WalletService, 'reserveFunds').mockResolvedValue(undefined as any);
+      jest.spyOn(WalletService, 'checkLivePaystackBalance').mockResolvedValue({
+        canPayout: true,
+        deficit: 0,
+        balance: 500000,
+      });
+      jest.spyOn(paymentModule, 'getPaymentProvider').mockReturnValue({
+        createTransferRecipient: jest.fn<any>().mockResolvedValue({ recipientCode: 'RCP-123' }),
+        initiateTransfer: jest.fn<any>().mockResolvedValue({
+          status: 'pending',
+          transferCode: 'TRF-123',
+        }),
+      } as any);
+      jest.spyOn(prisma.settlementPayout, 'update').mockResolvedValue({
+        id: 'payout-sse-new',
+        businessId: mockBusinessId,
+        amount: 20000,
+        fee: 100,
+        netAmount: 19900,
+        transferReference: 'PO-TEST-12345',
+        status: 'pending',
+        destinationBankCode: '058',
+        destinationBankName: 'GTBank',
+        destinationAccountNum: '0123456789',
+        destinationAccountName: 'Apex Store',
+        initiatedAt: new Date(),
+        completedAt: null,
+      } as any);
 
       const mockTx: any = {
         $queryRaw: jest.fn<any>().mockResolvedValue([{ locked: true }]),
@@ -95,6 +122,7 @@ describe('Admin Withdrawals Realtime SSE Unit Suite (Step 3)', () => {
             netAmount: 19900,
             transferReference: 'PO-TEST-12345',
             status: 'pending',
+            destinationBankCode: '058',
             destinationBankName: 'GTBank',
             destinationAccountNum: '0123456789',
             destinationAccountName: 'Apex Store',

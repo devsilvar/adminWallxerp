@@ -126,7 +126,7 @@ export const topUp = asyncHandler(
       req.params.businessId,
       req.params.customerId,
       data,
-      { direct }
+      { direct, origin: req.get('origin') }
     );
     if ('status' in result && result.status === 'pending') {
       res.status(202).json({

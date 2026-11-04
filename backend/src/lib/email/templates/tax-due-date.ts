@@ -78,7 +78,7 @@ export function generateTaxDueDateHtml(data: TaxDueDateEmailData): string {
                   <li>Verify all monthly sales and deductible operating expenses are logged</li>
                   <li>Click <strong>Calculate Tax</strong> for <strong>${data.taxMonthLabel}</strong></li>
                   <li>Review and <strong>Finalize</strong> your assessment report</li>
-                  <li>Complete your 7.5% Gross Profit tax remittance to lock the period</li>
+                  <li>Complete your statutory tax remittance to lock the period</li>
                 </ol>
               </div>
 

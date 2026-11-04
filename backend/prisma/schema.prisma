@@ -153,6 +153,7 @@ model Business {
   feedbacks               UserFeedback[]
   aiQueryLogs             AiQueryLog[]
   voucherLedgerRequests   VoucherLedgerRequest[]
+  marketplaceProducts     MarketplaceProduct[]
 
   @@index([userId])
   @@index([taxId])
@@ -632,6 +633,20 @@ enum TaxTreatment {
 }
 
 /// Credit status lifecycle: unpaid -> partially_paid / overdue -> paid | written_off
+
+enum ProductType {
+  physical
+  service
+}
+
+enum ProductListingStatus {
+  draft
+  pending_approval
+  approved
+  rejected
+  archived
+}
+
 enum CreditStatus {
   unpaid
   partially_paid
@@ -1215,4 +1230,53 @@ model BusinessTaxProfile {
   @@index([businessId])
   @@index([needsManualReview])
   @@map("business_tax_profiles")
+}
+
+/// Marketplace products for SME showcases (max 3 products per business)
+model MarketplaceProduct {
+  id              String               @id @default(uuid())
+  businessId      String               @map("business_id")
+  name            String               @map("name")
+  slug            String               @unique @map("slug")
+  category        String               @map("category")
+  productType     ProductType          @default(physical) @map("product_type")
+  description     String               @db.Text
+  price           Decimal              @db.Decimal(15, 2)
+  compareAtPrice  Decimal?             @map("compare_at_price") @db.Decimal(15, 2)
+  currency        String               @default("NGN")
+  
+  // Stock & Inventory
+  stockQuantity   Int?                 @default(1) @map("stock_quantity")
+  trackInventory  Boolean              @default(true) @map("track_inventory")
+  
+  // Dynamic category attributes
+  attributes      Json?                @map("attributes")
+
+  // Media & Assets
+  images          String[]             @default([])
+  
+  // Direct Action / Purchase Link
+  contactPhone    String?              @map("contact_phone")
+  contactWhatsapp String?              @map("contact_whatsapp")
+  purchaseUrl     String?              @map("purchase_url")
+  
+  // Moderation & Governance
+  status          ProductListingStatus @default(draft)
+  rejectionReason String?              @map("rejection_reason") @db.Text
+  approvedAt      DateTime?            @map("approved_at")
+  approvedBy      String?              @map("approved_by")
+  
+  // Audit Timestamps
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  // Relations
+  business        Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([attributes], type: Gin)
+  @@index([businessId])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([category])
+  @@index([slug])
+  @@map("marketplace_products")
 }

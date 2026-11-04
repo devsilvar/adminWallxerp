@@ -11,6 +11,8 @@ import { listReports } from '@/services/tax/tax-report.service';
 import { listSales } from '@/services/sales.service';
 import { listExpenses } from '@/services/expense.service';
 import { type PermissionKey } from '@/services/team/permission.service';
+import { calculateTaxWithStrategy } from '@/services/tax/tax-calculation-strategy';
+import { resolveTaxPolicy } from '@/services/tax/tax-policy.service';
 
 // ─── Dashboard ──────────────────────────────────────────────
 
@@ -125,13 +127,21 @@ export async function getDashboard(
   let currentMonth = currentReport;
   if (currentReport && !currentReport.isLocked) {
     const grossProfit = Math.max(monthSales - monthExpenses, 0);
-    const rate = toNumber(currentReport.taxRate);
+    const strategyResult = await calculateTaxWithStrategy({
+      businessId,
+      month: now.getUTCMonth() + 1,
+      year: now.getUTCFullYear(),
+      totalSales: monthSales,
+      totalExpenses: monthExpenses,
+      grossProfit,
+    });
     currentMonth = {
       ...currentReport,
       totalSales: new Decimal(monthSales),
       totalExpenses: new Decimal(monthExpenses),
       grossProfit: new Decimal(grossProfit),
-      taxPayable: new Decimal(grossProfit > 0 ? (grossProfit * rate) / 100 : 0),
+      taxRate: new Decimal(strategyResult.taxRate),
+      taxPayable: new Decimal(strategyResult.taxPayable),
       profitMargin:
         monthSales > 0
           ? new Decimal(parseFloat(((grossProfit / monthSales) * 100).toFixed(2)))
@@ -139,7 +149,14 @@ export async function getDashboard(
     };
   } else if (!currentReport && (monthSales > 0 || monthExpenses > 0)) {
     const grossProfit = Math.max(monthSales - monthExpenses, 0);
-    const rate = config.tax.defaultRate;
+    const strategyResult = await calculateTaxWithStrategy({
+      businessId,
+      month: now.getUTCMonth() + 1,
+      year: now.getUTCFullYear(),
+      totalSales: monthSales,
+      totalExpenses: monthExpenses,
+      grossProfit,
+    });
     currentMonth = {
       id: 'live-preview',
       businessId,
@@ -147,8 +164,8 @@ export async function getDashboard(
       totalSales: new Decimal(monthSales),
       totalExpenses: new Decimal(monthExpenses),
       grossProfit: new Decimal(grossProfit),
-      taxRate: new Decimal(rate),
-      taxPayable: new Decimal(grossProfit > 0 ? (grossProfit * rate) / 100 : 0),
+      taxRate: new Decimal(strategyResult.taxRate),
+      taxPayable: new Decimal(strategyResult.taxPayable),
       profitMargin:
         monthSales > 0
           ? new Decimal(parseFloat(((grossProfit / monthSales) * 100).toFixed(2)))
@@ -163,11 +180,17 @@ export async function getDashboard(
     };
   }
 
-  // Current tax config — so the frontend knows what rate is in effect
+  // Current tax config — dynamic from resolved policy
+  const taxPolicy = await resolveTaxPolicy(businessId);
   const taxConfig = {
-    currentRate: config.tax.defaultRate,
+    currentRate: taxPolicy.vat.chargeable ? taxPolicy.vat.rate : 0,
     currency: config.tax.currency,
     authority: config.tax.taxAuthority,
+    // Let the UI label an exempt business without a second policy round-trip.
+    vatChargeable: taxPolicy.vat.chargeable,
+    vatExempt: !taxPolicy.vat.chargeable,
+    vatReason: taxPolicy.vat.reason,
+    source: taxPolicy.source,
   };
 
   return {

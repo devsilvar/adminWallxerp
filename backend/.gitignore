@@ -8,6 +8,9 @@ node_modules/
 .env.development
 .env.production
 .env.test
+.env.bak
+.env.*.bak
+*.bak
 !.env.example
 
 # Build output

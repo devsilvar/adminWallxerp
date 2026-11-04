@@ -1,5 +1,4 @@
 import prisma from '@/lib/prisma';
-import { config } from '@/config';
 import logger from '@/lib/logger';
 import { AppError } from '@/middleware/errorHandler';
 import { logAudit } from '@/lib/audit';
@@ -7,6 +6,12 @@ import { createMarginWarning } from '@/services/reminder.service';
 import { verifyBusinessAccess } from '@/lib/ownership';
 import { buildTaxSlipPdf } from '@/services/tax-slip.pdf';
 import { toNumber, TAXABLE_SALES_WHERE } from '@/shared/helpers';
+import { calculateTaxWithStrategy } from '@/services/tax/tax-calculation-strategy';
+import {
+  resolveTaxPolicy,
+  paymentBasisForPolicy,
+  isTaxProfileComplete,
+} from '@/services/tax/tax-policy.service';
 
 // ─── Tax Calculation ────────────────────────────────────────
 
@@ -64,18 +69,29 @@ export async function calculateTax(
   const totalExpenses = toNumber(expenseAgg._sum.amount);
   const grossProfit = Math.max(totalSales - totalExpenses, 0);
 
-  // Tax rate: override > config default (from env). Stored per-report for auditability.
-  const taxRate = taxRateOverride ?? config.tax.defaultRate;
-
-  if (taxRate < config.tax.minRate || taxRate > config.tax.maxRate) {
+  // Statutory rates come from the business's tax profile — a caller-supplied
+  // rate can no longer be honoured, so reject it instead of ignoring it.
+  if (taxRateOverride !== undefined) {
     throw new AppError(
       400,
-      `Tax rate must be between ${config.tax.minRate}% and ${config.tax.maxRate}%`,
-      'INVALID_TAX_RATE'
+      'Tax rate overrides are not supported: your rate is determined by your Tax Profile Quiz classification. Update the profile to change it.',
+      'TAX_RATE_OVERRIDE_NOT_SUPPORTED'
     );
   }
 
-  const taxPayable = grossProfit > 0 ? (grossProfit * taxRate) / 100 : 0;
+  // Dispatch to the strategy engine (PROFILED or LEGACY based on feature flag + profile).
+  const strategyResult = await calculateTaxWithStrategy({
+    businessId,
+    month,
+    year,
+    totalSales,
+    totalExpenses,
+    grossProfit,
+    taxRateOverride,
+  });
+
+  const taxRate = strategyResult.taxRate;
+  const taxPayable = strategyResult.taxPayable;
   const profitMargin = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
 
   // Upsert — create if first calculation for this month, update if recalculating
@@ -117,6 +133,17 @@ export async function calculateTax(
   // 'number'. Using toNumber() preserves the configured value; falling through
   // to 20 (the legacy default) only when truly null/undefined.
   const warnings: { type: string; message: string }[] = [];
+
+  // ₦0 here means "no statutory rate applies", not "nothing is owed".
+  if (strategyResult.needsManualReview) {
+    warnings.push({
+      type: 'tax_profile_review',
+      message:
+        strategyResult.reviewReason ??
+        'No completed tax profile: this month cannot be remitted until the Tax Profile Quiz is completed.',
+    });
+  }
+
   const expectedMargin =
     business.defaultProfitMargin != null
       ? toNumber(business.defaultProfitMargin)
@@ -141,7 +168,7 @@ export async function calculateTax(
     }
   }
 
-  return { ...report, warnings };
+  return { ...report, warnings, advisory: strategyResult.advisory, strategyUsed: strategyResult.strategyUsed };
 }
 
 // ─── Reports CRUD ───────────────────────────────────────────
@@ -194,11 +221,25 @@ export async function listReports(
 
   const totalPages = Math.ceil(total / query.limit);
 
+  // One policy read for the whole page — the basis is per business, not per report.
+  const [policy, profile] = await Promise.all([
+    resolveTaxPolicy(businessId),
+    prisma.businessTaxProfile.findUnique({
+      where: { businessId },
+      select: { completedAt: true, computedConfig: true },
+    }),
+  ]);
+  const taxBasis = paymentBasisForPolicy(policy);
+  // A ₦0 report from a business with no profile is "not calculated", not "no tax".
+  const needsManualReview = !isTaxProfileComplete(profile);
+
   const formattedReports = reports.map((r) => {
     const latestPayment = r.payments && r.payments.length > 0 ? r.payments[0] : null;
     return {
       ...r,
       latestPayment,
+      taxBasis,
+      needsManualReview,
     };
   });
 
@@ -230,7 +271,19 @@ export async function getReportById(userId: string, businessId: string, reportId
     throw new AppError(404, 'Tax report not found', 'REPORT_NOT_FOUND');
   }
 
-  return report;
+  const [policy, profile] = await Promise.all([
+    resolveTaxPolicy(businessId),
+    prisma.businessTaxProfile.findUnique({
+      where: { businessId },
+      select: { completedAt: true, computedConfig: true },
+    }),
+  ]);
+
+  return {
+    ...report,
+    taxBasis: paymentBasisForPolicy(policy),
+    needsManualReview: !isTaxProfileComplete(profile),
+  };
 }
 
 // ─── Finalize / Un-finalize ─────────────────────────────────
@@ -247,6 +300,13 @@ export async function finalizeReport(
   _options?: FinalizeReportOptions
 ) {
   await verifyBusinessAccess(userId, businessId, 'tax.finalize');
+
+  // Pre-fetch tax profile outside the transaction so calculateTaxWithStrategy
+  // can use it without opening a nested Prisma client inside tx.
+  const taxProfile = await prisma.businessTaxProfile.findUnique({
+    where: { businessId },
+    select: { completedAt: true, computedConfig: true },
+  });
 
   return prisma.$transaction(async (tx) => {
     const report = await tx.monthlyTaxReport.findUnique({ where: { id: reportId } });
@@ -313,8 +373,31 @@ export async function finalizeReport(
     const isNilReturn = totalSales === 0;
 
     const grossProfit = Math.max(totalSales - totalExpenses, 0);
-    const taxRate = toNumber(report.taxRate) || config.tax.defaultRate;
-    const taxPayable = grossProfit > 0 ? (grossProfit * taxRate) / 100 : 0;
+
+    // Use strategy dispatcher for accurate tax calculation.
+    // taxProfile was pre-fetched before the transaction to avoid nested Prisma client calls.
+    const strategyResult = await calculateTaxWithStrategy({
+      businessId,
+      month: reportMonth + 1, // reportMonth is 0-indexed
+      year: reportYear,
+      totalSales,
+      totalExpenses,
+      grossProfit,
+      profile: taxProfile as { completedAt: Date | null; computedConfig: any } | null,
+    });
+    // A business with no completed tax profile has no statutory rate. Finalising
+    // it would file a ₦0 return that nobody validated — refuse instead.
+    if (strategyResult.needsManualReview) {
+      throw new AppError(
+        400,
+        strategyResult.reviewReason ??
+          'Cannot finalize: no completed tax profile. Complete the Tax Profile Quiz first.',
+        'TAX_PROFILE_REVIEW_REQUIRED'
+      );
+    }
+
+    const taxRate = strategyResult.taxRate;
+    const taxPayable = strategyResult.taxPayable;
     const profitMargin = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
 
     const updated = await tx.monthlyTaxReport.update({
@@ -323,6 +406,7 @@ export async function finalizeReport(
         totalSales,
         totalExpenses,
         grossProfit,
+        taxRate,
         taxPayable,
         profitMargin: parseFloat(profitMargin.toFixed(2)),
         isFinalized: true,
@@ -340,6 +424,7 @@ export async function finalizeReport(
         totalSales,
         totalExpenses,
         grossProfit,
+        taxRate,
         taxPayable,
         isFinalized: true,
       },
@@ -374,6 +459,12 @@ export async function autoFinalizeConcludedMonth(
     where: { businessId_taxMonth: { businessId, taxMonth: monthStart } },
   });
 
+  // Pre-fetch the tax profile once at function scope so both branches (create and update tx) can use it.
+  const autoProfile = await prisma.businessTaxProfile.findUnique({
+    where: { businessId },
+    select: { completedAt: true, computedConfig: true },
+  });
+
   // If report doesn't exist, calculate it first if there is activity
   if (!report) {
     const [salesAgg, expenseAgg] = await Promise.all([
@@ -393,9 +484,22 @@ export async function autoFinalizeConcludedMonth(
       return null;
     }
     const grossProfit = Math.max(totalSales - totalExpenses, 0);
-    const taxRate = config.tax.defaultRate;
-    const taxPayable = grossProfit > 0 ? (grossProfit * taxRate) / 100 : 0;
+
+    const autoStrategyResult = await calculateTaxWithStrategy({
+      businessId,
+      month,
+      year,
+      totalSales,
+      totalExpenses,
+      grossProfit,
+      profile: autoProfile as { completedAt: Date | null; computedConfig: any } | null,
+    });
+    const taxRate = autoStrategyResult.taxRate;
+    const taxPayable = autoStrategyResult.taxPayable;
     const profitMargin = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
+    // No profile ⇒ no statutory scenario ⇒ the month stays a draft for review
+    // rather than being auto-finalized at ₦0.
+    const needsReview = Boolean(autoStrategyResult.needsManualReview);
 
     report = await prisma.monthlyTaxReport.create({
       data: {
@@ -407,10 +511,19 @@ export async function autoFinalizeConcludedMonth(
         taxRate,
         taxPayable,
         profitMargin: parseFloat(profitMargin.toFixed(2)),
-        isFinalized: true,
+        isFinalized: !needsReview,
         isNilReturn,
       },
     });
+
+    if (needsReview) {
+      logger.warn('Auto-finalization skipped: no completed tax profile', {
+        businessId,
+        reportId: report.id,
+        month,
+        year,
+      });
+    }
 
     await logAudit({
       businessId,
@@ -444,9 +557,21 @@ export async function autoFinalizeConcludedMonth(
     const totalExpenses = toNumber(expenseAgg._sum.amount);
     const isNilReturn = totalSales === 0;
     const grossProfit = Math.max(totalSales - totalExpenses, 0);
-    const taxRate = toNumber(report.taxRate) || config.tax.defaultRate;
-    const taxPayable = grossProfit > 0 ? (grossProfit * taxRate) / 100 : 0;
+
+    // Profile was already fetched above (autoProfile). Re-use it for the tx path.
+    const txStrategyResult = await calculateTaxWithStrategy({
+      businessId,
+      month,
+      year,
+      totalSales,
+      totalExpenses,
+      grossProfit,
+      profile: autoProfile as { completedAt: Date | null; computedConfig: any } | null,
+    });
+    const taxRate = txStrategyResult.taxRate;
+    const taxPayable = txStrategyResult.taxPayable;
     const profitMargin = totalSales > 0 ? (grossProfit / totalSales) * 100 : 0;
+    const needsReview = Boolean(txStrategyResult.needsManualReview);
 
     const updated = await tx.monthlyTaxReport.update({
       where: { id: report.id },
@@ -454,9 +579,10 @@ export async function autoFinalizeConcludedMonth(
         totalSales,
         totalExpenses,
         grossProfit,
+        taxRate,
         taxPayable,
         profitMargin: parseFloat(profitMargin.toFixed(2)),
-        isFinalized: true,
+        isFinalized: !needsReview,
         isNilReturn,
       },
     });
@@ -466,7 +592,7 @@ export async function autoFinalizeConcludedMonth(
       action: 'tax.report_auto_finalized',
       resourceType: 'monthly_tax_report',
       resourceId: report.id,
-      newData: { totalSales, taxPayable, isFinalized: true, systemAuto: true },
+      newData: { totalSales, taxRate, taxPayable, isFinalized: !needsReview, needsManualReview: needsReview, systemAuto: true },
     }, tx);
 
     logger.info('Tax report auto-finalized by system on Day 1', {
@@ -640,6 +766,16 @@ export async function downloadTaxSlip(
   const isPaid = report.paymentStatus === 'completed' || report.isLocked;
   const latestPayment = report.payments && report.payments.length > 0 ? report.payments[0] : null;
 
+  // The slip must state the basis the assessment was actually made under —
+  // a VAT-exempt business must never be handed a 7.5%-of-gross-profit slip.
+  const [policy, profile] = await Promise.all([
+    resolveTaxPolicy(businessId),
+    prisma.businessTaxProfile.findUnique({
+      where: { businessId },
+      select: { completedAt: true, computedConfig: true },
+    }),
+  ]);
+
   let paymentData = null;
   if (latestPayment) {
     paymentData = {
@@ -682,6 +818,8 @@ export async function downloadTaxSlip(
       taxRate: toNumber(report.taxRate),
       taxPayable: toNumber(report.taxPayable),
       profitMargin: report.profitMargin ? toNumber(report.profitMargin) : null,
+      taxBasis: paymentBasisForPolicy(policy),
+      needsManualReview: !isTaxProfileComplete(profile),
     },
     payment: paymentData,
   });

@@ -344,7 +344,7 @@ const options: swaggerJsdoc.Options = {
               type: 'number',
               minimum: 0,
               maximum: 50,
-              description: 'Override per-business default (7.5% standard NRS rate)',
+              description: 'Override per-business default tax rate',
             },
           },
         },
@@ -422,7 +422,7 @@ const options: swaggerJsdoc.Options = {
             customerTaxId: { type: 'string', maxLength: 50 },
             issueDate: { type: 'string', format: 'date' },
             dueDate: { type: 'string', format: 'date', description: 'Must be ≥ issueDate' },
-            vatRate: { type: 'number', minimum: 0, maximum: 100, default: 7.5 },
+            vatRate: { type: 'number', minimum: 0, maximum: 100 },
             discount: { type: 'number', minimum: 0, default: 0 },
             currency: { type: 'string', minLength: 3, maxLength: 3, default: 'NGN' },
             notes: { type: 'string', maxLength: 2000 },
@@ -972,7 +972,7 @@ const options: swaggerJsdoc.Options = {
         post: {
           tags: ['Tax'],
           summary: 'Calculate (or recalculate) tax for a month',
-          description: 'Tax = 7.5% × (Sales − Expenses). Persists/updates a MonthlyTaxReport, fires margin_warning reminders.',
+          description: 'Tax calculated from sales and expenses per business tax profile. Persists/updates a MonthlyTaxReport, fires margin_warning reminders.',
           security: [{ bearerAuth: [] }],
           parameters: [{ $ref: '#/components/parameters/BusinessIdPathParam' }],
           requestBody: {

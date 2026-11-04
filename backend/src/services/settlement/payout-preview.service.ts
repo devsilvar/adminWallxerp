@@ -15,6 +15,7 @@ import {
 } from '@/shared/helpers';
 import { getPayoutLockStatus } from '@/lib/payout-lock';
 import { PlatformConfigService } from '@/services/platform-config.service';
+import { resolveTaxPolicy } from '@/services/tax/tax-policy.service';
 import { verifyBusinessAccess } from '@/lib/ownership';
 import { getDailyPayoutAllowance } from '@/modules/wallet/services/daily-payout-cap.service';
 
@@ -199,6 +200,7 @@ export async function getPayoutPreview(
   const bizTotalWithdrawn = bizCompletedWithdrawn + bizPendingWithdrawn;
 
   // 3. Tax Liability calculation (unpaid reports or estimated monthly liability)
+  const policy = await resolveTaxPolicy(businessId, db);
   const unpaidReports = await db.monthlyTaxReport.findMany({
     where: {
       businessId,
@@ -211,8 +213,8 @@ export async function getPayoutPreview(
     estimatedTaxLiability += toNumber(report.taxPayable);
   }
 
-  // If no finalized reports yet, compute 7.5% tax escrow reserve on total qualified taxable sales minus expenses (R9).
-  if (unpaidReports.length === 0) {
+  // If no finalized reports yet, compute tax escrow reserve on total qualified taxable sales minus expenses.
+  if (unpaidReports.length === 0 && policy.vat.chargeable) {
     const qualifiedTaxableSalesAgg = await db.salesTransaction.aggregate({
       where: {
         businessId,
@@ -232,12 +234,14 @@ export async function getPayoutPreview(
       });
       const totalExpenses = toNumber(totalExpensesAgg._sum.amount ?? 0);
       const grossProfit = Math.max(0, qualifiedTaxableSales - totalExpenses);
-      estimatedTaxLiability = Math.round(grossProfit * 0.075 * 100) / 100;
+      const effectiveRate = policy.vat.rate / 100;
+      estimatedTaxLiability = Math.round(grossProfit * effectiveRate * 100) / 100;
     }
   }
 
   // 4. Tax due (display-only) and available balance.
-  const taxReserve = Math.max(0, estimatedTaxLiability);
+  // Exempt business => reserve 0.
+  const taxReserve = policy.vat.chargeable ? Math.max(0, estimatedTaxLiability) : 0;
 
   // Available balance: Platform-held DVA funds minus total withdrawals.
   // The platform absorbs Paystack's 1% DVA processing fee, so customer available balance is 100% of their DVA deposits.

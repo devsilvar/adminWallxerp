@@ -297,3 +297,21 @@ export const voucherVerificationRateLimiter = rateLimit({
 });
 
 
+
+/**
+ * Rate limiter for public marketplace catalog endpoints.
+ * Capped at 100 requests per minute per IP to defend against scraping and abuse.
+ */
+export const publicMarketplaceRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: config.app.isDevelopment ? 10000 : 100, // 10,000 (dev) / 100 (prod)
+  skip: skipLocalhost,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'MARKETPLACE_RATE_LIMITED',
+      message: 'Too many catalog requests. Please wait a minute and try again.',
+    },
+  },
+});

@@ -12,6 +12,7 @@ import {
   SalesReceiptData,
 } from '@/services/receipt.pdf';
 import { toNumber } from '@/shared/helpers';
+import { resolveTaxPolicy, paymentBasisForPolicy } from '@/services/tax/tax-policy.service';
 
 /**
  * Generate a deterministic or sequential receipt number.
@@ -76,6 +77,7 @@ export async function getTaxPaymentReceipt(
       grossProfit: toNumber(payment.taxReport.grossProfit),
       taxRate: toNumber(payment.taxReport.taxRate),
       taxPayable: toNumber(payment.taxReport.taxPayable),
+      taxBasis: paymentBasisForPolicy(await resolveTaxPolicy(businessId)),
     },
   };
 

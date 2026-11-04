@@ -78,6 +78,8 @@ export interface CartItem {
   subtotal: number;
 }
 
+//new types
+
 export interface Cart {
   items: CartItem[];
   total: number;

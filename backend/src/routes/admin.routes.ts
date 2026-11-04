@@ -3,6 +3,7 @@ import { authenticate, authorize } from '@/middleware/auth';
 import * as adminController from '@/controllers/admin.controller';
 import * as remittanceController from '@/controllers/firs-remittance.controller';
 import * as messageController from '@/controllers/message.controller';
+import marketplaceAdminRoutes from './marketplace-admin.routes';
 import { broadcastRateLimiter } from '@/middleware/security';
 
 const router = Router();
@@ -81,5 +82,8 @@ router.get('/broadcasts/:id', messageController.getBroadcast);
 router.get('/broadcasts/:id/messages', messageController.listBroadcastMessages);
 router.post('/broadcasts/:id/retry', messageController.retryBroadcastEmails);
 router.post('/broadcasts', broadcastRateLimiter, messageController.createBroadcast);
+
+// Marketplace moderation queue & approvals
+router.use('/marketplace', marketplaceAdminRoutes);
 
 export default router;
