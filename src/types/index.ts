@@ -1415,5 +1415,50 @@ export interface AdminMarketplaceQueueResponse {
   };
 }
 
+export type AdminSlotPurchaseStatus =
+  | 'pending_proof'
+  | 'active'
+  | 'rejected'
+  | 'refunded';
+
+export interface AdminSlotPurchase {
+  id: string;
+  businessId: string;
+  slots: number;
+  unitPrice: number | string;
+  amount: number | string;
+  status: AdminSlotPurchaseStatus;
+  paidVia: 'wallet' | 'proof';
+  walletTxRef?: string | null;
+  proofUrl?: string | null;
+  purchasedBy: string;
+  rejectionReason?: string | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+  updatedAt?: string;
+  business?: {
+    id: string;
+    businessName: string;
+    marketplaceSlotAllowance: number;
+    user?: {
+      id: string;
+      email?: string | null;
+      fullName?: string | null;
+      phone?: string | null;
+    } | null;
+  };
+}
+
+export interface AdminSlotPurchasesResponse {
+  data: AdminSlotPurchase[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
 
 
