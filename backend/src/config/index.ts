@@ -305,6 +305,23 @@ export const config = {
     platformCommissionPct: Number(process.env.PLATFORM_COMMISSION_PCT ?? 0),
   },
 
+  // Marketplace & Monetization (Phases 9 - 14)
+  marketplace: {
+    slotAllowanceDefault: parseInt(process.env.MARKETPLACE_SLOT_ALLOWANCE_DEFAULT ?? '3', 10),
+    slotUnitPrice: Number(process.env.MARKETPLACE_SLOT_UNIT_PRICE ?? '1000'),
+    boostPrices: {
+      week: Number(process.env.MARKETPLACE_BOOST_PRICE_WEEK ?? '2000'),
+      fortnight: Number(process.env.MARKETPLACE_BOOST_PRICE_FORTNIGHT ?? '3500'),
+      month: Number(process.env.MARKETPLACE_BOOST_PRICE_MONTH ?? '6000'),
+    },
+    boostDurationsDays: {
+      week: 7,
+      fortnight: 14,
+      month: 30,
+    },
+    maxCategoryBoostsPerPage: parseInt(process.env.MARKETPLACE_MAX_CATEGORY_BOOSTS_PER_PAGE ?? '3', 10),
+  },
+
   // Scheduled Jobs (node-cron)
   // Auto-enabled in production; opt-in for dev so `tsx watch` doesn't
   // re-register the schedule on every file save.

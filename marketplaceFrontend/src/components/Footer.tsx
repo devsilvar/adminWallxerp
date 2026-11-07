@@ -1,6 +1,6 @@
 export default function Footer() {
   const year = new Date().getFullYear();
-  const appUrl = import.meta.env.PUBLIC_APP_URL || 'http://localhost:5173';
+  const appUrl = import.meta.env.PUBLIC_APP_URL || '';
 
   return (
     <footer className="border-t border-gray-200 bg-gray-900 text-gray-300">
@@ -63,9 +63,9 @@ export default function Footer() {
             <h3 className="mb-4 text-[10.5px] font-bold uppercase tracking-widest text-gray-500">For Merchants</h3>
             <ul className="space-y-2.5 text-[13px]">
               {[
-                { label: 'List Your Products', href: `${appUrl}/inventory`, external: true },
-                { label: 'WallXERP Dashboard', href: appUrl, external: true },
-                { label: 'Create Free Account', href: `${appUrl}/register`, external: true },
+                { label: 'List Your Products', href: `${appUrl}/inventory?src=marketplace`, external: true },
+                { label: 'WallXERP Dashboard', href: `${appUrl}?src=marketplace`, external: true },
+                { label: 'Create Free Account', href: `${appUrl}/register?src=marketplace`, external: true },
               ].map(({ label, href, external }) => (
                 <li key={label}>
                   <a

@@ -1,0 +1,263 @@
+---
+import Layout from '@/layouts/Layout.astro';
+import ProductCard from '@/components/ProductCard';
+import { getSellerStorefront } from '@/lib/api';
+import type { SellerStorefrontResponse } from '@/types';
+import { 
+  BadgeCheck, 
+  MapPin, 
+  Calendar, 
+  Package, 
+  MessageCircle, 
+  Store, 
+  ChevronRight, 
+  AlertCircle, 
+  RefreshCw, 
+  PackageX 
+} from 'lucide-react';
+
+export const prerender = false;
+
+// Edge cache header: 1 minute s-maxage with 5-minute stale-while-revalidate grace period
+Astro.response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+
+const { id } = Astro.params;
+
+let storefrontData: SellerStorefrontResponse | null = null;
+let isUnavailable = false;
+
+if (!id || !id.trim()) {
+  Astro.response.status = 404;
+} else {
+  try {
+    storefrontData = await getSellerStorefront(id.trim());
+    if (!storefrontData) {
+      Astro.response.status = 404;
+    }
+  } catch (err) {
+    console.error(`[s/${id}] Error loading storefront:`, err);
+    isUnavailable = true;
+    Astro.response.status = 503;
+  }
+}
+
+const seller = storefrontData?.seller;
+const products = storefrontData?.products || [];
+const total = storefrontData?.total ?? 0;
+
+function formatMemberSince(isoDate?: string): string {
+  if (!isoDate) return 'WallX Verified Merchant';
+  try {
+    const d = new Date(isoDate);
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `Member since ${months[d.getMonth()]} ${d.getFullYear()}`;
+  } catch {
+    return 'WallX Verified Merchant';
+  }
+}
+
+const rawPhone = seller?.contactWhatsapp || '';
+const cleanPhone = rawPhone.replace(/[^0-9+]/g, '').replace(/^0/, '+234');
+const hasWhatsapp = Boolean(cleanPhone && cleanPhone.replace('+', '').trim().length >= 7);
+
+const whatsappMsg = seller
+  ? `Hello ${seller.businessName}! I am browsing your storefront on WallX Marketplace and would like to inquire about your products.`
+  : '';
+
+const whatsappUrl = hasWhatsapp
+  ? `https://wa.me/${cleanPhone.replace('+', '')}?text=${encodeURIComponent(whatsappMsg)}`
+  : null;
+
+const sellerInitial = (seller?.businessName || 'M').charAt(0).toUpperCase();
+
+const pageTitle = isUnavailable
+  ? 'Service Temporarily Unavailable — WallX Marketplace'
+  : seller
+  ? `${seller.businessName} — Seller Storefront | WallX Marketplace`
+  : 'Storefront Not Found — WallX Marketplace';
+
+const pageDescription = isUnavailable
+  ? 'We are experiencing temporary connectivity issues retrieving this storefront. Please try again shortly.'
+  : seller
+  ? `Browse all verified products and listings from ${seller.businessName} on WallX Marketplace.`
+  : 'The requested seller storefront could not be found or may have been removed.';
+---
+
+<Layout title={pageTitle} description={pageDescription}>
+  {isUnavailable ? (
+    <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-24 text-center">
+      <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+        <AlertCircle className="h-8 w-8" client:load />
+      </div>
+      <h1 class="text-2xl font-extrabold text-gray-900">Service Temporarily Unavailable</h1>
+      <p class="mt-2 text-[14px] text-gray-500 max-w-md mx-auto">
+        We encountered a temporary connection issue while loading this seller's storefront. Please retry in a few moments.
+      </p>
+      <div class="mt-7 flex items-center justify-center gap-3">
+        <button
+          onclick="window.location.reload()"
+          class="inline-flex items-center gap-2 rounded-full bg-[#352778] px-6 py-2.5 text-[13px] font-bold text-white hover:bg-[#2a1f5e] transition-colors"
+        >
+          <RefreshCw className="h-4 w-4" client:load />
+          Retry Now
+        </button>
+        <a
+          href="/products"
+          class="inline-flex items-center rounded-full border border-gray-200 px-6 py-2.5 text-[13px] font-semibold text-gray-700 hover:border-gray-300 hover:bg-gray-50 transition-colors"
+        >
+          Browse All Listings
+        </a>
+      </div>
+    </div>
+  ) : !seller ? (
+    <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-24 text-center">
+      <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-50 text-[#352778]">
+        <PackageX className="h-8 w-8" client:load />
+      </div>
+      <h1 class="text-2xl font-extrabold text-gray-900">Storefront Not Found</h1>
+      <p class="mt-2 text-[14px] text-gray-500 max-w-md mx-auto">
+        This merchant storefront does not exist, has been suspended, or was removed.
+      </p>
+      <div class="mt-7 flex items-center justify-center gap-3">
+        <a
+          href="/products"
+          class="inline-flex items-center gap-2 rounded-full bg-[#352778] px-6 py-2.5 text-[13px] font-bold text-white hover:bg-[#2a1f5e] transition-colors"
+        >
+          Browse All Products
+        </a>
+        <a
+          href="/"
+          class="inline-flex items-center rounded-full border border-gray-200 px-6 py-2.5 text-[13px] font-semibold text-gray-700 hover:border-gray-300 hover:bg-gray-50 transition-colors"
+        >
+          Return Home
+        </a>
+      </div>
+    </div>
+  ) : (
+    <div class="min-h-screen bg-gray-50/50 pb-16">
+      {/* Breadcrumb Navigation */}
+      <nav class="border-b border-gray-200 bg-white">
+        <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-3 flex items-center gap-1.5 text-[12px] text-gray-400 overflow-x-auto whitespace-nowrap">
+          <a href="/" class="hover:text-gray-700 transition-colors">Home</a>
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <a href="/products" class="hover:text-gray-700 transition-colors">Marketplace</a>
+          <ChevronRight className="h-3 w-3 shrink-0" />
+          <span class="truncate font-semibold text-gray-700 max-w-[220px] sm:max-w-md">{seller.businessName}</span>
+        </div>
+      </nav>
+
+      <div class="mx-auto max-w-[1152px] px-5 sm:px-8 py-8 sm:py-10">
+
+        {/* ── Merchant Storefront Hero Card ── */}
+        <div class="rounded-3xl border border-gray-200 bg-white p-6 sm:p-8 shadow-[0_2px_16px_0_rgba(53,39,120,0.06)] relative overflow-hidden mb-10">
+          <div class="absolute top-0 right-0 h-40 w-40 bg-gradient-to-br from-purple-100/40 to-transparent rounded-bl-full pointer-events-none" />
+
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
+            <div class="flex items-start sm:items-center gap-5">
+              {/* Merchant Avatar / Logo */}
+              {seller.logoUrl ? (
+                <img
+                  src={seller.logoUrl}
+                  alt={seller.businessName}
+                  class="h-16 w-16 sm:h-20 sm:w-20 rounded-2xl object-cover border-2 border-purple-100 shadow-xs shrink-0"
+                />
+              ) : (
+                <div class="flex h-16 w-16 sm:h-20 sm:w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#352778] to-[#7c3aed] text-white text-2xl sm:text-3xl font-extrabold shadow-sm">
+                  {sellerInitial}
+                </div>
+              )}
+
+              <div class="space-y-1.5">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h1 class="text-xl sm:text-2xl font-black text-gray-900 tracking-tight leading-snug">
+                    {seller.businessName}
+                  </h1>
+                  {seller.isVerified && (
+                    <span class="inline-flex items-center gap-1 rounded-full bg-purple-50 border border-purple-200 px-2.5 py-0.5 text-[11px] font-bold text-[#352778]" title="Verified WallX Business">
+                      <BadgeCheck className="h-3.5 w-3.5 text-[#7c3aed]" />
+                      Verified
+                    </span>
+                  )}
+                </div>
+
+                <div class="flex items-center gap-4 text-[12.5px] text-gray-500 flex-wrap">
+                  {(seller.city || seller.state) && (
+                    <span class="flex items-center gap-1">
+                      <MapPin className="h-3.5 w-3.5 text-[#7c3aed]" />
+                      {[seller.city, seller.state].filter(Boolean).join(', ')}
+                    </span>
+                  )}
+                  <span class="flex items-center gap-1">
+                    <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                    {formatMemberSince(seller.createdAt)}
+                  </span>
+                  <span class="flex items-center gap-1 font-semibold text-[#352778]">
+                    <Store className="h-3.5 w-3.5 text-[#7c3aed]" />
+                    {total} {total === 1 ? 'listing' : 'listings'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Merchant Contact Action */}
+            {whatsappUrl && (
+              <div class="shrink-0 pt-2 sm:pt-0">
+                <a
+                  href={whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 hover:bg-emerald-700 px-6 py-3 text-[13.5px] font-bold text-white shadow-sm hover:shadow-md transition-all active:scale-[0.98] w-full sm:w-auto"
+                >
+                  <MessageCircle className="h-4.5 w-4.5" />
+                  <span>Chat with Merchant</span>
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Products Section ── */}
+        <div class="mb-6 flex items-center justify-between pb-3 border-b border-gray-200/80">
+          <div>
+            <h2 class="text-lg font-bold text-gray-900 tracking-tight">
+              All Products & Services
+            </h2>
+            <p class="text-[12.5px] text-gray-500">
+              Showing approved offerings from {seller.businessName}
+            </p>
+          </div>
+          <span class="text-[12px] font-semibold text-gray-500 bg-white border border-gray-200 rounded-full px-3 py-1">
+            {total} {total === 1 ? 'item' : 'items'}
+          </span>
+        </div>
+
+        {products.length > 0 ? (
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {products.map((product) => (
+              <ProductCard product={product} client:load />
+            ))}
+          </div>
+        ) : (
+          <div class="rounded-2xl border border-dashed border-gray-300 bg-white p-12 text-center max-w-md mx-auto my-12">
+            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-50 text-[#352778]">
+              <Package className="h-7 w-7 text-[#7c3aed]" />
+            </div>
+            <h3 class="text-base font-bold text-gray-900">No active listings</h3>
+            <p class="mt-1.5 text-[13px] text-gray-500">
+              This merchant has not published any active listings in the marketplace yet.
+            </p>
+            <div class="mt-6">
+              <a
+                href="/products"
+                class="inline-flex items-center gap-1.5 text-[13px] font-bold text-[#352778] hover:underline"
+              >
+                Browse other merchants
+              </a>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  )}
+</Layout>

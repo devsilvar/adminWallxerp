@@ -193,14 +193,20 @@ export async function register(input: RegisterInput) {
       }
     }
 
+    const termsAccepted = input.acceptedTerms ?? true;
+    const termsVersion = config.regulatory.termsVersion;
+
     const created = await tx.user.create({
       data: {
         email: input.email,
         passwordHash,
         phone: input.phone,
+        acquisitionSource: input.acquisitionSource ?? null,
         isVerified: false,
         verificationTokenHash,
         verificationTokenExpiresAt,
+        regulatoryTermsAcceptedAt: termsAccepted ? new Date() : null,
+        regulatoryTermsVersion: termsAccepted ? termsVersion : null,
       },
     });
 
@@ -383,6 +389,50 @@ export async function getMe(userId: string) {
   ]);
   const isOwnerAccount = !(ownedCount === 0 && nonOwnerMemberships > 0);
 
+  // If user is not an owner but has business memberships, inherit owner's subscription
+  let isSubscriptionInherited = false;
+  let subscriptionOwner: { id: string; name: string | null; email: string | null } | null = null;
+  let effectiveSubscriptionTier = user.subscriptionTier;
+  let effectiveSubscriptionExpiresAt = user.subscriptionExpiresAt;
+  let effectiveTrialEndsAt = user.trialEndsAt;
+
+  if (!isOwnerAccount) {
+    // Find the first active membership and get the business owner
+    const membership = await prisma.businessMember.findFirst({
+      where: { userId, isActive: true },
+      include: {
+        business: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                fullName: true,
+                email: true,
+                subscriptionTier: true,
+                subscriptionExpiresAt: true,
+                trialEndsAt: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { joinedAt: 'asc' },
+    });
+
+    if (membership?.business?.user) {
+      const owner = membership.business.user;
+      isSubscriptionInherited = true;
+      subscriptionOwner = {
+        id: owner.id,
+        name: owner.fullName,
+        email: owner.email,
+      };
+      effectiveSubscriptionTier = owner.subscriptionTier;
+      effectiveSubscriptionExpiresAt = owner.subscriptionExpiresAt;
+      effectiveTrialEndsAt = owner.trialEndsAt;
+    }
+  }
+
   const pendingSubmission = await prisma.subscriptionSubmission.findFirst({
     where: { userId, status: 'pending' },
     orderBy: { createdAt: 'desc' },
@@ -390,9 +440,16 @@ export async function getMe(userId: string) {
   });
 
   return {
-    ...sanitizeUser(user),
+    ...sanitizeUser({
+      ...user,
+      subscriptionTier: effectiveSubscriptionTier,
+      subscriptionExpiresAt: effectiveSubscriptionExpiresAt,
+      trialEndsAt: effectiveTrialEndsAt,
+    }),
     pendingInvitationCount,
     isOwnerAccount,
+    isSubscriptionInherited,
+    subscriptionOwner,
     pendingPlan: pendingSubmission?.plan ?? null,
     hasPendingSubmission: !!pendingSubmission,
   };

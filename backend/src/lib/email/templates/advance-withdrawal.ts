@@ -56,13 +56,13 @@ export function generateAdvanceWithdrawalHtml(data: AdvanceWithdrawalEmailData):
           <tr>
             <td style="padding: 32px 32px 20px; text-align: center; background-color: #faf5ff; border-bottom: 1px solid #e9d5ff;">
               <p style="margin: 0; color: #7c3aed; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
-                Advance Amount Disbursed
+                Advance Credited to Wallet
               </p>
               <h2 style="margin: 8px 0 0; color: #0f172a; font-size: 32px; font-weight: 800; letter-spacing: -0.5px;">
                 ${data.requestedFormatted}
               </h2>
               <p style="margin: 6px 0 0; color: #6d28d9; font-size: 13px; font-weight: 500;">
-                Instant Commercial Bank Transfer
+                Instant Wallet Credit
               </p>
             </td>
           </tr>
@@ -75,7 +75,7 @@ export function generateAdvanceWithdrawalHtml(data: AdvanceWithdrawalEmailData):
               </p>
 
               <p style="margin: 0 0 24px; color: #475569; font-size: 14px; line-height: 1.6;">
-                Your settlement advance request for <strong>${data.businessName}</strong> has been approved. A net advance of <strong>${data.requestedFormatted}</strong> is being transferred to your commercial settlement account.
+                Your settlement advance request for <strong>${data.businessName}</strong> has been approved. A net advance of <strong>${data.requestedFormatted}</strong> has been credited to your WallX wallet and is available to withdraw.
               </p>
 
               <!-- Details Box -->
@@ -89,15 +89,15 @@ export function generateAdvanceWithdrawalHtml(data: AdvanceWithdrawalEmailData):
                   <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 13px; font-weight: 600; text-align: right;">${data.feeFormatted}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Total Wallet Debit</td>
+                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Total Advance Cost</td>
                   <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 13px; font-weight: 600; text-align: right;">${data.totalDebitFormatted}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Destination Bank</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 13px; font-weight: 600; text-align: right;">${data.destinationBankName} (${data.accountNumberMasked})</td>
+                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Credited To</td>
+                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 13px; font-weight: 600; text-align: right;">WallX Wallet</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Account Name</td>
+                  <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">Wallet Owner</td>
                   <td style="padding: 12px 16px; border-bottom: 1px solid #e2e8f0; color: #0f172a; font-size: 13px; font-weight: 600; text-align: right;">${data.destinationAccountName}</td>
                 </tr>
                 <tr>
@@ -177,9 +177,9 @@ Your settlement advance request for ${data.businessName} has been approved.
 ADVANCE SUMMARY:
 - Net Advance Credited: ${data.requestedFormatted}
 - Advance Fee: ${data.feeFormatted} (1% capped ₦500)
-- Total Wallet Debit: ${data.totalDebitFormatted}
-- Destination Bank: ${data.destinationBankName} (${data.accountNumberMasked})
-- Account Name: ${data.destinationAccountName}
+- Total Advance Cost: ${data.totalDebitFormatted}
+- Credited To: WallX Wallet
+- Wallet Owner: ${data.destinationAccountName}
 - Reference: ${data.transferReference}
 - Remaining Unsettled Inflow: ${remainingCopy}
 - Date: ${data.requestDate}

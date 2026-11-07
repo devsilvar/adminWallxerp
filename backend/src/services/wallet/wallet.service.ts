@@ -20,6 +20,7 @@ export interface CreditWalletParams {
   description?: string;
   idempotencyKey?: string;
   linkedSaleId?: string;
+  linkedPayoutId?: string;
   metadata?: Record<string, any>;
 }
 
@@ -322,6 +323,17 @@ export class WalletService {
         }
       }
 
+      // Check linked payout deduplication (settlement advances)
+      if (params.linkedPayoutId) {
+        const existingByPayout = await db.walletTransaction.findUnique({
+          where: { linkedPayoutId: params.linkedPayoutId },
+        });
+        if (existingByPayout) {
+          const currentWallet = await this.getOrCreateWallet(params.userId, db);
+          return { wallet: currentWallet, transaction: existingByPayout, alreadyProcessed: true };
+        }
+      }
+
       // 2. Ensure wallet exists
       await this.getOrCreateWallet(params.userId, db);
 
@@ -359,6 +371,7 @@ export class WalletService {
           idempotencyKey: params.idempotencyKey,
           metadata: params.metadata ?? Prisma.JsonNull,
           linkedSaleId: params.linkedSaleId,
+          linkedPayoutId: params.linkedPayoutId,
         },
       });
 
@@ -384,6 +397,9 @@ export class WalletService {
           (await client.walletTransaction.findUnique({ where: { reference: params.reference } })) ??
           (params.linkedSaleId
             ? await client.walletTransaction.findUnique({ where: { linkedSaleId: params.linkedSaleId } })
+            : null) ??
+          (params.linkedPayoutId
+            ? await client.walletTransaction.findUnique({ where: { linkedPayoutId: params.linkedPayoutId } })
             : null);
 
         if (existingTx) {
@@ -787,6 +803,165 @@ export class WalletService {
       });
 
       return { success: true, releasedAmount: actualToRelease, wallet: updatedWallet };
+    };
+
+    if (tx) {
+      return execute(tx);
+    }
+    return prisma.$transaction(execute, TX_OPTIONS);
+  }
+
+  /**
+   * Returns the settlement advance still outstanding for a user.
+   *
+   * An advance is an internal bucket transfer: the merchant's wallet is credited
+   * now (`source = 'settlement_advance'`) and the gross amount is recovered from
+   * the maturing DVA inflows later (`source = 'settlement_advance_recovery'`).
+   *
+   * - `gross` is the amount still to be recovered from future settlements
+   *   (requested + fee, minus what has already been recovered). Clamped at 0.
+   * - `net` is the advance still sitting in the wallet (requested minus recovered).
+   *   It can go slightly negative once the fee has been fully recovered, which is
+   *   correct: the merchant has paid the advance fee.
+   */
+  static async getOutstandingAdvance(
+    userId: string,
+    tx?: TxClient,
+    opts?: { businessId?: string }
+  ): Promise<{ gross: number; net: number }> {
+    const db = tx ?? prisma;
+
+    // Only wallet-credited advances count. A bank-fulfilled advance (source
+    // 'payout') already debited the wallet at draw time, so the cash is gone and
+    // the maturing inflow is still owed in full — treating it as outstanding here
+    // would recover it a second time out of the settlement sweep.
+    const [creditAgg, recoveryAgg] = await Promise.all([
+      // `netAmount > 0` excludes the legacy bank-payout advance debits.
+      db.walletTransaction.aggregate({
+        where: {
+          userId,
+          type: 'advance',
+          source: 'settlement_advance',
+          netAmount: { gt: 0 },
+          ...(opts?.businessId ? { businessId: opts.businessId } : {}),
+        },
+        _sum: { amount: true, netAmount: true },
+      }),
+      db.walletTransaction.aggregate({
+        where: {
+          userId,
+          type: 'advance',
+          source: 'settlement_advance_recovery',
+          netAmount: { lt: 0 },
+          ...(opts?.businessId ? { businessId: opts.businessId } : {}),
+        },
+        _sum: { amount: true, netAmount: true },
+      }),
+    ]);
+
+    const gross = round2(
+      toNumber(creditAgg._sum.amount ?? 0) - toNumber(recoveryAgg._sum.amount ?? 0)
+    );
+    const net = round2(
+      toNumber(creditAgg._sum.netAmount ?? 0) + toNumber(recoveryAgg._sum.netAmount ?? 0)
+    );
+
+    return { gross: Math.max(0, gross), net };
+  }
+
+  /**
+   * Recovers an outstanding settlement advance from a maturing DVA inflow.
+   *
+   * Called by the T+1 settlement release sweep after the sale has been credited
+   * to the wallet. The sale is credited in full (preserving the sale → wallet
+   * ledger link), then this method debits the wallet by the outstanding advance
+   * (capped at the sale amount) and records a `settlement_advance_recovery`
+   * ledger entry. Net effect: the merchant receives `saleAmount - recovered`,
+   * which is exactly the un-advanced portion of the inflow.
+   *
+   * Idempotent per sale: the recovery reference is derived from the sale id, so
+   * a replayed sweep will not double-recover.
+   */
+  static async recoverAdvanceFromSettlement(
+    params: {
+      userId: string;
+      businessId: string;
+      saleId: string;
+      saleAmount: number | Prisma.Decimal;
+      /** Pre-computed outstanding gross; skips the aggregate when supplied. */
+      outstandingGross?: number;
+    },
+    tx?: TxClient
+  ): Promise<number> {
+    const execute = async (db: TxClient) => {
+      const reference = `ADV-REC-${params.saleId}`;
+
+      const existing = await db.walletTransaction.findUnique({ where: { reference } });
+      if (existing) return 0;
+
+      const gross =
+        params.outstandingGross !== undefined
+          ? params.outstandingGross
+          : (await this.getOutstandingAdvance(params.userId, db)).gross;
+      if (gross <= 0) return 0;
+
+      const saleAmount = toNumber(params.saleAmount);
+      const offset = round2(Math.min(saleAmount, gross));
+      if (offset <= 0) return 0;
+
+      await this.getOrCreateWallet(params.userId, db);
+
+      if (typeof (db as any).$queryRaw === 'function') {
+        await (db as any).$queryRaw`SELECT id FROM wallet_balances WHERE user_id = ${params.userId} FOR UPDATE`;
+      }
+
+      const wallet = await db.walletBalance.findUnique({ where: { userId: params.userId } });
+      if (!wallet) throw new AppError(404, 'Wallet not found', 'WALLET_NOT_FOUND');
+
+      const offsetDec = new Prisma.Decimal(offset);
+      const updatedWallet = await db.walletBalance.update({
+        where: { userId: params.userId },
+        data: {
+          balance: { decrement: offsetDec },
+          version: { increment: 1 },
+          updatedAt: new Date(),
+        },
+      });
+
+      try {
+        await db.walletTransaction.create({
+          data: {
+            walletId: updatedWallet.id,
+            userId: params.userId,
+            businessId: params.businessId,
+            type: 'advance',
+            amount: offsetDec,
+            fee: new Prisma.Decimal(0),
+            netAmount: offsetDec.negated(),
+            balanceAfter: updatedWallet.balance,
+            reference,
+            source: 'settlement_advance_recovery',
+            description: 'Settlement advance recovery from matured inflow',
+            metadata: { recoveredFromSaleId: params.saleId },
+          },
+        });
+      } catch (err: any) {
+        if (err?.code === 'P2002') {
+          // Concurrent sweep already recorded this recovery — undo the debit.
+          await db.walletBalance.update({
+            where: { userId: params.userId },
+            data: {
+              balance: { increment: offsetDec },
+              version: { increment: 1 },
+              updatedAt: new Date(),
+            },
+          });
+          return 0;
+        }
+        throw err;
+      }
+
+      return offset;
     };
 
     if (tx) {

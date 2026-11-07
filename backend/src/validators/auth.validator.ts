@@ -15,6 +15,8 @@ export const registerSchema = z.object({
     .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format')
     .optional(),
   requestedPlan: z.enum(['free', 'starter', 'business', 'scale']).optional(),
+  acquisitionSource: z.enum(['marketplace']).optional(),
+  acceptedTerms: z.boolean().optional(),
 });
 
 export const loginSchema = z.object({
@@ -115,5 +117,3 @@ export type UpdateBvnInput = z.infer<typeof updateBvnSchema>;
 export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
 export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
 export type UpdatePrimaryBusinessInput = z.infer<typeof updatePrimaryBusinessSchema>;
-
-

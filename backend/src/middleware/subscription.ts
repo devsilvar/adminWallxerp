@@ -92,7 +92,50 @@ export async function requireActiveSubscription(
       return next();
     }
 
-    const status = getSubscriptionStatus(user);
+    // Check if user is a team member - inherit owner's subscription
+    let subscriptionUser = user;
+    const ownedCount = await prisma.business.count({ where: { userId } });
+    if (ownedCount === 0) {
+      const membership = await prisma.businessMember.findFirst({
+        where: { userId, isActive: true },
+        include: {
+          business: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  role: true,
+                  createdAt: true,
+                  subscriptionTier: true,
+                  subscriptionExpiresAt: true,
+                  trialEndsAt: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: { joinedAt: 'asc' },
+      });
+      if (membership?.business?.user) {
+        // If owner is admin, treat as admin access
+        if (membership.business.user.role === 'admin') {
+          req.subscription = {
+            tier: 'admin',
+            planName: 'System Administrator',
+            hasAccess: true,
+            isReadOnlyGrace: false,
+            isExpired: false,
+            isPaid: true,
+            expiresAt: null,
+            reason: 'ACTIVE',
+          };
+          return next();
+        }
+        subscriptionUser = membership.business.user as any;
+      }
+    }
+
+    const status = getSubscriptionStatus(subscriptionUser);
 
     // Soft-launch monitoring mode: log warnings without rejecting client
     const enforcementEnabled = config.subscription?.enforcementEnabled ?? false;
@@ -178,21 +221,52 @@ export function requireFeature(feature: keyof PlanFeatures) {
 
       // If tier was not yet resolved, query database
       if (!tier && req.user?.userId) {
+        const userId = req.user.userId;
         const businessId = req.params.businessId || req.params.id;
         if (businessId) {
           const business = await prisma.business.findUnique({
             where: { id: businessId },
             select: {
-              user: { select: { subscriptionTier: true } },
+              user: { select: { subscriptionTier: true, role: true } },
             },
           });
-          tier = business?.user?.subscriptionTier || 'free';
+          if (business?.user?.role === 'admin') {
+            tier = 'admin';
+          } else {
+            tier = business?.user?.subscriptionTier || 'free';
+          }
         } else {
-          const user = await prisma.user.findUnique({
-            where: { id: req.user.userId },
-            select: { subscriptionTier: true },
-          });
-          tier = user?.subscriptionTier || 'free';
+          const ownedCount = await prisma.business.count({ where: { userId } });
+          if (ownedCount === 0) {
+            const membership = await prisma.businessMember.findFirst({
+              where: { userId, isActive: true },
+              include: {
+                business: {
+                  include: {
+                    user: { select: { subscriptionTier: true, role: true } },
+                  },
+                },
+              },
+              orderBy: { joinedAt: 'asc' },
+            });
+            if (membership?.business?.user?.role === 'admin') {
+              tier = 'admin';
+            } else if (membership?.business?.user) {
+              tier = membership.business.user.subscriptionTier || 'free';
+            } else {
+              const user = await prisma.user.findUnique({
+                where: { id: userId },
+                select: { subscriptionTier: true },
+              });
+              tier = user?.subscriptionTier || 'free';
+            }
+          } else {
+            const user = await prisma.user.findUnique({
+              where: { id: userId },
+              select: { subscriptionTier: true },
+            });
+            tier = user?.subscriptionTier || 'free';
+          }
         }
       }
 

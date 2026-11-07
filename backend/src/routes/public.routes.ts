@@ -7,6 +7,7 @@
  */
 
 import { Router } from 'express';
+import express from 'express';
 import * as invoiceController from '@/controllers/invoice.controller';
 import { publicVoucherController } from '@/controllers/public-voucher.controller';
 import * as publicMarketplaceController from '@/controllers/public-marketplace.controller';
@@ -47,9 +48,28 @@ router.get(
 );
 
 router.get(
+  '/marketplace/products/:productId/whatsapp-redirect',
+  publicMarketplaceRateLimiter,
+  publicMarketplaceController.redirectWhatsApp
+);
+
+router.get(
   '/marketplace/products/:slug',
   publicMarketplaceRateLimiter,
   publicMarketplaceController.getBySlug
+);
+
+router.post(
+  '/marketplace/products/:productId/events',
+  publicMarketplaceRateLimiter,
+  express.json({ limit: '1kb' }),
+  publicMarketplaceController.recordEvent
+);
+
+router.get(
+  '/marketplace/sellers/:identifier',
+  publicMarketplaceRateLimiter,
+  publicMarketplaceController.getSellerStorefront
 );
 
 export default router;

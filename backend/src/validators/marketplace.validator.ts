@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { asNumber, asStringOptional } from './query.utils';
+import { asNumber, asStringOptional, asBooleanOptional } from './query.utils';
 
 export const MARKETPLACE_CATEGORIES = [
   'fashion',
@@ -308,30 +308,65 @@ export const submitProductSchema = z
   })
   .optional();
 
+export const MARKETPLACE_SORT_OPTIONS = [
+  'newest',
+  'price_asc',
+  'price_desc',
+  'relevance',
+] as const;
+
+export type MarketplaceSortOption = (typeof MARKETPLACE_SORT_OPTIONS)[number];
+
 /**
  * List / Query Marketplace Products Schema (SME & Public)
  */
-export const listProductsQuerySchema = z.object({
-  page: asNumber({ min: 1, int: true }).default(1),
-  limit: asNumber({ min: 1, max: 100, int: true }).default(24),
-  category: z.preprocess(
-    (val) => (Array.isArray(val) ? val[0] : val),
-    z.enum(MARKETPLACE_CATEGORIES).optional()
-  ),
-  type: z.preprocess(
-    (val) => (Array.isArray(val) ? val[0] : val),
-    z.enum(PRODUCT_TYPES).optional()
-  ),
-  productType: z.preprocess(
-    (val) => (Array.isArray(val) ? val[0] : val),
-    z.enum(PRODUCT_TYPES).optional()
-  ),
-  status: z.preprocess(
-    (val) => (Array.isArray(val) ? val[0] : val),
-    z.enum(['draft', 'pending_approval', 'approved', 'rejected', 'archived']).optional()
-  ),
-  search: asStringOptional,
-});
+export const listProductsQuerySchema = z
+  .object({
+    page: asNumber({ min: 1, int: true }).default(1),
+    limit: asNumber({ min: 1, max: 100, int: true }).default(24),
+    category: z.preprocess(
+      (val) => (Array.isArray(val) ? val[0] : val),
+      z.enum(MARKETPLACE_CATEGORIES).optional()
+    ),
+    type: z.preprocess(
+      (val) => (Array.isArray(val) ? val[0] : val),
+      z.enum(PRODUCT_TYPES).optional()
+    ),
+    productType: z.preprocess(
+      (val) => (Array.isArray(val) ? val[0] : val),
+      z.enum(PRODUCT_TYPES).optional()
+    ),
+    status: z.preprocess(
+      (val) => (Array.isArray(val) ? val[0] : val),
+      z.enum(['draft', 'pending_approval', 'approved', 'rejected', 'archived']).optional()
+    ),
+    search: asStringOptional,
+    sort: z.preprocess((val) => {
+      const raw = Array.isArray(val) ? val[0] : val;
+      if (raw === 'price-asc') return 'price_asc';
+      if (raw === 'price-desc') return 'price_desc';
+      return raw;
+    }, z.enum(MARKETPLACE_SORT_OPTIONS).default('newest')),
+    state: asStringOptional,
+    minPrice: asNumber({ min: 0 }).optional(),
+    maxPrice: asNumber({ min: 0 }).optional(),
+    verifiedOnly: asBooleanOptional,
+    hasDiscount: asBooleanOptional,
+    inStockOnly: asBooleanOptional,
+  })
+  .superRefine((data, ctx) => {
+    if (
+      data.minPrice !== undefined &&
+      data.maxPrice !== undefined &&
+      data.minPrice > data.maxPrice
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'minPrice cannot be greater than maxPrice',
+        path: ['minPrice'],
+      });
+    }
+  });
 
 /**
  * Admin Moderation Schemas
@@ -358,6 +393,31 @@ export const takedownSchema = z.object({
     .max(500, 'Takedown reason cannot exceed 500 characters'),
 });
 
+export const sendBackSchema = z.object({
+  reason: z
+    .string({ error: 'Send back reason is mandatory' })
+    .trim()
+    .min(3, 'Reason must be at least 3 characters')
+    .max(500, 'Reason cannot exceed 500 characters'),
+});
+
+/**
+ * Record Listing Event Schema (Phase 4 — anonymous beacon)
+ */
+export const MARKETPLACE_EVENT_TYPES = [
+  'view',
+  'whatsapp_click',
+  'call_click',
+  'share_click',
+  'storefront_view',
+  'boost_impression',
+] as const;
+
+export const recordEventSchema = z.object({
+  type: z.enum(MARKETPLACE_EVENT_TYPES),
+  source: z.string().max(50).optional(),
+});
+
 /**
  * Inferred Types
  */
@@ -368,3 +428,74 @@ export type ListProductsQuery = z.infer<typeof listProductsQuerySchema>;
 export type ApproveProductInput = z.infer<typeof approveSchema>;
 export type RejectProductInput = z.infer<typeof rejectSchema>;
 export type TakedownProductInput = z.infer<typeof takedownSchema>;
+export type SendBackProductInput = z.infer<typeof sendBackSchema>;
+export type RecordEventInput = z.infer<typeof recordEventSchema>;
+
+/**
+ * Slot Purchase Schema (Phase 10)
+ */
+export const purchaseSlotsSchema = z.object({
+  slots: z.coerce
+    .number()
+    .int('Slots must be an integer')
+    .min(1, 'At least 1 slot must be purchased')
+    .max(100, 'Cannot purchase more than 100 slots at once'),
+  idempotencyKey: z.string().trim().max(128).optional(),
+});
+
+export type PurchaseSlotsInput = z.infer<typeof purchaseSlotsSchema>;
+
+/**
+ * Slot Purchase via Proof Schema (Phase 11)
+ */
+export const submitSlotProofSchema = z.object({
+  slots: z.coerce
+    .number()
+    .int('Slots must be an integer')
+    .min(1, 'At least 1 slot must be requested')
+    .max(100, 'Cannot request more than 100 slots at once')
+    .default(1),
+});
+
+export type SubmitSlotProofInput = z.infer<typeof submitSlotProofSchema>;
+
+/**
+ * Admin Slot Purchase Actions (Phase 11)
+ */
+export const rejectSlotProofSchema = z.object({
+  reason: z
+    .string({ error: 'Rejection reason is mandatory' })
+    .trim()
+    .min(3, 'Rejection reason must be at least 3 characters')
+    .max(500, 'Rejection reason cannot exceed 500 characters'),
+});
+
+export type RejectSlotProofInput = z.infer<typeof rejectSlotProofSchema>;
+
+export const refundSlotPurchaseSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+
+export type RefundSlotPurchaseInput = z.infer<typeof refundSlotPurchaseSchema>;
+
+export const listAdminSlotPurchasesQuerySchema = z.object({
+  status: z.preprocess(
+    (val) => (Array.isArray(val) ? val[0] : val),
+    z.enum(['pending_proof', 'active', 'rejected', 'refunded']).optional()
+  ),
+  page: asNumber({ min: 1, int: true }).default(1),
+  limit: asNumber({ min: 1, max: 100, int: true }).default(20),
+  search: asStringOptional,
+});
+
+export type ListAdminSlotPurchasesQuery = z.infer<typeof listAdminSlotPurchasesQuerySchema>;
+
+/**
+ * Marketplace Boost Purchase Schema (Phase 13)
+ */
+export const createBoostSchema = z.object({
+  plan: z.enum(['week', 'fortnight', 'month']),
+  requestId: z.string().trim().max(100).optional(),
+});
+
+export type CreateBoostInput = z.infer<typeof createBoostSchema>;

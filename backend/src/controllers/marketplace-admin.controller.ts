@@ -5,9 +5,14 @@ import {
   approveSchema,
   rejectSchema,
   takedownSchema,
+  sendBackSchema,
   listProductsQuerySchema,
+  rejectSlotProofSchema,
+  refundSlotPurchaseSchema,
+  listAdminSlotPurchasesQuerySchema,
 } from '@/validators/marketplace.validator';
 import * as marketplaceService from '@/services/marketplace/marketplace.service';
+import * as marketplaceSlotsService from '@/services/marketplace/marketplace-slots.service';
 
 /**
  * Extracts a single string route parameter safely, handling Express 5 string[] types.
@@ -120,9 +125,162 @@ export const takedownProduct = asyncHandler(
   }
 );
 
+/**
+ * POST /admin/marketplace/:id/send-back
+ * Send an approved product listing back to pending_approval for merchant revision.
+ */
+export const sendBackProduct = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user?.userId) {
+      throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
+    }
+
+    const productId = extractParam(req.params.id, 'id');
+    const { reason } = sendBackSchema.parse(req.body);
+
+    const product = await marketplaceService.sendProductBack(
+      req.user.userId,
+      productId,
+      reason
+    );
+
+    res.status(200).json({
+      success: true,
+      data: product,
+      message: 'Product sent back for review',
+    });
+  }
+);
+
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Phase 11 — Admin Listing Slots Moderation & Refunds
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * GET /admin/marketplace/slots
+ * List slot purchase records and pending bank transfer proofs.
+ */
+export const listSlotPurchases = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user?.userId) {
+      throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
+    }
+
+    const query = listAdminSlotPurchasesQuerySchema.parse(req.query);
+    const result = await marketplaceSlotsService.listAdminSlotPurchases(query);
+
+    res.status(200).json({
+      success: true,
+      data: result.data,
+      pagination: result.pagination,
+    });
+  }
+);
+
+/**
+ * POST /admin/marketplace/slots/:id/approve
+ * Approve a pending slot purchase proof and raise merchant allowance.
+ */
+export const approveSlotProof = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user?.userId) {
+      throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
+    }
+
+    const purchaseId = extractParam(req.params.id, 'id');
+
+    const result = await marketplaceSlotsService.approveSlotProof({
+      adminUserId: req.user.userId,
+      purchaseId,
+      metadata: {
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: result.purchase,
+      newAllowance: result.newAllowance,
+      message: result.message,
+    });
+  }
+);
+
+/**
+ * POST /admin/marketplace/slots/:id/reject
+ * Reject a pending slot purchase proof with mandatory reason.
+ */
+export const rejectSlotProof = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user?.userId) {
+      throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
+    }
+
+    const purchaseId = extractParam(req.params.id, 'id');
+    const { reason } = rejectSlotProofSchema.parse(req.body);
+
+    const result = await marketplaceSlotsService.rejectSlotProof({
+      adminUserId: req.user.userId,
+      purchaseId,
+      reason,
+      metadata: {
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: result.purchase,
+      message: result.message,
+    });
+  }
+);
+
+/**
+ * POST /admin/marketplace/slots/:id/refund
+ * Refund an active slot purchase (credits merchant wallet & decrements allowance).
+ * Blocked if allowance - slots < liveProducts with 409.
+ */
+export const refundSlotPurchase = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    if (!req.user?.userId) {
+      throw new AppError(401, 'Authentication required', 'UNAUTHORIZED');
+    }
+
+    const purchaseId = extractParam(req.params.id, 'id');
+    const { reason } = refundSlotPurchaseSchema.parse(req.body || {});
+
+    const result = await marketplaceSlotsService.refundSlotPurchase({
+      adminUserId: req.user.userId,
+      purchaseId,
+      reason,
+      metadata: {
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: result.purchase,
+      newAllowance: result.newAllowance,
+      message: result.message,
+    });
+  }
+);
+
 export const marketplaceAdminController = {
   listQueue,
   approveProduct,
   rejectProduct,
   takedownProduct,
+  sendBackProduct,
+  listSlotPurchases,
+  approveSlotProof,
+  rejectSlotProof,
+  refundSlotPurchase,
 };

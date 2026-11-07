@@ -1,0 +1,24 @@
+{
+  "greeting": {
+    "morning": "Good morning",
+    "afternoon": "Good afternoon",
+    "evening": "Good evening"
+  },
+  "kpis": {
+    "this_month": "This month",
+    "total_sales": "Total Sales",
+    "expenses": "Expenses",
+    "gross_profit": "Gross Profit",
+    "tax_payable": "Tax Payable"
+  },
+  "actions": {
+    "view_report": "View Report",
+    "record_sale": "Record Sale",
+    "pay_tax": "Pay Tax"
+  },
+  "status": {
+    "unpaid": "Unpaid",
+    "paid": "Paid",
+    "pending": "Pending"
+  }
+}

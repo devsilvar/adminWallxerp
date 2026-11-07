@@ -121,7 +121,11 @@ export default function TreasuryTab({
             <StatCell
               label='Total You Owe Merchants'
               sublabel='All merchant wallet balances combined'
-              value={formatNaira(kpis.merchantLiabilityNaira)}
+              value={
+                typeof kpis.merchantLiabilityNaira === 'number' && Number.isFinite(kpis.merchantLiabilityNaira)
+                  ? formatNaira(kpis.merchantLiabilityNaira)
+                  : 'Unavailable'
+              }
             />
             <div className='bg-panel px-3 py-2.5'>
               <div className='flex items-start justify-between gap-2'>

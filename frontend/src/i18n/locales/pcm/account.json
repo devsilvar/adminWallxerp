@@ -1,0 +1,26 @@
+{
+  "dva": {
+    "title": "Virtual Bank Account",
+    "subtitle": "Get account number wey you go dey receive money",
+    "setup_button": "Setup am",
+    "account_number": "Account Number",
+    "bank_name": "Bank",
+    "status": {
+      "active": "Dey work",
+      "pending": "Dey setup...",
+      "none": "Never setup"
+    },
+    "bvn_form": {
+      "title": "Confirm say na you",
+      "subtitle": "Make you fit collect money, we need confirm your identity",
+      "bvn_label": "BVN (Bank Verification Number)",
+      "bank_label": "Bank",
+      "account_label": "Account Number",
+      "submit": "Verify",
+      "verifying": "Dey check your identity",
+      "wait_message": "Paystack dey verify your BVN. E fit take 1-2 minutes.",
+      "polling_message": "We dey check every 10 seconds. You fit comot — the account go show when e don ready.",
+      "refresh_button": "Check again"
+    }
+  }
+}

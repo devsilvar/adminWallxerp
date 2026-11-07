@@ -63,6 +63,7 @@ model User {
   subscriptionTier      String?   @default("free") @map("subscription_tier")
   subscriptionExpiresAt DateTime? @map("subscription_expires_at")
   trialEndsAt           DateTime? @map("trial_ends_at")
+  acquisitionSource     String?   @map("acquisition_source")
 
   auditLogs               AuditLog[]
   businesses              Business[]
@@ -127,6 +128,7 @@ model Business {
   voucherBonusPct            Decimal                 @default(0.00) @map("voucher_bonus_pct") @db.Decimal(5, 2)
   // Per-business editable threshold for negative voucher deductions (manager <= threshold, owner > threshold)
   voucherAdjustmentThreshold Decimal                 @default(50000.00) @map("voucher_adjustment_threshold") @db.Decimal(15, 2)
+  marketplaceSlotAllowance   Int                     @default(3) @map("marketplace_slot_allowance")
   createdAt                  DateTime                @default(now()) @map("created_at")
   updatedAt                  DateTime                @updatedAt @map("updated_at")
   merchantId                 String                  @unique @map("merchant_id")
@@ -154,6 +156,8 @@ model Business {
   aiQueryLogs             AiQueryLog[]
   voucherLedgerRequests   VoucherLedgerRequest[]
   marketplaceProducts     MarketplaceProduct[]
+  marketplaceSlotPurchases MarketplaceSlotPurchase[]
+  marketplaceBoosts       MarketplaceBoost[]
 
   @@index([userId])
   @@index([taxId])
@@ -1271,12 +1275,121 @@ model MarketplaceProduct {
   updatedAt       DateTime             @updatedAt @map("updated_at")
 
   // Relations
+  // Tracking & Funnel Counters
+  viewCount       Int                  @default(0) @map("view_count")
+  contactCount    Int                  @default(0) @map("contact_count")
+  lastContactedAt DateTime?            @map("last_contacted_at")
+  expiresAt       DateTime?            @map("expires_at")
+  soldAt          DateTime?            @map("sold_at")
+  discountActive  Boolean              @default(dbgenerated()) @map("discount_active")
+  boostEndsAt     DateTime?            @map("boost_ends_at")
+
   business        Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  events          MarketplaceListingEvent[]
+  boosts          MarketplaceBoost[]
 
   @@index([attributes], type: Gin)
   @@index([businessId])
   @@index([status, createdAt(sort: Desc)])
   @@index([category])
   @@index([slug])
+  @@index([discountActive])
+  @@index([boostEndsAt])
   @@map("marketplace_products")
+}
+
+/// Append-only funnel events for marketplace analytics
+model MarketplaceListingEvent {
+  id          String               @id @default(uuid())
+  productId   String               @map("product_id")
+  businessId  String               @map("business_id")
+  eventType   MarketplaceEventType @map("event_type")
+  sessionHash String?              @map("session_hash")
+  source      String?              @map("source")
+  occurredAt  DateTime             @default(now()) @map("occurred_at")
+
+  product     MarketplaceProduct   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, eventType, sessionHash])
+  @@index([productId, eventType, occurredAt])
+  @@index([businessId, occurredAt])
+  @@map("marketplace_listing_events")
+}
+
+enum MarketplaceEventType {
+  view
+  whatsapp_click
+  call_click
+  share_click
+  storefront_view
+  boost_impression
+}
+
+enum SlotPurchaseStatus {
+  pending_proof
+  active
+  rejected
+  refunded
+}
+
+model MarketplaceSlotPurchase {
+  id          String             @id @default(uuid())
+  businessId  String             @map("business_id")
+  slots       Int                @default(1)
+  unitPrice   Decimal            @db.Decimal(15, 2) @map("unit_price")
+  amount      Decimal            @db.Decimal(15, 2)
+  status      SlotPurchaseStatus @default(active)
+  paidVia     String             @map("paid_via") // wallet | proof
+  walletTxRef String?            @unique @map("wallet_tx_ref")
+  proofUrl    String?            @map("proof_url")
+  purchasedBy    String             @map("purchased_by")
+  idempotencyKey String?            @unique @map("idempotency_key")
+  reviewedBy     String?            @map("reviewed_by")
+  reviewedAt     DateTime?          @map("reviewed_at")
+  rejectionReason String?           @map("rejection_reason")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
+
+  business    Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@map("marketplace_slot_purchases")
+}
+
+enum BoostPlan {
+  week
+  fortnight
+  month
+}
+
+enum BoostStatus {
+  waitlisted
+  active
+  expired
+  refunded
+  paused
+}
+
+model MarketplaceBoost {
+  id             String      @id @default(uuid())
+  productId      String      @map("product_id")
+  businessId     String      @map("business_id")
+  plan           BoostPlan
+  amount         Decimal     @db.Decimal(15, 2)
+  startsAt       DateTime    @map("starts_at")
+  endsAt         DateTime    @map("ends_at")
+  status         BoostStatus @default(active)
+  impressions    Int         @default(0)
+  walletTxRef    String?     @unique @map("wallet_tx_ref")
+  idempotencyKey String?     @unique @map("idempotency_key")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @default(now()) @updatedAt @map("updated_at")
+
+  product        MarketplaceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  business       Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([productId, status, endsAt])
+  @@index([businessId, createdAt])
+  @@index([status, endsAt])
+  @@map("marketplace_boosts")
 }

@@ -63,6 +63,10 @@ export async function runSettlementReleaseSweep(opts?: { bypassLock?: boolean })
 
 async function executeRelease(db: typeof prisma = prisma): Promise<SettlementReleaseResult> {
   const now = new Date();
+  // When the sweep runs under the advisory-lock transaction, reuse it so the
+  // credit + advance recovery are atomic. When bypassing the lock, let each
+  // wallet operation manage its own transaction.
+  const txClient = db === prisma ? undefined : (db as any);
 
   const maturingSales = await db.salesTransaction.findMany({
     where: {
@@ -81,16 +85,29 @@ async function executeRelease(db: typeof prisma = prisma): Promise<SettlementRel
     return { salesFound: 0, credited: 0, failed: 0 };
   }
 
+  // Resolve every business in one query instead of one per sale.
+  const businessIds = Array.from(new Set(maturingSales.map((s) => s.businessId)));
+  const businesses = await db.business.findMany({
+    where: { id: { in: businessIds } },
+    select: { id: true, userId: true },
+  });
+  const userIdByBusinessId = new Map(businesses.map((b) => [b.id, b.userId]));
+
+  // Pre-compute each user's outstanding settlement advance once, then keep the
+  // running balance in memory as sales are recovered.
+  const outstandingByUser = new Map<string, number>();
+  for (const userId of new Set(businesses.map((b) => b.userId))) {
+    const { gross } = await WalletService.getOutstandingAdvance(userId, txClient);
+    outstandingByUser.set(userId, gross);
+  }
+
   let credited = 0;
   let failed = 0;
 
   for (const sale of maturingSales) {
     try {
-      const biz = await db.business.findUnique({
-        where: { id: sale.businessId },
-        select: { userId: true },
-      });
-      if (!biz) {
+      const userId = userIdByBusinessId.get(sale.businessId);
+      if (!userId) {
         logger.warn('[SETTLEMENT_RELEASE] Sale has no business, skipping', { saleId: sale.id });
         failed++;
         continue;
@@ -100,7 +117,7 @@ async function executeRelease(db: typeof prisma = prisma): Promise<SettlementRel
       const reference = sale.referenceId || `SETTLEMENT-RELEASE-${sale.id}`;
 
       await WalletService.creditWallet({
-        userId: biz.userId,
+        userId,
         businessId: sale.businessId,
         amount: amountNum,
         fee: 0,
@@ -111,7 +128,27 @@ async function executeRelease(db: typeof prisma = prisma): Promise<SettlementRel
         description: `Settlement release (T+1 business day)`,
         linkedSaleId: sale.id,
         metadata: { settlementRelease: true, settledAt: sale.settledAt },
-      });
+      }, txClient);
+
+      // Recover any outstanding settlement advance from this matured inflow.
+      // The sale is credited in full above; the recovery debits the wallet by
+      // the advanced portion so the merchant is not paid twice.
+      const outstanding = outstandingByUser.get(userId) ?? 0;
+      if (outstanding > 0) {
+        const recovered = await WalletService.recoverAdvanceFromSettlement(
+          {
+            userId,
+            businessId: sale.businessId,
+            saleId: sale.id,
+            saleAmount: amountNum,
+            outstandingGross: outstanding,
+          },
+          txClient
+        );
+        if (recovered > 0) {
+          outstandingByUser.set(userId, Math.max(0, Math.round((outstanding - recovered) * 100) / 100));
+        }
+      }
 
       credited++;
     } catch (err: any) {

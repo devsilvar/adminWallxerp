@@ -60,3 +60,5 @@ Thumbs.db
 # Documentation & notes (keep plan docs tracked)
 !*.md
 !*.txt
+# Scratch workspace
+scratch/

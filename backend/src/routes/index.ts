@@ -7,6 +7,7 @@
  */
 
 import { Router } from 'express';
+import express from 'express';
 import healthRoutes from './health.routes';
 import authRoutes from './auth.routes';
 import businessRoutes from './business.routes';
@@ -69,9 +70,26 @@ v1.get(
   publicMarketplaceController.listFeed
 );
 v1.get(
+  '/marketplace/products/:productId/whatsapp-redirect',
+  publicMarketplaceRateLimiter,
+  publicMarketplaceController.redirectWhatsApp
+);
+v1.get(
   '/marketplace/products/:slug',
   publicMarketplaceRateLimiter,
   publicMarketplaceController.getBySlug
+);
+v1.post(
+  '/marketplace/products/:productId/events',
+  publicMarketplaceRateLimiter,
+  express.json({ limit: '1kb' }),
+  publicMarketplaceController.recordEvent
+);
+
+v1.get(
+  '/marketplace/sellers/:identifier',
+  publicMarketplaceRateLimiter,
+  publicMarketplaceController.getSellerStorefront
 );
 
 v1.use('/auth', authRoutes);

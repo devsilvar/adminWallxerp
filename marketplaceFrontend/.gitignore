@@ -24,3 +24,8 @@ pnpm-debug.log*
 .idea/
 
 .vercel
+
+# Local env overrides — never commit (added during settlement-advance recovery)
+.env.*
+!.env.example
+.npmrc

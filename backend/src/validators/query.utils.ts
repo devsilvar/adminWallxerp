@@ -28,4 +28,12 @@ const asNumberOptional = (opts?: { min?: number; max?: number; int?: boolean }) 
       : z.coerce.number().min(opts?.min ?? 0).max(opts?.max ?? Number.MAX_SAFE_INTEGER).optional()
   );
 
-export { asString, asStringOptional, asNumber, asNumberOptional };
+const asBooleanOptional = z.preprocess((val) => {
+  const raw = Array.isArray(val) ? val[0] : val;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (raw === '' || raw === undefined) return undefined;
+  return raw;
+}, z.boolean().optional());
+
+export { asString, asStringOptional, asNumber, asNumberOptional, asBooleanOptional };

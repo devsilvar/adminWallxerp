@@ -162,6 +162,24 @@ export const paymentRateLimiter = rateLimit({
 });
 
 /**
+ * Rate limiter for marketplace wallet purchases (slot/boost).
+ * Protects wallet-debit and audit-heavy purchase endpoints from abuse.
+ */
+export const marketplacePurchaseRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: config.app.isDevelopment || config.app.env === 'test' ? 5000 : 20,
+  skip: skipLocalhost,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'MARKETPLACE_PURCHASE_RATE_LIMIT_EXCEEDED',
+      message: 'Too many marketplace purchase attempts. Please try again later.',
+    },
+  },
+});
+
+/**
  * Strict rate limiter for password reset endpoints
  * 
  * More restrictive than general auth limiter to prevent:

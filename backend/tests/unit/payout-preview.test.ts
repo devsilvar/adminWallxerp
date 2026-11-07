@@ -58,6 +58,9 @@ const mockPrisma = {
   businessTaxProfile: {
     findUnique: jest.fn(),
   },
+  walletTransaction: {
+    aggregate: jest.fn(),
+  },
 };
 
 jest.mock('@/lib/prisma', () => ({
@@ -126,6 +129,11 @@ describe('getPayoutPreview — Tax Reserve & Policy Enforcement (Phase 10)', () 
     // Default expenses: 300,000 deductible
     (mockPrisma.expense.aggregate as any).mockResolvedValue({
       _sum: { amount: 300_000 },
+    });
+
+    // No outstanding settlement advance by default
+    (mockPrisma.walletTransaction.aggregate as any).mockResolvedValue({
+      _sum: { amount: 0, netAmount: 0 },
     });
   });
 

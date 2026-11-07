@@ -14,6 +14,8 @@ interface HeaderProps {
 export default function Header({ cartItemCount: _cartItemCount = 0 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const appUrl = import.meta.env.PUBLIC_APP_URL || '';
+  const merchantPortalUrl = import.meta.env.PUBLIC_MERCHANT_PORTAL_URL || import.meta.env.PUBLIC_APP_URL || '';
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,16 +59,22 @@ export default function Header({ cartItemCount: _cartItemCount = 0 }: HeaderProp
         {/* ── Search Bar (Desktop) ── */}
         <form
           onSubmit={handleSearchSubmit}
-          className="hidden md:flex flex-1 max-w-[420px] items-center relative"
+          className="hidden md:flex flex-1 max-w-[520px] items-center rounded-full border-2 border-[#352778] bg-white overflow-hidden"
         >
-          <Search className="absolute left-3.5 h-[15px] w-[15px] text-gray-400 pointer-events-none" />
+          <Search className="ml-4 h-[18px] w-[18px] text-gray-400 pointer-events-none" />
           <input
             type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search phones, fashion, services..."
-            className="w-full rounded-full border border-gray-200 bg-gray-50 pl-10 pr-4 py-[9px] text-[13.5px] text-gray-900 placeholder:text-gray-400 transition-all focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/20 focus:border-[#7c3aed]"
+            placeholder="What are you looking for?"
+            className="w-full bg-transparent pl-3 pr-4 py-[10px] text-[13.5px] text-gray-900 placeholder:text-gray-400 focus:outline-none"
           />
+          <button
+            type="submit"
+            className="bg-[#352778] px-6 py-[10px] text-[13px] font-bold text-white hover:bg-[#2a1f5e] transition-colors"
+          >
+            Search
+          </button>
         </form>
 
         {/* ── Right: Nav links + CTA ── */}
@@ -93,7 +101,7 @@ export default function Header({ cartItemCount: _cartItemCount = 0 }: HeaderProp
           </nav>
 
           <a
-            href="http://localhost:5173/inventory"
+            href={`${merchantPortalUrl}/inventory?src=marketplace`}
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -117,15 +125,21 @@ export default function Header({ cartItemCount: _cartItemCount = 0 }: HeaderProp
       {/* ── Mobile Drawer ── */}
       {mobileMenuOpen && (
         <div className="md:hidden border-t border-gray-200 bg-white px-5 py-5 space-y-4 shadow-lg">
-          <form onSubmit={handleSearchSubmit} className="relative">
-            <Search className="absolute left-3.5 top-2.5 h-4 w-4 text-gray-400" />
+          <form onSubmit={handleSearchSubmit} className="flex items-center rounded-full border-2 border-[#352778] bg-white overflow-hidden">
+            <Search className="ml-3.5 h-4 w-4 text-gray-400 pointer-events-none" />
             <input
               type="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search products..."
-              className="w-full rounded-full border border-gray-200 bg-gray-50 pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#7c3aed]/20 focus:border-[#7c3aed]"
+              placeholder="What are you looking for?"
+              className="w-full bg-transparent pl-2.5 pr-3 py-2 text-sm focus:outline-none"
             />
+            <button
+              type="submit"
+              className="bg-[#352778] px-4 py-2 text-xs font-bold text-white hover:bg-[#2a1f5e] transition-colors"
+            >
+              Search
+            </button>
           </form>
 
           <nav className="flex flex-col gap-1">
@@ -151,7 +165,7 @@ export default function Header({ cartItemCount: _cartItemCount = 0 }: HeaderProp
               Fashion
             </a>
             <a
-              href="http://localhost:5173/inventory"
+              href={`${merchantPortalUrl}/inventory?src=marketplace`}
               target="_blank"
               rel="noopener noreferrer"
               className="mt-2 flex items-center justify-between rounded-xl bg-gradient-to-r from-[#352778] to-[#7c3aed] px-4 py-3 text-sm font-bold text-white"

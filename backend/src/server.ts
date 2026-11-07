@@ -17,6 +17,7 @@ import { registerWalletReconciliationCron } from './jobs/wallet-reconciliation.c
 import { registerPayoutReconciliationCron } from './jobs/payout-reconciliation.cron';
 import { registerSubscriptionExpiryCron } from './jobs/subscription-expiry.cron';
 import { registerVoucherCron } from './jobs/voucher-cron';
+import { registerMarketplaceExpiryCron } from './jobs/marketplace-expiry.cron';
 import { registerDomainEventListeners } from './core/events/register-listeners';
 import { runEraseTestAccounts } from './scripts/erase-test-accounts';
 
@@ -53,6 +54,7 @@ const startServer = async () => {
         registerPayoutReconciliationCron();
         registerSubscriptionExpiryCron();
         registerVoucherCron();
+        registerMarketplaceExpiryCron();
       } catch (cronErr) {
         logger.error('❌ Failed to register scheduled cron jobs', {
           error: cronErr instanceof Error ? cronErr.message : String(cronErr),

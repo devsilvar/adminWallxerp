@@ -1,0 +1,26 @@
+{
+  "dva": {
+    "title": "Virtual Bank Account",
+    "subtitle": "Get a dedicated account number for receiving payments",
+    "setup_button": "Set Up",
+    "account_number": "Account Number",
+    "bank_name": "Bank",
+    "status": {
+      "active": "Active",
+      "pending": "Setting up...",
+      "none": "Not set up"
+    },
+    "bvn_form": {
+      "title": "Identity Verification",
+      "subtitle": "To receive payments, we need to verify your identity",
+      "bvn_label": "BVN (Bank Verification Number)",
+      "bank_label": "Bank",
+      "account_label": "Account Number",
+      "submit": "Verify",
+      "verifying": "Verifying your identity",
+      "wait_message": "Your BVN is being verified with Paystack. This usually takes 1-2 minutes.",
+      "polling_message": "We're checking every 10 seconds. You can leave this page — the account will appear automatically once verified.",
+      "refresh_button": "Refresh status"
+    }
+  }
+}

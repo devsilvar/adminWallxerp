@@ -8,6 +8,7 @@ import type {
   PaginatedProductsResponse,
   ApiResponse,
   RelatedProduct,
+  SellerStorefrontResponse,
 } from '@/types';
 
 // API Base URL - defaults to localhost:3000
@@ -91,6 +92,14 @@ export type GetProductsParams = {
   category?: string;
   search?: string;
   type?: string;
+  productType?: string;
+  sort?: string;
+  state?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  verifiedOnly?: boolean;
+  hasDiscount?: boolean;
+  inStockOnly?: boolean;
 };
 
 /**
@@ -144,4 +153,96 @@ export async function getProductBySlug(
     console.warn(`[getProductBySlug] Error fetching product ${slug}:`, err);
     throw err;
   }
+}
+
+/**
+ * Fetches a merchant's public storefront profile and approved listings.
+ * Returns null if the merchant is not found (404), or rethrows on network/server errors.
+ */
+export async function getSellerStorefront(
+  identifier: string
+): Promise<SellerStorefrontResponse | null> {
+  if (!identifier || !identifier.trim()) {
+    return null;
+  }
+
+  const endpoint = `/api/v1/marketplace/sellers/${encodeURIComponent(identifier.trim())}`;
+  try {
+    const res = await apiFetch<ApiResponse<SellerStorefrontResponse>>(endpoint);
+    if (!res || !res.data) {
+      return null;
+    }
+    return res.data;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      return null;
+    }
+    console.warn(`[getSellerStorefront] Error fetching seller ${identifier}:`, err);
+    throw err;
+  }
+}
+
+/**
+ * Constructs the server-side WhatsApp redirect URL.
+ * Automatically tracks the whatsapp_click event and redirects to wa.me without exposing contact numbers.
+ */
+export function getWhatsAppRedirectUrl(productId: string, source?: string): string {
+  const query = source ? `?source=${encodeURIComponent(source)}` : '';
+  return `${API_BASE_URL}/api/v1/marketplace/products/${encodeURIComponent(productId)}/whatsapp-redirect${query}`;
+}
+
+export type MarketplaceListingEventType =
+  | 'view'
+  | 'whatsapp_click'
+  | 'call_click'
+  | 'share_click'
+  | 'storefront_view'
+  | 'boost_impression';
+
+/**
+ * Fires a fire-and-forget interaction beacon for a marketplace listing.
+ * Uses navigator.sendBeacon (best practice — non-blocking, survives page navigation)
+ * with a fetch fallback for environments where sendBeacon is unavailable.
+ * Never throws — analytics must never break UX.
+ */
+export function recordListingEvent(
+  productId: string,
+  type: MarketplaceListingEventType = 'view',
+  source?: string
+): void {
+  if (!productId) return;
+
+  const url = `${API_BASE_URL}/api/v1/marketplace/products/${encodeURIComponent(productId)}/events`;
+  const payload = JSON.stringify({ type, source: source ?? 'detail_page' });
+
+  try {
+    const blob = new Blob([payload], { type: 'application/json' });
+    if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+      const queued = navigator.sendBeacon(url, blob);
+      if (!queued && typeof fetch !== 'undefined') {
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } else if (typeof fetch !== 'undefined') {
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
+    }
+  } catch {
+    // swallow — analytics must never break the page
+  }
+}
+
+/**
+ * Fires a fire-and-forget view beacon for a marketplace listing.
+ */
+export function recordViewEvent(productId: string, source?: string): void {
+  recordListingEvent(productId, 'view', source);
 }

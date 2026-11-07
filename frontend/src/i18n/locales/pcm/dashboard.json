@@ -1,0 +1,24 @@
+{
+  "greeting": {
+    "morning": "Good morning",
+    "afternoon": "Good afternoon",
+    "evening": "Good evening"
+  },
+  "kpis": {
+    "this_month": "Dis month",
+    "total_sales": "Total Sales",
+    "expenses": "Money wey you spend",
+    "gross_profit": "Your profit",
+    "tax_payable": "Tax wey you go pay"
+  },
+  "actions": {
+    "view_report": "See report",
+    "record_sale": "Enter sale",
+    "pay_tax": "Pay tax"
+  },
+  "status": {
+    "unpaid": "Never pay",
+    "paid": "Don pay",
+    "pending": "Dey wait"
+  }
+}

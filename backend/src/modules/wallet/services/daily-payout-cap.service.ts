@@ -15,11 +15,10 @@ export interface DailyPayoutAllowance {
  * Computes total gross payout amount (including any fees) initiated or completed
  * by a user across all their owned businesses during the current Lagos calendar day.
  *
- * ARCHITECTURAL INVARIANT (Settlement Advance Specification §5.4 / Phase 4.1):
- * SUM(amount) is `totalDebit` (principal + fee) and is SHARED across normal withdrawals
- * AND settlement advances — there is intentionally NO `isAdvance` partition here.
- * The daily payout cap strictly bounds the user's aggregate gross daily cash outflows
- * across all channels within the Lagos calendar day.
+ * Settlement advances are EXCLUDED (`isAdvance: false`). An advance is an internal
+ * settlement -> wallet transfer, not a cash outflow: no money leaves the platform.
+ * Counting it here would consume the merchant's daily allowance twice — once for
+ * the advance and again when they withdraw the credited funds.
  *
  * Statuses counted:
  * - 'completed': funds transferred
@@ -53,6 +52,7 @@ export async function getDailyPayoutTotal(
     where: {
       businessId: { in: businessIds },
       status: { in: ['pending', 'processing', 'completed'] },
+      isAdvance: false,
       createdAt: {
         gte: startOfDay,
         lt: endOfDay,

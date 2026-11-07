@@ -13,7 +13,6 @@ import {
 import { verifyBusinessAccess } from '@/lib/ownership';
 import { WalletService } from '@/services/wallet.service';
 import { getAdvancePreview } from '@/services/settlement/payout-preview.service';
-import { executeInstantPayout } from '@/modules/wallet/services/instant-payout.service';
 import { assertWithinDailyPayoutCap } from '@/modules/wallet/services/daily-payout-cap.service';
 import {
   AdvanceRequestInput,
@@ -29,7 +28,13 @@ import logger from '@/lib/logger';
 export { getAdvancePreview } from '@/services/settlement/payout-preview.service';
 
 /**
- * Initiates a settlement advance withdrawal under the strict One-Shot 30% per batch rule.
+ * Initiates a settlement advance under the strict One-Shot 30% per batch rule.
+ *
+ * An advance is an INTERNAL BUCKET TRANSFER, not a bank payout:
+ *   settlement (unsettled DVA inflows)  ->  wallet (available balance)
+ * The merchant's wallet is credited immediately; the gross advance is recovered
+ * from the maturing inflows by the T+1 settlement release sweep. No Paystack
+ * transfer is initiated here.
  *
  * Requirements & Invariants:
  * 1. Actor must be verified owner of the business with connected commercial bank account.
@@ -45,7 +50,9 @@ export { getAdvancePreview } from '@/services/settlement/payout-preview.service'
  *    - requested <= maxAdvance (floor(pooledPending * 30%)) -> 400 ADVANCE_LIMIT_EXCEEDED.
  * 7. Shared daily payout cap: gross debit (requested + fee) asserted against Lagos-day cap.
  * 8. Sales-neutrality: zero mutations on SalesTransaction rows.
- * 9. Wallet ledger: calls WalletService.reserveAdvanceFunds inside tx, then delegates to executeInstantPayout outside tx.
+ * 9. Wallet ledger: credits the central wallet inside the tx via WalletService.creditWallet
+ *    (type 'advance', source 'settlement_advance'). The matching recovery is applied by
+ *    the settlement release cron when the underlying inflows mature.
  */
 export async function requestAdvance(
   userId: string,
@@ -219,33 +226,48 @@ export async function requestAdvance(
       // Step F: Assert gross debit against user daily payout cap
       await assertWithinDailyPayoutCap({ userId, amount: quote.amount, tx });
 
-      // Step G: Create SettlementPayout record
+      // Step G: Create SettlementPayout record (internal transfer — completed immediately)
       const payoutRecord = await tx.settlementPayout.create({
         data: {
           businessId,
           isAdvance: true,
           amount: quote.amount, // gross debit: requested + fee
           fee: quote.fee,
-          netAmount: quote.netAmount, // transfer principal: requested
+          netAmount: quote.netAmount, // wallet credit: requested
           destinationBankCode: settlementBankCode,
           destinationBankName: settlementBankName || 'Commercial Bank',
           destinationAccountNum: settlementAccountNumber,
           destinationAccountName: settlementAccountName || business.businessName,
           transferReference,
-          status: 'processing',
+          status: 'completed',
+          completedAt: now,
+          adminApprovedBy: 'SYSTEM_ADVANCE_TO_WALLET',
+          adminApprovedAt: now,
           narration: params.narration,
         },
       });
 
-      // Step H: Reserve locked funds in central wallet
-      await WalletService.reserveAdvanceFunds(
+      // Step H: Credit the central wallet — the advance moves settlement -> wallet.
+      // The gross amount (requested + fee) is recovered from maturing inflows by
+      // the settlement release sweep, so the merchant never receives it twice.
+      await WalletService.creditWallet(
         {
           userId,
-          amount: quote.netAmount,
+          businessId,
+          amount: quote.amount,
           fee: quote.fee,
+          netAmount: quote.netAmount,
           reference: transferReference,
+          source: 'settlement_advance',
+          type: 'advance',
+          description: `Settlement advance credited to wallet for ${business.businessName}`,
           linkedPayoutId: payoutRecord.id,
-          description: `Advance reservation for ${business.businessName}`,
+          metadata: {
+            advance: true,
+            grossDebit: quote.amount,
+            fee: quote.fee,
+            requested: quote.netAmount,
+          },
         },
         tx
       );
@@ -255,15 +277,7 @@ export async function requestAdvance(
     { maxWait: 20000, timeout: 60000 }
   );
 
-  // 7. Dispatch instant transfer to Paystack via shared executor (outside DB transaction)
-  const result = await executeInstantPayout({
-    userId,
-    businessId,
-    payoutId: payout.id,
-    initiator: 'merchant',
-  });
-
-  // 8. Fire-and-forget notification dispatch (post-commit, outside transaction)
+  // 7. Fire-and-forget notification dispatch (post-commit, outside transaction)
   void dispatchAdvanceWithdrawalEmail(payout.id);
 
   void emitToAdmins({
@@ -281,14 +295,28 @@ export async function requestAdvance(
     businessId,
     reminderType: 'advance_withdrawal',
     scheduledDate: new Date(),
-    message: `Your advance of ${formatNaira(quote.netAmount)} (ref ${transferReference}) has been approved. The transfer to your ${settlementBankName || 'settlement bank'} account ••••${settlementAccountNumber.slice(-4)} is in progress.`,
+    message: `Your advance of ${formatNaira(quote.netAmount)} (ref ${transferReference}) has been credited to your wallet. The remaining unsettled inflows will settle normally on schedule.`,
     referenceType: 'settlement_payout',
     referenceId: payout.id,
   }).catch((remErr) => {
     logger.warn('Failed to create advance_withdrawal reminder (non-critical)', { payoutId: payout.id, err: remErr });
   });
 
-  return result;
+  return {
+    id: payout.id,
+    amount: quote.amount,
+    fee: quote.fee,
+    netAmount: quote.netAmount,
+    transferReference,
+    status: 'completed' as const,
+    isAdvance: true,
+    destinationBankName: settlementBankName || 'Commercial Bank',
+    destinationAccountNum: settlementAccountNumber,
+    destinationAccountName: settlementAccountName || business.businessName,
+    initiatedAt: payout.initiatedAt,
+    completedAt: payout.completedAt,
+    message: `Settlement advance of ${formatNaira(quote.netAmount)} credited to your wallet.`,
+  };
 }
 
 /**

@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "marketplace_slot_purchases"
+  ADD COLUMN IF NOT EXISTS "reviewed_by" TEXT,
+  ADD COLUMN IF NOT EXISTS "reviewed_at" TIMESTAMP(3),
+  ADD COLUMN IF NOT EXISTS "rejection_reason" TEXT,
+  ADD COLUMN IF NOT EXISTS "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

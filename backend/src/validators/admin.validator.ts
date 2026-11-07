@@ -1,18 +1,10 @@
 import { z } from 'zod';
-import { asNumber, asStringOptional } from './query.utils';
+import { asNumber, asStringOptional, asBooleanOptional } from './query.utils';
 
 export const paginationSchema = z.object({
   page: asNumber({ min: 1, int: true }).default(1),
   limit: asNumber({ min: 1, max: 100, int: true }).default(20),
 });
-
-const asBooleanOptional = z.preprocess((val) => {
-  const raw = Array.isArray(val) ? val[0] : val;
-  if (raw === 'true') return true;
-  if (raw === 'false') return false;
-  if (raw === '' || raw === undefined) return undefined;
-  return raw;
-}, z.boolean().optional());
 
 const asRoleOptional = z.preprocess((val) => {
   const raw = Array.isArray(val) ? val[0] : val;

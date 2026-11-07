@@ -18,6 +18,7 @@ import { PlatformConfigService } from '@/services/platform-config.service';
 import { resolveTaxPolicy } from '@/services/tax/tax-policy.service';
 import { verifyBusinessAccess } from '@/lib/ownership';
 import { getDailyPayoutAllowance } from '@/modules/wallet/services/daily-payout-cap.service';
+import { WalletService } from '@/services/wallet/wallet.service';
 
 /**
  * Computes available withdrawal balance, tax due (display-only), and settlement details.
@@ -199,6 +200,33 @@ export async function getPayoutPreview(
   const bizPendingWithdrawn = toNumber(bizPendingAggregate._sum.amount ?? 0);
   const bizTotalWithdrawn = bizCompletedWithdrawn + bizPendingWithdrawn;
 
+  // Advances fulfilled as a bank transfer (the original advance mode) already
+  // debited the wallet, so they are cash out of the wallet just like a normal
+  // withdrawal — but they carry isAdvance = true and were therefore skipped by
+  // the `isAdvance: false` filters above. Counting them keeps the advertised
+  // spendable balance from exceeding what the wallet actually holds.
+  // Advances credited to the wallet (current mode) are identified by the type of
+  // their linked ledger entry, so the two modes never double-count.
+  const legacyAdvanceWhere = (scope: Prisma.SettlementPayoutWhereInput): Prisma.SettlementPayoutWhereInput => ({
+    ...scope,
+    isAdvance: true,
+    status: 'completed',
+    walletTx: { is: { type: 'payout' } },
+  });
+
+  const [legacyAdvanceAgg, bizLegacyAdvanceAgg] = await Promise.all([
+    db.settlementPayout.aggregate({
+      where: legacyAdvanceWhere({ businessId: { in: userBizIds } }),
+      _sum: { amount: true },
+    }),
+    db.settlementPayout.aggregate({
+      where: legacyAdvanceWhere({ businessId }),
+      _sum: { amount: true },
+    }),
+  ]);
+  const legacyAdvanceWithdrawn = toNumber(legacyAdvanceAgg._sum.amount ?? 0);
+  const bizLegacyAdvanceWithdrawn = toNumber(bizLegacyAdvanceAgg._sum.amount ?? 0);
+
   // 3. Tax Liability calculation (unpaid reports or estimated monthly liability)
   const policy = await resolveTaxPolicy(businessId, db);
   const unpaidReports = await db.monthlyTaxReport.findMany({
@@ -243,11 +271,34 @@ export async function getPayoutPreview(
   // Exempt business => reserve 0.
   const taxReserve = policy.vat.chargeable ? Math.max(0, estimatedTaxLiability) : 0;
 
-  // Available balance: Platform-held DVA funds minus total withdrawals.
+  // Settlement advances are an internal bucket transfer: the wallet was credited
+  // up-front and the gross amount is recovered from maturing inflows. The net
+  // advance still sitting in the wallet is therefore withdrawable alongside
+  // settled inflows.
+  const outstandingAdvance = await WalletService.getOutstandingAdvance(business.userId, tx);
+  const businessOutstandingAdvance = await WalletService.getOutstandingAdvance(
+    business.userId,
+    tx,
+    { businessId }
+  );
+
+  // The amount still "in settlement" is what will actually land in the merchant's
+  // wallet when this batch matures. Any advance already drawn against the batch
+  // has been handed over up-front — as a wallet credit or a bank payout — and is
+  // recovered from these inflows, so it must not be advertised a second time.
+  // `businessInflows` below stays gross on purpose: it is the inflow ledger, not
+  // the amount still owed to the merchant.
+  const netPendingSettlement = Math.max(0, round2(pendingSettlement - businessOutstandingAdvance.gross));
+  const netPooledPendingSettlement = Math.max(0, round2(userPendingSettlement - outstandingAdvance.gross));
+
+  // Available balance: Platform-held DVA funds minus total withdrawals, plus any
+  // settlement advance already credited to the wallet and not yet recovered.
   // The platform absorbs Paystack's 1% DVA processing fee, so customer available balance is 100% of their DVA deposits.
   const availableForWithdrawal = Math.max(
     0,
-    Math.round((platformHeldFunds - totalWithdrawn) * 100) / 100
+    Math.round(
+      (platformHeldFunds - totalWithdrawn - legacyAdvanceWithdrawn + outstandingAdvance.net) * 100
+    ) / 100
   );
 
   // Attributable settled balance for this specific business:
@@ -255,7 +306,12 @@ export async function getPayoutPreview(
   // Capped at overall availableForWithdrawal (cannot exceed pooled liquidity) and floored at 0.
   const businessBalance = Math.min(
     availableForWithdrawal,
-    Math.max(0, Math.round((businessSettledInflows - bizTotalWithdrawn) * 100) / 100)
+    Math.max(
+      0,
+      Math.round(
+        (businessSettledInflows - bizTotalWithdrawn - bizLegacyAdvanceWithdrawn + outstandingAdvance.net) * 100
+      ) / 100
+    )
   );
 
   const isPinLocked = Boolean(
@@ -279,8 +335,16 @@ export async function getPayoutPreview(
     totalInflows: businessInflows,
     businessInflows,
     pooledInflows: totalInflowsAll,
-    pendingSettlement,
-    pooledPendingSettlement: userPendingSettlement,
+    // Net of any advance already drawn against this batch — see note above.
+    pendingSettlement: netPendingSettlement,
+    pooledPendingSettlement: netPooledPendingSettlement,
+    // Gross, pre-advance figures for callers that need the inflow ledger.
+    grossPendingSettlement: pendingSettlement,
+    grossPooledPendingSettlement: userPendingSettlement,
+    /** Gross advance drawn from unsettled inflows and not yet recovered. */
+    outstandingAdvance: outstandingAdvance.gross,
+    /** Advances already paid out to the bank, deducted from the spendable balance. */
+    legacyAdvanceWithdrawn,
     totalSplitSettled: 0,
     totalWithdrawn: bizTotalWithdrawn,
     businessWithdrawn: bizTotalWithdrawn,
@@ -326,12 +390,18 @@ export interface AdvancePreviewResult {
   businessId: string;
   businessName: string;
   isPooled: boolean;
+  /** Unsettled inflows less any advance drawn against them. */
   pendingSettlement: number;
   pooledPendingSettlement: number;
+  /** Unsettled inflows before netting off advances. */
+  grossPendingSettlement: number;
+  grossPooledPendingSettlement: number;
   maxAdvance: number;
   maxAdvancePct: number;
   minAdvanceAmount: number;
   remainingPending: number;
+  /** Gross advance already credited to the wallet and not yet recovered. */
+  outstandingAdvance: number;
   hasOutstandingAdvance: boolean;
   lastAdvance: {
     reference: string;
@@ -491,15 +561,24 @@ export async function getAdvancePreview(
   const feeConfig = await PlatformConfigService.getFeeConfig();
   const maxAdvancePct = feeConfig.maxAdvancePct;
 
+  // An advance is an internal settlement -> wallet transfer. The gross amount
+  // already advanced is recovered from the maturing inflows, so it is no longer
+  // part of the balance that will settle normally.
+  const outstandingAdvance = await WalletService.getOutstandingAdvance(business.userId, tx);
+  const availablePending = Math.max(
+    0,
+    round2(pooledPendingSettlement - outstandingAdvance.gross)
+  );
+
   // One-shot 30% math:
-  // maxAdvance = floor(pooledPendingSettlement * maxAdvancePct / 100) via round2
+  // maxAdvance = floor(availablePending * maxAdvancePct / 100) via round2
   // If hasOutstandingAdvance is true, merchant already took an advance for this batch => maxAdvance = 0
   let maxAdvance = 0;
-  let remainingPending = pooledPendingSettlement;
+  let remainingPending = availablePending;
 
-  if (!hasOutstandingAdvance && pooledPendingSettlement > 0) {
-    maxAdvance = round2(Math.floor((pooledPendingSettlement * maxAdvancePct) / 100));
-    remainingPending = Math.max(0, round2(pooledPendingSettlement - maxAdvance));
+  if (!hasOutstandingAdvance && availablePending > 0) {
+    maxAdvance = round2(Math.floor((availablePending * maxAdvancePct) / 100));
+    remainingPending = Math.max(0, round2(availablePending - maxAdvance));
   }
 
   const isPinLocked = Boolean(
@@ -512,12 +591,16 @@ export async function getAdvancePreview(
     businessId: business.id,
     businessName: business.businessName,
     isPooled: userBizRecords.length > 1,
-    pendingSettlement,
-    pooledPendingSettlement,
+    // Net of any advance already drawn, so the card agrees with the settlement page.
+    pendingSettlement: Math.max(0, round2(pendingSettlement - outstandingAdvance.gross)),
+    pooledPendingSettlement: availablePending,
+    grossPendingSettlement: pendingSettlement,
+    grossPooledPendingSettlement: pooledPendingSettlement,
     maxAdvance,
     maxAdvancePct: feeConfig.maxAdvancePct,
     minAdvanceAmount: feeConfig.minAdvanceAmount,
     remainingPending,
+    outstandingAdvance: outstandingAdvance.gross,
     hasOutstandingAdvance,
     lastAdvance,
     fees: {

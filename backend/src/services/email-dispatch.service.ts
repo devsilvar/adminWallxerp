@@ -273,7 +273,7 @@ export async function dispatchAdvanceWithdrawalEmail(payoutId: string): Promise<
 
     await sendEmail({
       to: recipientEmail,
-      subject: `Settlement Advance Approved: ${requestedFormatted} Sent to Bank — WallX ERP`,
+      subject: `Settlement Advance Approved: ${requestedFormatted} Credited to Wallet — WallX ERP`,
       html: generateAdvanceWithdrawalHtml(data),
       text: generateAdvanceWithdrawalText(data),
     });

@@ -30,10 +30,22 @@ export const CATEGORY_LABELS: Record<MarketplaceCategory, string> = {
 export type ProductType = 'physical' | 'service';
 
 export interface SellerInfo {
+  id?: string;
+  merchantId?: string;
   businessName: string;
   city?: string | null;
   state?: string | null;
+  address?: string | null;
+  logoUrl?: string | null;
   isVerified: boolean;
+  createdAt?: string;
+  contactWhatsapp?: string | null;
+}
+
+export interface SellerStorefrontResponse {
+  seller: SellerInfo;
+  products: Product[];
+  total: number;
 }
 
 export interface Product {
@@ -57,6 +69,7 @@ export interface Product {
   createdAt: string;
   updatedAt?: string;
   inStock?: boolean;
+  promoted?: boolean;
 }
 
 export interface RelatedProduct {
@@ -108,8 +121,33 @@ export interface PaginationMeta {
   totalPages: number;
 }
 
+export interface FacetCategory {
+  slug: string;
+  count: number;
+}
+
+export interface FacetState {
+  name: string;
+  count: number;
+}
+
+export interface FacetPriceBand {
+  id: string;
+  label: string;
+  count: number;
+}
+
+export interface MarketplaceFacets {
+  categories: FacetCategory[];
+  states: FacetState[];
+  priceBands: FacetPriceBand[];
+  verifiedCount: number;
+  discountCount: number;
+}
+
 export interface PaginatedProductsResponse {
   success: boolean;
   data: Product[];
   pagination: PaginationMeta;
+  facets?: MarketplaceFacets;
 }

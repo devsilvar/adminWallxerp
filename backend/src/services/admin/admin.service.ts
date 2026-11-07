@@ -6,6 +6,7 @@ import { toNumber } from '@/shared/helpers';
 import { ACCRUAL_SALE_INCLUDE, isAccrualLinked } from '@/shared/helpers/accrual';
 import { transferFee, stampDuty, withdrawalCost, round2 } from '@/lib/paystack-fees';
 import { canonicalTier, getPlanLimits, isFeatureAllowed } from '@/config/subscription-plans';
+import { getPaymentProvider } from '@/lib/payment';
 import { TreasuryAnalyticsFilterInput, AdminTransactionsQueryInput, AdminOverrideSubscriptionInput } from '@/validators/admin.validator';
 import {
   dispatchAccountDeactivatedEmail,
@@ -700,29 +701,51 @@ export async function getTreasuryAnalytics(filters: TreasuryAnalyticsFilterInput
   const page = filters.page || 1;
   const limit = filters.limit || 20;
 
-  // 1. Fetch settled DVA inflows
-  const dvaSales = await prisma.salesTransaction.findMany({
-    where: {
-      source: 'bank_transfer',
-      dvaOrigin: true,
-      status: { in: ['confirmed', 'completed'] },
-    },
-    include: {
-      business: { select: { id: true, businessName: true } },
-    },
-    orderBy: { transactionDate: 'desc' },
-  });
-
-  // 2. Fetch all completed, processing, or pending payouts
-  const payouts = await prisma.settlementPayout.findMany({
-    where: {
-      status: { in: ['completed', 'processing', 'pending'] },
-    },
-    include: {
-      business: { select: { id: true, businessName: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  // 1. Fetch settled DVA inflows, payouts, merchant liabilities, and live gateway
+  // balance in parallel. Gateway balance is best-effort (nullable on failure) so a
+  // Paystack outage never blocks the rest of the treasury view.
+  const [dvaSales, payouts, liabilitiesAgg, gatewayBalanceNaira] = await Promise.all([
+    prisma.salesTransaction.findMany({
+      where: {
+        source: 'bank_transfer',
+        dvaOrigin: true,
+        status: { in: ['confirmed', 'completed'] },
+      },
+      include: {
+        business: { select: { id: true, businessName: true } },
+      },
+      orderBy: { transactionDate: 'desc' },
+    }),
+    prisma.settlementPayout.findMany({
+      where: {
+        status: { in: ['completed', 'processing', 'pending'] },
+      },
+      include: {
+        business: { select: { id: true, businessName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.walletBalance.aggregate({
+      _sum: {
+        balance: true,
+        lockedBalance: true,
+      },
+    }),
+    (async () => {
+      try {
+        const provider = getPaymentProvider();
+        const balances = await provider.getBalance();
+        const ngnItem = balances.find((b) => b.currency === 'NGN');
+        return ngnItem ? round2(ngnItem.balanceNaira) : 0;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.warn('[TREASURY] Failed to fetch live gateway balance; returning unavailable', {
+          error: message,
+        });
+        return null;
+      }
+    })(),
+  ]);
 
   // 3. Compute aggregate KPIs
   let totalGrossInflows = 0;
@@ -841,6 +864,19 @@ export async function getTreasuryAnalytics(filters: TreasuryAnalyticsFilterInput
   const startIndex = (page - 1) * limit;
   const paginatedItems = filtered.slice(startIndex, startIndex + limit);
 
+  const merchantLiabilityNaira = round2(
+    toNumber(liabilitiesAgg._sum.balance ?? 0) + toNumber(liabilitiesAgg._sum.lockedBalance ?? 0)
+  );
+  const expectedFeeFloatNaira = round2(Math.max(0, netPlatformMargin));
+  const floatNaira =
+    gatewayBalanceNaira != null ? round2(gatewayBalanceNaira - merchantLiabilityNaira) : null;
+  const floatStatus: 'healthy' | 'expected' | 'deficit' | 'unknown' =
+    gatewayBalanceNaira == null
+      ? 'unknown'
+      : floatNaira != null && floatNaira < 0
+        ? 'deficit'
+        : 'healthy';
+
   return {
     kpis: {
       totalGrossInflows,
@@ -850,6 +886,13 @@ export async function getTreasuryAnalytics(filters: TreasuryAnalyticsFilterInput
       totalDisbursementCost,
       netPlatformMargin,
       isProfitable: netPlatformMargin >= 0,
+      gatewayBalanceNaira,
+      merchantLiabilityNaira,
+      floatNaira,
+      expectedFeeFloatNaira,
+      floatStatus,
+      paystackGlobalBalance: gatewayBalanceNaira,
+      reconciliationVariance: floatNaira,
     },
     transfers: paginatedItems,
     pagination: {

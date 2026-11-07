@@ -6,14 +6,17 @@
  */
 import { MessageCircle, Phone } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { recordListingEvent } from '@/lib/api';
 
 interface MobileStickyContactProps {
+  productId?: string;
   whatsappUrl: string | null;
   callUrl: string | null;
   price: string;
 }
 
 export default function MobileStickyContact({
+  productId,
   whatsappUrl,
   callUrl,
   price,
@@ -48,7 +51,15 @@ export default function MobileStickyContact({
 
           {/* Call — secondary */}
           {callUrl && (
-            <a href={callUrl} className="shrink-0">
+            <a
+              href={callUrl}
+              className="shrink-0"
+              onClick={() => {
+                if (productId) {
+                  recordListingEvent(productId, 'call_click', 'mobile_sticky');
+                }
+              }}
+            >
               <button className="inline-flex items-center justify-center gap-1.5 rounded-full border-2 border-[#352778] px-4 py-2.5 text-[13px] font-bold text-[#352778] hover:bg-[#352778] hover:text-white transition-all active:scale-[0.97]">
                 <Phone className="h-4 w-4 shrink-0" />
                 Call
