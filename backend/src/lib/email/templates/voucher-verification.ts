@@ -28,7 +28,6 @@ export function generateVoucherVerificationHtml(data: VoucherVerificationEmailDa
   const totalFormatted = escapeHtml(data.totalFormatted);
   const verifyUrl = escapeHtml(data.verifyUrl);
   const customerPhone = data.customerPhone ? escapeHtml(data.customerPhone) : null;
-  const businessPhone = data.businessPhone ? escapeHtml(data.businessPhone) : null;
   const expiresInHours = data.expiresInHours ?? 24;
 
   const bonusBadge =
@@ -141,7 +140,7 @@ export function generateVoucherVerificationHtml(data: VoucherVerificationEmailDa
                 </tr>
               </table>
 
-              ${businessPhone ? `<p style="margin: 20px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; text-align: center;">Need help? Contact ${businessName} directly at <strong>${businessPhone}</strong>.</p>` : ''}
+              <p style="margin: 20px 0 0; color: #64748b; font-size: 12px; line-height: 1.5; text-align: center;">Need help? Contact <a href="mailto:support@wallxerp.com" style="color: #7c3aed; text-decoration: none; font-weight: 600;">support@wallxerp.com</a>.</p>
             </td>
           </tr>
 

@@ -73,7 +73,7 @@ export function generateVoucherAdjustmentNotificationHtml(
                 <div style="color: #0f172a; font-size: 14px; font-weight: 500;">${reason}</div>
               </div>
               <p style="margin: 0; color: #64748b; font-size: 13px; line-height: 1.5;">
-                If you believe this adjustment was made in error or have questions about your balance, please reach out to ${businessName}${businessPhone ? ` at <strong>${businessPhone}</strong>` : ''}.
+                If you believe this adjustment was made in error or have questions about your balance, please reach out to <a href="mailto:support@wallxerp.com" style="color: #7c3aed; text-decoration: none; font-weight: 600;">support@wallxerp.com</a>.
               </p>
             </td>
           </tr>
@@ -106,7 +106,7 @@ Your store voucher at ${data.businessName} was ${actionWord} by ${data.amountFor
 ${data.balanceFormatted ? `New Balance: ${data.balanceFormatted}\n` : ''}
 Reason: ${data.reason}
 
-If you believe this was made in error, please contact ${data.businessName}${data.businessPhone ? ` at ${data.businessPhone}` : ''}.
+If you believe this was made in error or have questions about your balance, please contact support@wallxerp.com.
 
 PayMyTax by WallX ERP
   `.trim();
