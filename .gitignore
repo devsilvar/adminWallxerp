@@ -62,3 +62,8 @@ Thumbs.db
 !*.txt
 # Scratch workspace
 scratch/
+
+# The Wowo external API is its own repository and is checked out here only for
+# local convenience. It must never be tracked by this repo — see docs/
+# external-api-service-plan.reviewed.md §4.1.
+external-api/

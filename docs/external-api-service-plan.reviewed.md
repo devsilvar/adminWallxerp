@@ -179,7 +179,7 @@ estimates until Wowo answers that.
 | D22 | One credential: per-account device token from a one-time activation code | Settled |
 | D23 | Provisioning is operator-side CLI, not an HTTP endpoint | Settled |
 | D24 | No `Idempotency-Key` header. `referenceId` (sales) / `externalRef` (expenses, invoices) | **Corrected v10** |
-| D25 | Separate Railway service and separate Postgres. **The code lives at `external-api/` in the PayMyTax repository, not in its own repository** | **Revised Phase 0** |
+| D25 | Separate repository (`devsilvar/external_wallxerpapi`), separate Railway service, separate Postgres | Settled |
 | D26 | New service writes rows directly; it never calls the existing backend | Settled |
 | D27 | New service owns its whole schema and runs its own `prisma migrate` | Settled |
 | D28 | Every safety invariant the old services gave us is explicit code with a test | Settled |
@@ -278,21 +278,22 @@ the SME project. A noisy-neighbour service on the same plan can starve the SME
 app's CPU, which violates the core constraint. *(UNVERIFIED — Railway resource
 isolation depends on plan; separate project is the safe default.)*
 
-### 4.1 Where the code lives (D25, revised in Phase 0)
+### 4.1 Where the code lives (D25)
 
-The service is built at **`external-api/` in the PayMyTax repository**, not in a
-repository of its own. Nothing above changes: still no shared table, migration
-history, connection pool or deploy. What the revision does move is the blast radius
-of a mistake, so three things become explicit:
+The service is built in **its own repository, `devsilvar/external_wallxerpapi`**,
+and deployed as its own Railway service against its own Postgres. Nothing above
+changes: still no shared table, migration history, connection pool or deploy.
 
 | Concern | Rule |
 |---|---|
-| Railway | The service's **root directory** is `external-api/`. If it is left at the repository root, a change to `backend/` redeploys the partner API and vice versa — which is the deploy coupling this architecture exists to avoid |
-| CI | A separate job scoped to `external-api/` (`.github/workflows/ci.yml`), with its own cache key on `external-api/package-lock.json` |
-| Local development | Both apps are now one `cd` apart, so §14's "never point both at the same database" is a live hazard rather than a note. The concrete failure is `prisma migrate dev` run in the wrong directory against the SME database |
+| Repository | The service repository is canonical. It is **never** tracked by the PayMyTax repo — `external-api/` is listed in that repo's `.gitignore`, so a local checkout placed inside the monorepo working tree cannot be committed by accident |
+| CI | The service's workflow lives in the service repository and runs only on it. The PayMyTax workflow does not reference this code |
+| Railway | The service's root directory is the repository root, because the repository contains nothing else |
+| Local development | A local checkout may sit at `external-api/` inside the monorepo for convenience, which puts both apps one `cd` apart: §14's "never point both at the same database" is a live hazard, not a note. The concrete failure is `prisma migrate dev` run in the wrong directory against the SME database |
 
 The non-regression acceptance check is unchanged and still absolute: no file under
-`backend/` is modified.
+`backend/` is modified, and the PayMyTax repository does not contain this service's
+code at all.
 
 ---
 
@@ -1155,7 +1156,7 @@ items, then a continuation page.
 
 ## 10. FILE CHANGES
 
-### CREATE — `external-api/` (own service, same repository — D25)
+### CREATE — new repository (`devsilvar/external_wallxerpapi`)
 
 | File | Purpose |
 |---|---|
@@ -1211,7 +1212,7 @@ the database, not held in env.
 
 ### Phase 0 — Scaffold and environments (6 h)
 
-`external-api/` scaffold (§4.1), Node pinned to the SME app's range (`>=20 <23`), **separate Railway project**
+Service scaffold in its own repository (§4.1), Node pinned to the SME app's range (`>=20 <23`), **separate Railway project**
 with Postgres + staging, `prisma init`, `/health`, config validation, CI
 (lint/typecheck/test), request-ID middleware, error envelope, `trust proxy`.
 
