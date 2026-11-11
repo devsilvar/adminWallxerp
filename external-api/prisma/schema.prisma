@@ -6,8 +6,12 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migrations take advisory locks, which a transaction-mode pooler (port 6543)
+  // cannot hold. Locally both point at the Supabase session pooler; on Railway
+  // this is unset and `url` is used.
+  directUrl = env("DIRECT_URL")
 }
 
 // Phase 1 adds the fifteen models: users, businesses, business_members,
