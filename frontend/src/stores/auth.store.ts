@@ -1,4 +1,4 @@
-﻿import { create } from 'zustand';
+import { create } from 'zustand';
 import api from '@/lib/axios.ts';
 import {
   startSession,
@@ -227,8 +227,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user: data.data, isAuthenticated: true });
     } catch (err: any) {
       if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') return;
-      if (localStorage.getItem('accessToken') === tokenAtStart) {
-        await get().logout();
+      // Only force-logout when the server explicitly rejects the token (401).
+      // Network failures, 500s, and cold-start timeouts do NOT mean the token
+      // is invalid — keeping the user logged in and letting page-level data
+      // fetches surface their own error states is the correct UX. Logging out
+      // on every non-canceled error was the primary cause of users being
+      // unexpectedly kicked out mid-session on flaky connections.
+      const status = (err as any)?.response?.status;
+      if (status === 401) {
+        if (localStorage.getItem('accessToken') === tokenAtStart) {
+          await get().logout();
+        }
       }
     } finally {
       // Only settle bootstrap flags if WE are still the active call.

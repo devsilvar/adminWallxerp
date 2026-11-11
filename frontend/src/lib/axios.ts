@@ -258,7 +258,54 @@ api.interceptors.response.use(
         setAuthorizationHeader(originalRequest, newToken);
         processQueue(null, newToken);
         return api(originalRequest);
-      } catch (refreshError) {
+      } catch (refreshError: any) {
+        // ── Network-failure retry ───────────────────────────────────────────
+        // Only retry when the refresh failure is a transient network or server
+        // outage (packet drop, DNS timeout, Render cold-start 502/503/504).
+        // If the server explicitly rejected the token (4xx) or the error is an
+        // auth failure (invalid/expired refresh token), do not retry — fall
+        // straight through to logout. The refreshToken guard prevents
+        // resurrecting a session that was intentionally destroyed during the wait.
+        const isNetworkOrTransient =
+          (refreshError?.response &&
+            (refreshError.response.status === 502 ||
+              refreshError.response.status === 503 ||
+              refreshError.response.status === 504)) ||
+          (!refreshError?.response &&
+            (refreshError?.code === 'ERR_NETWORK' ||
+              refreshError?.code === 'ECONNABORTED' ||
+              refreshError?.code === 'ETIMEDOUT' ||
+              isNetworkishMessage(refreshError?.message || '')));
+
+        if (isNetworkOrTransient) {
+          try {
+            await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+            // Bail if the session was destroyed (manual logout) during the wait.
+            if (localStorage.getItem('refreshToken') !== refreshToken) {
+              processQueue(refreshError, null);
+              return Promise.reject(refreshError);
+            }
+            const { data: retryData } = await axios.post(
+              `${API_BASE_URL}/auth/refresh`,
+              { refreshToken }
+            );
+            // Post-retry zombie-session guard (same as the success path above).
+            if (localStorage.getItem('refreshToken') !== refreshToken) {
+              processQueue(refreshError, null);
+              return Promise.reject(refreshError);
+            }
+            const retryToken = retryData.data.accessToken;
+            localStorage.setItem('accessToken', retryToken);
+            try { touchActivity(); } catch {}
+            api.defaults.headers.common.Authorization = `Bearer ${retryToken}`;
+            setAuthorizationHeader(originalRequest, retryToken);
+            processQueue(null, retryToken);
+            return api(originalRequest);
+          } catch {
+            // Retry also failed — fall through to the standard logout below.
+          }
+        }
+
         processQueue(refreshError, null);
         console.error('Token refresh failed:', refreshError);
         // Lazy import — auth.store imports this module, so a top-level

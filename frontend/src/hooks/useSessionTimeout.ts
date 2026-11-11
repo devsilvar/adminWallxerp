@@ -11,6 +11,13 @@ import {
 
 const CHECK_INTERVAL_MS = 60_000;
 const TOUCH_THROTTLE_MS = 30_000;
+// When the tab regains focus and the session is already expired, give the user
+// 45 seconds to interact before enforcing logout. This prevents instantly
+// kicking out users who lock their laptop for just over the idle threshold
+// and return to find themselves already logged out before they touch anything.
+// If they interact within the grace window, throttledTouch() resets the timer
+// and checkExpiry() will pass. If they do not, logout fires correctly.
+const VISIBILITY_GRACE_MS = 45_000;
 
 const ACTIVITY_EVENTS: Array<keyof DocumentEventMap> = [
   'mousemove',
@@ -24,6 +31,7 @@ const ACTIVITY_EVENTS: Array<keyof DocumentEventMap> = [
 export function useSessionTimeout() {
   const navigate = useNavigate();
   const lastTouchRef = useRef(0);
+  const visibilityGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const doLogout = useCallback(
     async (reason: 'idle' | 'absolute') => {
@@ -74,8 +82,28 @@ export function useSessionTimeout() {
 
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
-        if (isSessionExpired()) checkExpiry();
-        else throttledTouch();
+        if (isSessionExpired()) {
+          // Grace period: give the user VISIBILITY_GRACE_MS to interact before
+          // enforcing logout. If they click/type/scroll within that window,
+          // throttledTouch() will update wallx_last_active_at and checkExpiry()
+          // will pass. If not, the timer fires and correctly logs them out.
+          // A pending grace timer means we are already waiting — do not reset it.
+          if (visibilityGraceTimerRef.current !== null) return;
+          visibilityGraceTimerRef.current = setTimeout(() => {
+            visibilityGraceTimerRef.current = null;
+            if (isSessionExpired()) checkExpiry();
+            // else: user interacted during grace window — session refreshed, no-op
+          }, VISIBILITY_GRACE_MS);
+        } else {
+          throttledTouch();
+        }
+      } else {
+        // Tab hidden — cancel any pending grace timer so it does not fire
+        // while the tab is invisible (e.g. user closed the tab).
+        if (visibilityGraceTimerRef.current !== null) {
+          clearTimeout(visibilityGraceTimerRef.current);
+          visibilityGraceTimerRef.current = null;
+        }
       }
     };
     document.addEventListener('visibilitychange', onVisibility);
@@ -106,6 +134,12 @@ export function useSessionTimeout() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('storage', onStorage);
       window.clearInterval(interval);
+      // Clean up any pending grace timer on unmount to prevent firing after
+      // the component is gone (e.g. logout that unmounts AppRoutes).
+      if (visibilityGraceTimerRef.current !== null) {
+        clearTimeout(visibilityGraceTimerRef.current);
+        visibilityGraceTimerRef.current = null;
+      }
     };
   }, [throttledTouch, checkExpiry, navigate]);
 }

@@ -200,6 +200,57 @@ describe('Axios Authentication & Interceptor Suite', () => {
       expect(replayResult.data.success).toBe(true);
     });
 
+    it('retries /auth/refresh once on transient network failure before logging out, and recovers if retry succeeds', async () => {
+      const responseErrorHandler = getAuthResponseErrorHandler();
+      expect(responseErrorHandler).toBeDefined();
+
+      localStorage.setItem('accessToken', 'expired-token');
+      localStorage.setItem('refreshToken', 'valid-refresh-token');
+
+      // First attempt fails with transient network error (ERR_NETWORK), second attempt succeeds
+      const networkError = {
+        name: 'AxiosError',
+        code: 'ERR_NETWORK',
+        message: 'Network Error',
+      };
+      const axiosPostSpy = vi.spyOn(axios, 'post')
+        .mockRejectedValueOnce(networkError)
+        .mockResolvedValueOnce({
+          data: {
+            data: {
+              accessToken: 'recovered-new-token',
+            },
+          },
+        });
+
+      const originalRequest: any = {
+        url: '/businesses/123/sales',
+        headers: { Authorization: 'Bearer expired-token' },
+      };
+
+      const error = {
+        config: originalRequest,
+        response: { status: 401 },
+      };
+
+      vi.useFakeTimers();
+      try {
+        const replayPromise = responseErrorHandler(error);
+        // Fast-forward 2000ms for the retry delay
+        await vi.advanceTimersByTimeAsync(2000);
+        const replayResult = await replayPromise;
+
+        expect(axiosPostSpy).toHaveBeenCalledTimes(2);
+        expect(localStorage.getItem('accessToken')).toBe('recovered-new-token');
+        expect(replayResult.data.success).toBe(true);
+
+        const { useAuthStore } = await import('@/stores/auth.store');
+        expect(useAuthStore.getState().isAuthenticated).not.toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('rejects queue when refresh token endpoint fails and isLoggedOut synchronously, with delayed hard-replace safety net', async () => {
       const responseErrorHandler = getAuthResponseErrorHandler();
       expect(responseErrorHandler).toBeDefined();
