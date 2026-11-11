@@ -212,6 +212,28 @@ export const config = {
     from: process.env.EMAIL_FROM || 'WallX ERP <noreply@wallxerp.com>',
   },
 
+  // Internal "new sign-up" fan-out. Sent by the signup-notifications cron
+  // (src/jobs/signup-notifications.cron.ts) ~5 min after registration, so the
+  // register request never waits on the email provider. Override the list with
+  // a comma-separated SIGNUP_NOTIFICATION_EMAILS env var.
+  signupNotifications: {
+    recipients: (
+      process.env.SIGNUP_NOTIFICATION_EMAILS ??
+      [
+        'ogigairichmond@gmail.com',
+        'richmond@wallx.co',
+        'subomi@wallx.co',
+        'ro@devcenter.africa',
+        'partnerships@wallx.co',
+        'refsilva@yahoo.com',
+      ].join(',')
+    )
+      .split(',')
+      .map((address) => address.trim().toLowerCase())
+      .filter((address) => address.length > 0),
+    delayMinutes: Number(process.env.SIGNUP_NOTIFICATION_DELAY_MINUTES ?? '5'),
+  },
+
   // SMS
   sms: {
     apiKey: process.env.TERMII_API_KEY || '',

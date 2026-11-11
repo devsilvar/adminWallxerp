@@ -15,6 +15,7 @@ router.get('/dashboard', adminController.getDashboard);
 router.get('/users', adminController.listUsers);
 router.get('/users/:id', adminController.getUserDetail);
 router.patch('/users/:id/status', adminController.toggleUserStatus);
+router.post('/users/:id/notify-signup', adminController.notifyUserSignup);
 router.patch('/users/:id/email-verification', adminController.toggleEmailVerification);
 router.patch('/users/:id/auto-payout', adminController.toggleUserAutoPayout);
 router.get('/users/:id/downgrade-preview', adminController.previewDowngrade);

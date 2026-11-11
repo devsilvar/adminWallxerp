@@ -79,6 +79,20 @@ export const toggleUserStatus = asyncHandler(
   }
 );
 
+export const notifyUserSignup = asyncHandler(
+  async (req: AuthenticatedRequest, res: Response) => {
+    const result = await adminService.notifyUserSignup(req.params.id, req.user!.userId);
+
+    const message = result.skipped
+      ? result.reason === 'TEST_ACCOUNT'
+        ? 'Test account — internal alert not sent'
+        : 'Email provider not configured — alert logged only'
+      : `Sign-up alert sent to ${result.delivered} recipient${result.delivered === 1 ? '' : 's'}`;
+
+    res.status(200).json({ success: true, data: result, message });
+  }
+);
+
 export const toggleEmailVerification = asyncHandler(
   async (req: AuthenticatedRequest, res: Response) => {
     const { isVerified } = verifyEmailSchema.parse(req.body);

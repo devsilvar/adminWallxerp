@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -7,8 +7,12 @@ import {
   FileText,
   Users,
   CreditCard,
+  Loader2,
+  Mail,
   TrendingUp,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import api from '@/lib/axios';
 import type { AdminDashboardStats } from '@/types/index';
 import { Panel, PanelHeader } from '../shared/Panel';
 import StatusPill from '../shared/StatusPill';
@@ -55,6 +59,33 @@ const STATS = [
 ];
 
 export default function OverviewTab({ stats }: { stats: AdminDashboardStats }) {
+  const [notifyingId, setNotifyingId] = useState<string | null>(null);
+
+  const notifySignup = async (id: string) => {
+    setNotifyingId(id);
+    try {
+      const res = await api.post(`/admin/users/${id}/notify-signup`);
+      const data = res.data?.data;
+      if (data?.skipped) {
+        toast(
+          data.reason === 'TEST_ACCOUNT'
+            ? 'Test account — internal alert suppressed'
+            : 'Email provider not configured — alert logged only'
+        );
+      } else {
+        toast.success(
+          `Sign-up alert sent to ${data?.delivered ?? 0} recipient${data?.delivered === 1 ? '' : 's'}`
+        );
+      }
+    } catch (err: any) {
+      toast.error(
+        err?.response?.data?.error?.message || 'Failed to send sign-up alert'
+      );
+    } finally {
+      setNotifyingId(null);
+    }
+  };
+
   const signups = useMemo(
     () =>
       (stats.recentSignups || []).map((u) => ({
@@ -213,6 +244,21 @@ export default function OverviewTab({ stats }: { stats: AdminDashboardStats }) {
                   <span className='hidden text-[10px] text-ink-subtle sm:inline'>
                     {u.agoLabel}
                   </span>
+                  <button
+                    type='button'
+                    onClick={() => void notifySignup(u.id)}
+                    disabled={notifyingId === u.id}
+                    title='Email the internal sign-up alert list for this user'
+                    aria-label={`Send sign-up alert for ${u.email}`}
+                    className='inline-flex items-center gap-1 rounded-lg border border-hairline bg-panel px-2 py-1 text-xs font-medium text-ink-muted transition-colors hover:bg-panel-subtle hover:text-ink disabled:cursor-not-allowed disabled:opacity-60'
+                  >
+                    {notifyingId === u.id ? (
+                      <Loader2 className='h-3 w-3 animate-spin' aria-hidden='true' />
+                    ) : (
+                      <Mail className='h-3 w-3' aria-hidden='true' />
+                    )}
+                    Notify
+                  </button>
                   <Link
                     to={`/admin/users/${u.id}`}
                     className='rounded-lg border border-hairline bg-panel px-2 py-1 text-xs font-medium text-ink-muted hover:text-ink hover:bg-panel-subtle transition-colors'

@@ -27,6 +27,10 @@ model User {
   verificationTokenHash      String?   @map("verification_token_hash")
   verificationTokenExpiresAt DateTime? @map("verification_token_expires_at")
   verifiedAt                 DateTime? @map("verified_at")
+  /// Set when the internal "new sign-up" notification fan-out has been handled.
+  /// NULL = pending; the signup-notifications cron picks it up ~5 min after
+  /// createdAt and claims it atomically before sending.
+  signupNotifiedAt           DateTime? @map("signup_notified_at")
   isActive                   Boolean   @default(true) @map("is_active")
   lastLoginAt                DateTime? @map("last_login_at")
   createdAt                  DateTime  @default(now()) @map("created_at")

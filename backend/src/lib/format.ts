@@ -18,3 +18,11 @@ export function formatTaxMonth(taxMonth: Date): string {
 export function formatDateISO(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
+
+export function formatLagosDateTime(d: Date): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Lagos',
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(d);
+}

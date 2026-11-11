@@ -109,6 +109,11 @@ import {
   renderMarketplaceProductApprovedEmail,
 } from '@/lib/email/templates/marketplace-product-approved';
 import {
+  generateNewSignupNotificationHtml,
+  generateNewSignupNotificationText,
+  NewSignupNotificationData,
+} from '@/lib/email/templates/new-signup-notification';
+import {
   renderMarketplaceProductRejectedEmail,
 } from '@/lib/email/templates/marketplace-product-rejected';
 
@@ -2004,4 +2009,53 @@ export async function dispatchProductRejectedEmail(
       err: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+// ─── 27. Internal New Sign-Up Notification ──────────────────────
+
+/**
+ * Fans out the internal "a merchant signed up" alert to every address in
+ * `config.signupNotifications.recipients`. One email per recipient, never a
+ * shared To/Cc line — internal recipients should not see each other's addresses
+ * in a message that may be forwarded outside the company.
+ *
+ * Recipient-level failures are swallowed and counted; the caller (the
+ * signup-notifications cron) decides whether to retry.
+ */
+export async function dispatchNewSignupNotificationEmails(
+  data: NewSignupNotificationData
+): Promise<{ delivered: number; failed: number; skipped: boolean }> {
+  const recipients = config.signupNotifications.recipients;
+  if (recipients.length === 0) {
+    return { delivered: 0, failed: 0, skipped: true };
+  }
+
+  const subject = `New sign-up on WallX ERP: ${data.userEmail}`;
+  const html = generateNewSignupNotificationHtml(data);
+  const text = generateNewSignupNotificationText(data);
+
+  let delivered = 0;
+  let failed = 0;
+  let skipped = false;
+
+  for (const to of recipients) {
+    try {
+      const result = await sendEmail({ to, subject, html, text });
+      if (result.delivered) {
+        delivered++;
+      } else {
+        // Dev-logger fallback (no RESEND_API_KEY) — not a failure, but not a send.
+        skipped = true;
+      }
+    } catch (err) {
+      failed++;
+      logger.warn('Sign-up notification email failed for recipient (non-critical)', {
+        to,
+        signupUserId: data.userId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return { delivered, failed, skipped };
 }

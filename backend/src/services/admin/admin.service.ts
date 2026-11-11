@@ -10,9 +10,12 @@ import { getPaymentProvider } from '@/lib/payment';
 import { TreasuryAnalyticsFilterInput, AdminTransactionsQueryInput, AdminOverrideSubscriptionInput } from '@/validators/admin.validator';
 import {
   dispatchAccountDeactivatedEmail,
+  dispatchNewSignupNotificationEmails,
   dispatchSubscriptionApprovedEmail,
   dispatchSubscriptionRejectedEmail,
 } from '@/services/email-dispatch.service';
+import { isTestAccountEmail } from '@/lib/test-accounts';
+import { formatLagosDateTime } from '@/lib/format';
 import logger from '@/lib/logger';
 import { emitToAdmins } from './realtime-admin.helper';
 
@@ -1810,6 +1813,79 @@ export async function overrideUserSubscription(
     ...updatedUser,
     subscriptionExpiresAt: updatedUser.subscriptionExpiresAt ? updatedUser.subscriptionExpiresAt.toISOString() : null,
     trialEndsAt: updatedUser.trialEndsAt ? updatedUser.trialEndsAt.toISOString() : null,
+  };
+}
+
+/**
+ * Manually fan out the internal "new sign-up" alert for one user.
+ *
+ * Used by the "Notify" button on the admin dashboard's Recent Signups list —
+ * the same email the signup-notifications cron sends ~5 min after registration,
+ * triggered on demand. Test/throwaway addresses are refused (the internal list
+ * must never be spammed with QA accounts), and the pending marker is stamped so
+ * the cron does not send a duplicate afterwards.
+ */
+export async function notifyUserSignup(userId: string, adminUserId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      email: true,
+      fullName: true,
+      phone: true,
+      createdAt: true,
+      acquisitionSource: true,
+    },
+  });
+
+  if (!user) {
+    throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+  }
+
+  if (isTestAccountEmail(user.email)) {
+    return {
+      skipped: true,
+      reason: 'TEST_ACCOUNT' as const,
+      delivered: 0,
+      failed: 0,
+      recipients: 0,
+    };
+  }
+
+  const delivery = await dispatchNewSignupNotificationEmails({
+    userEmail: user.email,
+    fullName: user.fullName,
+    phone: user.phone,
+    userId: user.id,
+    signedUpAt: formatLagosDateTime(user.createdAt),
+    acquisitionSource: user.acquisitionSource,
+  });
+
+  // Stamp the pending marker so the cron sweep does not re-announce this
+  // account. A manual re-send is still allowed — the admin asked for it.
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { signupNotifiedAt: new Date() },
+  });
+
+  await logAudit({
+    userId: adminUserId,
+    action: 'admin.signup_notification_sent',
+    resourceType: 'user',
+    resourceId: user.id,
+    newData: {
+      delivered: delivery.delivered,
+      failed: delivery.failed,
+      skipped: delivery.skipped,
+    },
+  });
+
+  return {
+    skipped: delivery.skipped,
+    reason: delivery.skipped ? ('NO_PROVIDER' as const) : null,
+    delivered: delivery.delivered,
+    failed: delivery.failed,
+    recipients: config.signupNotifications.recipients.length,
   };
 }
 
