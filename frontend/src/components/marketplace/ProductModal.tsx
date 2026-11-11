@@ -29,7 +29,10 @@ interface ProductModalProps {
   isOpen: boolean;
   onClose: () => void;
   product?: MarketplaceProduct | null;
-  onSave: (payload: CreateProductPayload, submitImmediately: boolean) => Promise<void>;
+  onSave: (
+    payload: CreateProductPayload,
+    submitImmediately: boolean,
+  ) => Promise<void>;
   isSubmitting?: boolean;
   businessId?: string;
 }
@@ -100,9 +103,15 @@ export default function ProductModal({
       setCategory(product.category || 'fashion');
       setDescription(product.description || '');
       setPrice(product.price ? String(product.price) : '');
-      setCompareAtPrice(product.compareAtPrice ? String(product.compareAtPrice) : '');
+      setCompareAtPrice(
+        product.compareAtPrice ? String(product.compareAtPrice) : '',
+      );
       setTrackInventory(product.trackInventory ?? true);
-      setStockQuantity(product.stockQuantity !== null && product.stockQuantity !== undefined ? String(product.stockQuantity) : '');
+      setStockQuantity(
+        product.stockQuantity !== null && product.stockQuantity !== undefined
+          ? String(product.stockQuantity)
+          : '',
+      );
       setImages(product.images || []);
       setContactPhone(product.contactPhone || '');
       setContactWhatsapp(product.contactWhatsapp || '');
@@ -166,7 +175,9 @@ export default function ProductModal({
     if (fileList.length === 0) return;
 
     if (images.length + fileList.length > 3) {
-      setUploadError(`You can only have up to 3 images per product. You already have ${images.length}.`);
+      setUploadError(
+        `You can only have up to 3 images per product. You already have ${images.length}.`,
+      );
       return;
     }
 
@@ -181,8 +192,14 @@ export default function ProductModal({
     try {
       const uploadedUrls: string[] = [];
       for (const file of fileList) {
-        if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type.toLowerCase())) {
-          throw new Error(`"${file.name}" is not a supported format. Please use JPEG, PNG, or WebP.`);
+        if (
+          !['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(
+            file.type.toLowerCase(),
+          )
+        ) {
+          throw new Error(
+            `"${file.name}" is not a supported format. Please use JPEG, PNG, or WebP.`,
+          );
         }
         if (file.size > 5 * 1024 * 1024) {
           throw new Error(`"${file.name}" exceeds the 5MB size limit.`);
@@ -214,7 +231,10 @@ export default function ProductModal({
       setUploadError('You can add up to 3 product images.');
       return;
     }
-    if (!newImageUrl.startsWith('http://') && !newImageUrl.startsWith('https://')) {
+    if (
+      !newImageUrl.startsWith('http://') &&
+      !newImageUrl.startsWith('https://')
+    ) {
       setUploadError('Image URL must start with http:// or https://');
       return;
     }
@@ -232,12 +252,18 @@ export default function ProductModal({
         return false;
       }
       if (!description.trim() || description.trim().length < 10) {
-        setValidationError('Product description must be at least 10 characters.');
+        setValidationError(
+          'Product description must be at least 10 characters.',
+        );
         return false;
       }
     }
 
-    if (activeTab === 'pricing' || targetStep === 'attributes' || targetStep === 'media') {
+    if (
+      activeTab === 'pricing' ||
+      targetStep === 'attributes' ||
+      targetStep === 'media'
+    ) {
       const numPrice = Number(price);
       if (!numPrice || numPrice <= 0) {
         setValidationError('Please enter a valid price greater than 0.');
@@ -247,7 +273,9 @@ export default function ProductModal({
       if (compareAtPrice) {
         const numCompare = Number(compareAtPrice);
         if (numCompare < numPrice) {
-          setValidationError('Compare-at price cannot be lower than the selling price.');
+          setValidationError(
+            'Compare-at price cannot be lower than the selling price.',
+          );
           setActiveTab('pricing');
           return false;
         }
@@ -255,7 +283,9 @@ export default function ProductModal({
       if (productType === 'physical' && trackInventory) {
         const qty = parseInt(stockQuantity, 10);
         if (isNaN(qty) || qty < 0) {
-          setValidationError('Please provide a valid stock quantity (0 or greater).');
+          setValidationError(
+            'Please provide a valid stock quantity (0 or greater).',
+          );
           setActiveTab('pricing');
           return false;
         }
@@ -292,7 +322,9 @@ export default function ProductModal({
     if (compareAtPrice) {
       const numCompare = Number(compareAtPrice);
       if (numCompare < numPrice) {
-        setValidationError('Compare-at price cannot be lower than the selling price.');
+        setValidationError(
+          'Compare-at price cannot be lower than the selling price.',
+        );
         setActiveTab('pricing');
         return false;
       }
@@ -300,13 +332,17 @@ export default function ProductModal({
     if (productType === 'physical' && trackInventory) {
       const qty = parseInt(stockQuantity, 10);
       if (isNaN(qty) || qty < 0) {
-        setValidationError('Please provide a valid stock quantity (0 or greater).');
+        setValidationError(
+          'Please provide a valid stock quantity (0 or greater).',
+        );
         setActiveTab('pricing');
         return false;
       }
     }
     if (submitImmediately && images.length === 0) {
-      setValidationError('At least one product image is required to submit for marketplace moderation review.');
+      setValidationError(
+        'At least one product image is required to submit for marketplace moderation review.',
+      );
       setActiveTab('media');
       return false;
     }
@@ -352,77 +388,88 @@ export default function ProductModal({
       isOpen={isOpen}
       onClose={onClose}
       title={isEditing ? 'Edit Product Listing' : 'Create Marketplace Product'}
-      subtitle={isEditing ? 'Update details or submit changes for review.' : 'Add a product to your active 3-product inventory showcase.'}
-      icon={<Package className="w-5 h-5 text-purple-600" />}
-      size="lg"
+      subtitle={
+        isEditing
+          ? 'Update details or submit changes for review.'
+          : 'Add a product to your active 3-product inventory showcase.'
+      }
+      icon={<Package className='w-5 h-5 text-purple-600' />}
+      size='lg'
       footer={
-        <div className="flex flex-col sm:flex-row items-center justify-between w-full gap-3 pt-2">
+        <div className='flex flex-col sm:flex-row items-center justify-between w-full gap-3 pt-2'>
           {/* Left Action Button */}
           {activeTab === 'details' ? (
-            <Button variant="ghost" onClick={onClose} disabled={isSubmitting || isUploadingImage} className="w-full sm:w-auto">
+            <Button
+              variant='ghost'
+              onClick={onClose}
+              disabled={isSubmitting || isUploadingImage}
+              className='w-full sm:w-auto'
+            >
               Cancel
             </Button>
           ) : activeTab === 'pricing' ? (
             <Button
-              variant="ghost"
+              variant='ghost'
               onClick={() => setActiveTab('details')}
               disabled={isSubmitting || isUploadingImage}
-              className="w-full sm:w-auto"
+              className='w-full sm:w-auto'
             >
-              <ArrowLeft className="w-4 h-4 mr-1.5" /> Back to Details
+              <ArrowLeft className='w-4 h-4 mr-1.5' /> Back to Details
             </Button>
           ) : activeTab === 'attributes' ? (
             <Button
-              variant="ghost"
+              variant='ghost'
               onClick={() => setActiveTab('pricing')}
               disabled={isSubmitting || isUploadingImage}
-              className="w-full sm:w-auto"
+              className='w-full sm:w-auto'
             >
-              <ArrowLeft className="w-4 h-4 mr-1.5" /> Back to Pricing
+              <ArrowLeft className='w-4 h-4 mr-1.5' /> Back to Pricing
             </Button>
           ) : (
             <Button
-              variant="ghost"
+              variant='ghost'
               onClick={() => setActiveTab('attributes')}
               disabled={isSubmitting || isUploadingImage}
-              className="w-full sm:w-auto"
+              className='w-full sm:w-auto'
             >
-              <ArrowLeft className="w-4 h-4 mr-1.5" /> Back to Specs
+              <ArrowLeft className='w-4 h-4 mr-1.5' /> Back to Specs
             </Button>
           )}
 
           {/* Right Action Button(s) */}
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className='flex items-center gap-2 w-full sm:w-auto'>
             {activeTab === 'details' && (
               <Button
-                variant="primary"
+                variant='primary'
                 onClick={() => handleContinue('pricing')}
                 disabled={isSubmitting}
-                className="w-full sm:w-auto"
+                className='w-full sm:w-auto'
               >
-                Continue to Pricing <ArrowRight className="w-4 h-4 ml-1.5" />
+                Continue to Pricing <ArrowRight className='w-4 h-4 ml-1.5' />
               </Button>
             )}
 
             {activeTab === 'pricing' && (
               <Button
-                variant="primary"
+                variant='primary'
                 onClick={() => handleContinue('attributes')}
                 disabled={isSubmitting}
-                className="w-full sm:w-auto"
+                className='w-full sm:w-auto'
               >
-                Continue to Specifications <ArrowRight className="w-4 h-4 ml-1.5" />
+                Continue to Specifications{' '}
+                <ArrowRight className='w-4 h-4 ml-1.5' />
               </Button>
             )}
 
             {activeTab === 'attributes' && (
               <Button
-                variant="primary"
+                variant='primary'
                 onClick={() => handleContinue('media')}
                 disabled={isSubmitting}
-                className="w-full sm:w-auto"
+                className='w-full sm:w-auto'
               >
-                Continue to Media &amp; Contact <ArrowRight className="w-4 h-4 ml-1.5" />
+                Continue to Media &amp; Contact{' '}
+                <ArrowRight className='w-4 h-4 ml-1.5' />
               </Button>
             )}
 
@@ -430,21 +477,21 @@ export default function ProductModal({
             {activeTab === 'media' && (
               <>
                 <Button
-                  variant="outline"
+                  variant='outline'
                   onClick={() => handleSubmit(false)}
                   disabled={isSubmitting || isUploadingImage}
-                  className="w-full sm:w-auto"
+                  className='w-full sm:w-auto'
                 >
                   Save as Draft
                 </Button>
                 <Button
-                  variant="primary"
+                  variant='primary'
                   onClick={() => handleSubmit(true)}
                   disabled={isSubmitting || isUploadingImage}
                   isLoading={isSubmitting}
-                  className="w-full sm:w-auto"
+                  className='w-full sm:w-auto'
                 >
-                  <Check className="w-4 h-4 mr-1.5" />
+                  <Check className='w-4 h-4 mr-1.5' />
                   {isEditing ? 'Save & Submit' : 'Submit for Review'}
                 </Button>
               </>
@@ -453,19 +500,22 @@ export default function ProductModal({
         </div>
       }
     >
-      <div className="space-y-6">
+      <div className='space-y-6'>
         {/* Step Progress & Tab Navigation */}
-        <div className="border-b border-gray-200 pb-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-purple-700 uppercase tracking-wider">
-              Step {currentStep} of 4: {TABS.find((t) => t.key === activeTab)?.label}
+        <div className='border-b border-gray-200 pb-3'>
+          <div className='flex items-center justify-between mb-2'>
+            <span className='text-xs font-semibold text-purple-700 uppercase tracking-wider'>
+              Step {currentStep} of 4:{' '}
+              {TABS.find((t) => t.key === activeTab)?.label}
             </span>
-            <span className="text-xs text-gray-400">
-              {currentStep === 4 ? 'Final Step — Ready for Submission' : 'Complete details to proceed'}
+            <span className='text-xs text-gray-400'>
+              {currentStep === 4
+                ? 'Final Step — Ready for Submission'
+                : 'Complete details to proceed'}
             </span>
           </div>
 
-          <div className="flex gap-2">
+          <div className='flex gap-2'>
             {TABS.map((tab) => {
               const TabIcon = tab.icon;
               const isActive = activeTab === tab.key;
@@ -474,9 +524,12 @@ export default function ProductModal({
               return (
                 <button
                   key={tab.key}
-                  type="button"
+                  type='button'
                   onClick={() => {
-                    if (tab.step < currentStep || validateCurrentStep(tab.key)) {
+                    if (
+                      tab.step < currentStep ||
+                      validateCurrentStep(tab.key)
+                    ) {
                       setActiveTab(tab.key);
                     }
                   }}
@@ -484,12 +537,12 @@ export default function ProductModal({
                     isActive
                       ? 'bg-purple-600 text-white shadow-sm'
                       : isPast
-                      ? 'bg-purple-50 text-purple-700 hover:bg-purple-100'
-                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                        ? 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                   }`}
                 >
-                  <TabIcon className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">{tab.label}</span>
+                  <TabIcon className='w-3.5 h-3.5' />
+                  <span className='hidden sm:inline'>{tab.label}</span>
                 </button>
               );
             })}
@@ -498,23 +551,25 @@ export default function ProductModal({
 
         {/* Validation Error Banner */}
         {validationError && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-sm text-red-700">
-            <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+          <div className='p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-sm text-red-700'>
+            <AlertCircle className='w-4 h-4 text-red-500 mt-0.5 flex-shrink-0' />
             <span>{validationError}</span>
           </div>
         )}
 
         {/* ── TAB 1: BASIC DETAILS ── */}
         {activeTab === 'details' && (
-          <div className="space-y-4">
+          <div className='space-y-4'>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Category <span className="text-red-500">*</span>
+              <label className='block text-sm font-medium text-gray-700 mb-1'>
+                Category <span className='text-red-500'>*</span>
               </label>
               <select
                 value={category}
-                onChange={(e) => handleCategoryChange(e.target.value as MarketplaceCategory)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                onChange={(e) =>
+                  handleCategoryChange(e.target.value as MarketplaceCategory)
+                }
+                className='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-500'
               >
                 {CATEGORIES.map((cat) => (
                   <option key={cat.value} value={cat.value}>
@@ -525,33 +580,35 @@ export default function ProductModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Product or Service Name <span className="text-red-500">*</span>
+              <label className='block text-sm font-medium text-gray-700 mb-1'>
+                Product or Service Name <span className='text-red-500'>*</span>
               </label>
               <Input
-                placeholder="e.g. Handmade Leather Travel Bag"
+                placeholder='e.g. Handmade Leather Travel Bag'
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
               />
-              <p className="text-xs text-gray-400 mt-1">
-                Must be at least 3 characters. A unique URL slug will be automatically created.
+              <p className='text-xs text-gray-400 mt-1'>
+                Must be at least 3 characters. A unique URL slug will be
+                automatically created.
               </p>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Description <span className="text-red-500">*</span>
+              <label className='block text-sm font-medium text-gray-700 mb-1'>
+                Description <span className='text-red-500'>*</span>
               </label>
               <textarea
                 rows={4}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe your item, key highlights, materials, warranty, or delivery details..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder='Describe your item, key highlights, materials, warranty, or delivery details...'
+                className='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500'
               />
-              <p className="text-xs text-gray-400 mt-1">
-                Provide at least 10 characters detailing what you are offering to buyers.
+              <p className='text-xs text-gray-400 mt-1'>
+                Provide at least 10 characters detailing what you are offering
+                to buyers.
               </p>
             </div>
           </div>
@@ -559,15 +616,15 @@ export default function ProductModal({
 
         {/* ── TAB 2: PRICING & STOCK ── */}
         {activeTab === 'pricing' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className='space-y-4'>
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Selling Price (NGN) <span className="text-red-500">*</span>
+                <label className='block text-sm font-medium text-gray-700 mb-1'>
+                  Selling Price (NGN) <span className='text-red-500'>*</span>
                 </label>
                 <Input
-                  type="number"
-                  placeholder="e.g. 25000"
+                  type='number'
+                  placeholder='e.g. 25000'
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
                   required
@@ -575,12 +632,15 @@ export default function ProductModal({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Compare-at Price (NGN) <span className="text-gray-400 font-normal">(Optional Strikethrough)</span>
+                <label className='block text-sm font-medium text-gray-700 mb-1'>
+                  Compare-at Price (NGN){' '}
+                  <span className='text-gray-400 font-normal'>
+                    (Optional Strikethrough)
+                  </span>
                 </label>
                 <Input
-                  type="number"
-                  placeholder="e.g. 35000"
+                  type='number'
+                  placeholder='e.g. 35000'
                   value={compareAtPrice}
                   onChange={(e) => setCompareAtPrice(e.target.value)}
                 />
@@ -588,36 +648,36 @@ export default function ProductModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className='block text-sm font-medium text-gray-700 mb-1'>
                 Product Offering Type
               </label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <div className='flex gap-4'>
+                <label className='flex items-center gap-2 text-sm text-gray-700 cursor-pointer'>
                   <input
-                    type="radio"
-                    name="productType"
-                    value="physical"
+                    type='radio'
+                    name='productType'
+                    value='physical'
                     checked={productType === 'physical'}
                     onChange={() => {
                       setProductType('physical');
                       setTrackInventory(true);
                     }}
-                    className="text-purple-600 focus:ring-purple-500"
+                    className='text-purple-600 focus:ring-purple-500'
                   />
                   <span>Physical Good (Requires Stock)</span>
                 </label>
-                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <label className='flex items-center gap-2 text-sm text-gray-700 cursor-pointer'>
                   <input
-                    type="radio"
-                    name="productType"
-                    value="service"
+                    type='radio'
+                    name='productType'
+                    value='service'
                     checked={productType === 'service'}
                     onChange={() => {
                       setProductType('service');
                       setTrackInventory(false);
                       setStockQuantity('');
                     }}
-                    className="text-purple-600 focus:ring-purple-500"
+                    className='text-purple-600 focus:ring-purple-500'
                   />
                   <span>Service / Digital</span>
                 </label>
@@ -625,31 +685,36 @@ export default function ProductModal({
             </div>
 
             {productType === 'physical' && (
-              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3">
-                <div className="flex items-center justify-between">
+              <div className='p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-3'>
+                <div className='flex items-center justify-between'>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">Track Inventory Quantity</p>
-                    <p className="text-xs text-gray-500">Prevent sales if stock runs out</p>
+                    <p className='text-sm font-medium text-gray-900'>
+                      Track Inventory Quantity
+                    </p>
+                    <p className='text-xs text-gray-500'>
+                      Prevent sales if stock runs out
+                    </p>
                   </div>
                   <input
-                    type="checkbox"
+                    type='checkbox'
                     checked={trackInventory}
                     onChange={(e) => setTrackInventory(e.target.checked)}
-                    className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                    className='w-4 h-4 text-purple-600 rounded focus:ring-purple-500'
                   />
                 </div>
 
                 {trackInventory && (
                   <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      Available Stock Quantity <span className="text-red-500">*</span>
+                    <label className='block text-xs font-medium text-gray-700 mb-1'>
+                      Available Stock Quantity{' '}
+                      <span className='text-red-500'>*</span>
                     </label>
                     <Input
-                      type="number"
-                      placeholder="e.g. 10"
+                      type='number'
+                      placeholder='e.g. 10'
                       value={stockQuantity}
                       onChange={(e) => setStockQuantity(e.target.value)}
-                      min="0"
+                      min='0'
                     />
                   </div>
                 )}
@@ -660,167 +725,229 @@ export default function ProductModal({
 
         {/* ── TAB 3: CATEGORY SPECS ── */}
         {activeTab === 'attributes' && (
-          <div className="space-y-4">
-            <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-800">
-              Category specifications for <strong className="capitalize">{category}</strong> items help customers discover and filter your product.
+          <div className='space-y-4'>
+            <div className='p-3 bg-purple-50 border border-purple-200 rounded-lg text-xs text-purple-800'>
+              Category specifications for{' '}
+              <strong className='capitalize'>{category}</strong> items help
+              customers discover and filter your product.
             </div>
 
             {category === 'fashion' && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className='grid grid-cols-1 sm:grid-cols-3 gap-4'>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Size</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Size
+                  </label>
                   <Input
-                    placeholder="e.g. S, M, L, XL, 42"
+                    placeholder='e.g. S, M, L, XL, 42'
                     value={attributes.size || ''}
-                    onChange={(e) => setAttributes({ ...attributes, size: e.target.value })}
+                    onChange={(e) =>
+                      setAttributes({ ...attributes, size: e.target.value })
+                    }
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Color</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Color
+                  </label>
                   <Input
-                    placeholder="e.g. Black, Navy, Brown"
+                    placeholder='e.g. Black, Navy, Brown'
                     value={attributes.color || ''}
-                    onChange={(e) => setAttributes({ ...attributes, color: e.target.value })}
+                    onChange={(e) =>
+                      setAttributes({ ...attributes, color: e.target.value })
+                    }
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Gender</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Gender
+                  </label>
                   <select
                     value={attributes.gender || 'unisex'}
-                    onChange={(e) => setAttributes({ ...attributes, gender: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                    onChange={(e) =>
+                      setAttributes({ ...attributes, gender: e.target.value })
+                    }
+                    className='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white'
                   >
-                    <option value="men">Men</option>
-                    <option value="women">Women</option>
-                    <option value="unisex">Unisex</option>
-                    <option value="kids">Kids</option>
+                    <option value='men'>Men</option>
+                    <option value='women'>Women</option>
+                    <option value='unisex'>Unisex</option>
+                    <option value='kids'>Kids</option>
                   </select>
                 </div>
               </div>
             )}
 
             {category === 'bags' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Bag Type</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Bag Type
+                  </label>
                   <Input
-                    placeholder="e.g. Backpack, Tote, Duffle"
+                    placeholder='e.g. Backpack, Tote, Duffle'
                     value={attributes.bagType || ''}
-                    onChange={(e) => setAttributes({ ...attributes, bagType: e.target.value })}
+                    onChange={(e) =>
+                      setAttributes({ ...attributes, bagType: e.target.value })
+                    }
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Material</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Material
+                  </label>
                   <Input
-                    placeholder="e.g. Leather, Canvas, Nylon"
+                    placeholder='e.g. Leather, Canvas, Nylon'
                     value={attributes.material || ''}
-                    onChange={(e) => setAttributes({ ...attributes, material: e.target.value })}
+                    onChange={(e) =>
+                      setAttributes({ ...attributes, material: e.target.value })
+                    }
                   />
                 </div>
               </div>
             )}
 
             {category === 'electronics' && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className='grid grid-cols-1 sm:grid-cols-3 gap-4'>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Brand</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Brand
+                  </label>
                   <Input
-                    placeholder="e.g. Sony, Apple, Samsung"
+                    placeholder='e.g. Sony, Apple, Samsung'
                     value={attributes.brand || ''}
-                    onChange={(e) => setAttributes({ ...attributes, brand: e.target.value })}
+                    onChange={(e) =>
+                      setAttributes({ ...attributes, brand: e.target.value })
+                    }
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Model / Reference</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Model / Reference
+                  </label>
                   <Input
-                    placeholder="e.g. WH-1000XM5"
+                    placeholder='e.g. WH-1000XM5'
                     value={attributes.model || ''}
-                    onChange={(e) => setAttributes({ ...attributes, model: e.target.value })}
+                    onChange={(e) =>
+                      setAttributes({ ...attributes, model: e.target.value })
+                    }
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Warranty (Months)</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Warranty (Months)
+                  </label>
                   <Input
-                    type="number"
-                    placeholder="e.g. 12"
+                    type='number'
+                    placeholder='e.g. 12'
                     value={attributes.warrantyMonths ?? ''}
-                    onChange={(e) => setAttributes({ ...attributes, warrantyMonths: Number(e.target.value) || 0 })}
+                    onChange={(e) =>
+                      setAttributes({
+                        ...attributes,
+                        warrantyMonths: Number(e.target.value) || 0,
+                      })
+                    }
                   />
                 </div>
               </div>
             )}
 
             {category === 'services' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Delivery Method</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Delivery Method
+                  </label>
                   <select
                     value={attributes.deliveryMethod || 'remote'}
-                    onChange={(e) => setAttributes({ ...attributes, deliveryMethod: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                    onChange={(e) =>
+                      setAttributes({
+                        ...attributes,
+                        deliveryMethod: e.target.value,
+                      })
+                    }
+                    className='w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white'
                   >
-                    <option value="remote">Online / Remote Delivery</option>
-                    <option value="on_site">On-Site / Physical Visit</option>
-                    <option value="hybrid">Hybrid</option>
+                    <option value='remote'>Online / Remote Delivery</option>
+                    <option value='on_site'>On-Site / Physical Visit</option>
+                    <option value='hybrid'>Hybrid</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Estimated Duration (Minutes)</label>
+                  <label className='block text-xs font-medium text-gray-700 mb-1'>
+                    Estimated Duration (Minutes)
+                  </label>
                   <Input
-                    type="number"
-                    placeholder="e.g. 60"
+                    type='number'
+                    placeholder='e.g. 60'
                     value={attributes.serviceDurationMinutes ?? ''}
-                    onChange={(e) => setAttributes({ ...attributes, serviceDurationMinutes: Number(e.target.value) || 60 })}
+                    onChange={(e) =>
+                      setAttributes({
+                        ...attributes,
+                        serviceDurationMinutes: Number(e.target.value) || 60,
+                      })
+                    }
                   />
                 </div>
               </div>
             )}
 
-            {category !== 'fashion' && category !== 'bags' && category !== 'electronics' && category !== 'services' && (
-              <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600">
-                General product attributes. Additional custom specifications can be entered in the product description.
-              </div>
-            )}
+            {category !== 'fashion' &&
+              category !== 'bags' &&
+              category !== 'electronics' &&
+              category !== 'services' && (
+                <div className='p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs text-gray-600'>
+                  General product attributes. Additional custom specifications
+                  can be entered in the product description.
+                </div>
+              )}
           </div>
         )}
 
         {/* ── TAB 4: MEDIA & CONTACT (FINAL STEP) ── */}
         {activeTab === 'media' && (
-          <div className="space-y-5">
+          <div className='space-y-5'>
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-gray-900">
-                  Product Images (Max 3) <span className="text-red-500">*</span>
+              <div className='flex items-center justify-between mb-2'>
+                <label className='block text-sm font-medium text-gray-900'>
+                  Product Images (Max 3) <span className='text-red-500'>*</span>
                 </label>
-                <span className="text-xs text-purple-700 font-medium">
+                <span className='text-xs text-purple-700 font-medium'>
                   {images.length} of 3 images uploaded
                 </span>
               </div>
 
               {/* Upload Error Banner */}
               {uploadError && (
-                <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-xs text-red-700">
-                  <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+                <div className='mb-3 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-xs text-red-700'>
+                  <AlertCircle className='w-4 h-4 text-red-500 mt-0.5 flex-shrink-0' />
                   <span>{uploadError}</span>
                 </div>
               )}
 
               {/* Image Previews Grid */}
-              <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className='grid grid-cols-3 gap-3 mb-4'>
                 {images.map((url, idx) => (
-                  <div key={idx} className="relative aspect-square border border-gray-200 rounded-xl overflow-hidden bg-gray-50 shadow-xs group">
-                    <img src={url} alt={`Product preview ${idx + 1}`} className="w-full h-full object-cover" />
+                  <div
+                    key={idx}
+                    className='relative aspect-square border border-gray-200 rounded-xl overflow-hidden bg-gray-50 shadow-xs group'
+                  >
+                    <img
+                      src={url}
+                      alt={`Product preview ${idx + 1}`}
+                      className='w-full h-full object-cover'
+                    />
                     <button
-                      type="button"
+                      type='button'
                       onClick={() => handleRemoveImage(idx)}
                       disabled={isUploadingImage}
-                      title="Remove image"
-                      className="absolute top-1.5 right-1.5 p-1.5 bg-red-600 text-white rounded-full shadow hover:bg-red-700 transition"
+                      title='Remove image'
+                      className='absolute top-1.5 right-1.5 p-1.5 bg-red-600 text-white rounded-full shadow hover:bg-red-700 transition'
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className='w-3.5 h-3.5' />
                     </button>
                     {idx === 0 && (
-                      <span className="absolute bottom-1.5 left-1.5 px-2 py-0.5 bg-purple-900 bg-opacity-80 text-white text-[10px] rounded-md font-semibold tracking-wide">
+                      <span className='absolute bottom-1.5 left-1.5 px-2 py-0.5 bg-purple-900 bg-opacity-80 text-white text-[10px] rounded-md font-semibold tracking-wide'>
                         Cover Photo
                       </span>
                     )}
@@ -828,20 +955,22 @@ export default function ProductModal({
                 ))}
 
                 {/* Empty Slot Indicators */}
-                {Array.from({ length: Math.max(0, 3 - images.length) }).map((_, i) => (
-                  <div
-                    key={i}
-                    onClick={() => {
-                      if (images.length < 3 && fileInputRef.current) {
-                        fileInputRef.current.click();
-                      }
-                    }}
-                    className="aspect-square border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center p-2 text-center text-xs text-gray-400 hover:border-purple-300 hover:bg-purple-50/30 cursor-pointer transition"
-                  >
-                    <ImageIcon className="w-6 h-6 mb-1 text-gray-300" />
-                    <span>Slot {images.length + i + 1} of 3</span>
-                  </div>
-                ))}
+                {Array.from({ length: Math.max(0, 3 - images.length) }).map(
+                  (_, i) => (
+                    <div
+                      key={i}
+                      onClick={() => {
+                        if (images.length < 3 && fileInputRef.current) {
+                          fileInputRef.current.click();
+                        }
+                      }}
+                      className='aspect-square border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center p-2 text-center text-xs text-gray-400 hover:border-purple-300 hover:bg-purple-50/30 cursor-pointer transition'
+                    >
+                      <ImageIcon className='w-6 h-6 mb-1 text-gray-300' />
+                      <span>Slot {images.length + i + 1} of 3</span>
+                    </div>
+                  ),
+                )}
               </div>
 
               {/* Cloudinary Drag & Drop Upload Zone */}
@@ -855,7 +984,10 @@ export default function ProductModal({
                   onDrop={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    if (
+                      e.dataTransfer.files &&
+                      e.dataTransfer.files.length > 0
+                    ) {
                       handleFilesChosen(e.dataTransfer.files);
                     }
                   }}
@@ -866,31 +998,35 @@ export default function ProductModal({
                   }`}
                 >
                   <input
-                    type="file"
+                    type='file'
                     ref={fileInputRef}
                     onChange={(e) => {
                       if (e.target.files) handleFilesChosen(e.target.files);
                     }}
-                    accept="image/jpeg,image/png,image/webp"
+                    accept='image/jpeg,image/png,image/webp'
                     multiple
-                    className="hidden"
+                    className='hidden'
                   />
                   {isUploadingImage ? (
-                    <div className="flex flex-col items-center gap-1.5 py-2">
-                      <Loader2 className="w-7 h-7 text-purple-600 animate-spin" />
-                      <p className="text-sm font-semibold text-purple-900">Uploading to Cloudinary...</p>
-                      <p className="text-xs text-purple-600">Optimizing and storing your product image</p>
+                    <div className='flex flex-col items-center gap-1.5 py-2'>
+                      <Loader2 className='w-7 h-7 text-purple-600 animate-spin' />
+                      <p className='text-sm font-semibold text-purple-900'>
+                        Uploading to Cloudinary...
+                      </p>
+                      <p className='text-xs text-purple-600'>
+                        Optimizing and storing your product image
+                      </p>
                     </div>
                   ) : (
                     <>
-                      <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600">
-                        <UploadCloud className="w-5 h-5" />
+                      <div className='w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center text-purple-600'>
+                        <UploadCloud className='w-5 h-5' />
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-gray-800">
+                        <p className='text-sm font-semibold text-gray-800'>
                           Click to browse or drag &amp; drop product photos
                         </p>
-                        <p className="text-xs text-gray-500 mt-0.5">
+                        <p className='text-xs text-gray-500 mt-0.5'>
                           JPEG, PNG, or WebP up to 5MB (Max 3 images total)
                         </p>
                       </div>
@@ -900,52 +1036,59 @@ export default function ProductModal({
               )}
 
               {/* Secondary URL Input Option */}
-              <div className="mt-2 text-right">
+              <div className='mt-2 text-right'>
                 <button
-                  type="button"
+                  type='button'
                   onClick={() => setShowUrlFallback(!showUrlFallback)}
-                  className="text-xs text-purple-600 hover:text-purple-800 hover:underline"
+                  className='text-xs text-purple-600 hover:text-purple-800 hover:underline'
                 >
-                  {showUrlFallback ? 'Hide URL input' : 'Or paste direct image URL'}
+                  {showUrlFallback
+                    ? 'Hide URL input'
+                    : 'Or paste direct image URL'}
                 </button>
               </div>
 
               {showUrlFallback && images.length < 3 && (
-                <div className="flex gap-2 mt-2">
+                <div className='flex gap-2 mt-2'>
                   <Input
-                    placeholder="https://res.cloudinary.com/... or image link"
+                    placeholder='https://res.cloudinary.com/... or image link'
                     value={newImageUrl}
                     onChange={(e) => setNewImageUrl(e.target.value)}
-                    className="flex-1 text-xs"
+                    className='flex-1 text-xs'
                   />
-                  <Button type="button" variant="outline" onClick={handleAddManualImageUrl} className="flex-shrink-0 text-xs">
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Add URL
+                  <Button
+                    type='button'
+                    variant='outline'
+                    onClick={handleAddManualImageUrl}
+                    className='flex-shrink-0 text-xs'
+                  >
+                    <Plus className='w-3.5 h-3.5 mr-1' /> Add URL
                   </Button>
                 </div>
               )}
             </div>
 
-            <hr className="border-gray-200" />
+            <hr className='border-gray-200' />
 
             {/* Direct Contact & Inquiry Channels */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className='block text-sm font-medium text-gray-700 mb-1'>
                   Customer Inquiry Phone
                 </label>
                 <Input
-                  placeholder="+234 800 000 0000"
+                  placeholder='+234 800 000 0000'
                   value={contactPhone}
                   onChange={(e) => setContactPhone(e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className='block text-sm font-medium text-gray-700 mb-1'>
                   WhatsApp Direct Number
                 </label>
                 <Input
-                  placeholder="+234 800 000 0000"
+                  placeholder='+234 800 000 0000'
                   value={contactWhatsapp}
                   onChange={(e) => setContactWhatsapp(e.target.value)}
                 />
@@ -953,16 +1096,18 @@ export default function ProductModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Direct Checkout / Store Link <span className="text-gray-400 font-normal">(Optional)</span>
+              <label className='block text-sm font-medium text-gray-700 mb-1'>
+                Direct Checkout / Store Link / Social Media Handle / Page{' '}
+                <span className='text-gray-400 font-normal'>(Optional)</span>
               </label>
               <Input
-                placeholder="https://yourstore.com/checkout/item-1"
+                placeholder='https://yourstore.com/checkout/item-1'
                 value={purchaseUrl}
                 onChange={(e) => setPurchaseUrl(e.target.value)}
               />
-              <p className="text-xs text-gray-400 mt-1">
-                If provided, buyers on WallX Marketplace will see a direct checkout button pointing to your website.
+              <p className='text-xs text-gray-400 mt-1'>
+                If provided, buyers on WallX Marketplace will see a direct
+                checkout button pointing to your website.
               </p>
             </div>
           </div>
