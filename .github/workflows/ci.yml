@@ -66,3 +66,49 @@ jobs:
       - name: Run tests
         working-directory: backend
         run: npm run test:e2e
+
+  # The Wowo external API is a separate service that happens to share a
+  # repository (plan D25, §4.1). It has its own lockfile, its own database and no
+  # code in common with backend/, so it gets its own job rather than a step.
+  external-api:
+    runs-on: ubuntu-latest
+
+    env:
+      NODE_ENV: test
+      # Phase 0 has no migrations, so this only has to be well-formed. Phase 1
+      # adds a postgres service and `prisma migrate deploy`.
+      DATABASE_URL: postgresql://test:test@localhost:5432/wowo_external_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: external-api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: external-api
+        run: npm ci
+
+      - name: Validate Prisma schema
+        working-directory: external-api
+        run: npx prisma validate
+
+      - name: Generate Prisma Client
+        working-directory: external-api
+        run: npx prisma generate
+
+      - name: Lint
+        working-directory: external-api
+        run: npm run lint
+
+      - name: TypeScript compilation check
+        working-directory: external-api
+        run: npm run typecheck
+
+      - name: Run tests
+        working-directory: external-api
+        run: npm run test
