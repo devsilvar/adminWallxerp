@@ -4,12 +4,16 @@ import * as adminController from '@/controllers/admin.controller';
 import * as remittanceController from '@/controllers/firs-remittance.controller';
 import * as messageController from '@/controllers/message.controller';
 import marketplaceAdminRoutes from './marketplace-admin.routes';
+import adminAccountRoutes from './admin-account.routes';
 import { broadcastRateLimiter } from '@/middleware/security';
 
 const router = Router();
 
 // All admin routes require authentication + admin role
 router.use(authenticate, authorize('admin'));
+
+// Admin Account Security & Settings
+router.use('/account', adminAccountRoutes);
 
 router.get('/dashboard', adminController.getDashboard);
 router.get('/users', adminController.listUsers);

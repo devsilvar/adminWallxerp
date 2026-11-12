@@ -80,6 +80,7 @@ model User {
   aiQueryLogs             AiQueryLog[]
   broadcasts              Broadcast[]
   userMessages            UserMessage[]
+  accountSecurityCodes    AccountSecurityCode[]
 
   @@index([email])
   @@index([phone])
@@ -91,77 +92,77 @@ model User {
 
 /// Business profiles - each user can have multiple businesses
 model Business {
-  id                      String    @id @default(uuid())
-  userId                  String    @map("user_id")
-  businessName            String    @map("business_name")
-  ownerName               String    @map("owner_name")
-  taxId                   String?   @unique @map("tax_id")
-  businessType            String?   @map("business_type")
-  address                 String?
-  city                    String?
-  state                   String?
-  paystackCustomerCode    String?   @map("paystack_customer_code")
-  virtualAccountNumber    String?   @map("virtual_account_number")
-  virtualAccountBank      String?   @map("virtual_account_bank")
-  defaultProfitMargin     Decimal   @default(20.00) @map("default_profit_margin") @db.Decimal(5, 2)
-  taxReminderDay          Int       @default(25) @map("tax_reminder_day")
-  paystackSubaccountCode  String?   @map("paystack_subaccount_code")
-  settlementBankCode      String?   @map("settlement_bank_code")
-  settlementBankName      String?   @map("settlement_bank_name")
-  settlementAccountNumber String?   @map("settlement_account_number")
-  settlementAccountName   String?   @map("settlement_account_name")
-  platformCommissionPct   Decimal   @default(0.00) @map("platform_commission_pct") @db.Decimal(5, 2)
-  settlementConnectedAt   DateTime? @map("settlement_connected_at")
-  autoSplitEnabled        Boolean   @default(false) @map("auto_split_enabled")
-  taxSplitPercentage      Decimal   @default(7.50) @map("tax_split_percentage") @db.Decimal(5, 2)
+  id                         String    @id @default(uuid())
+  userId                     String    @map("user_id")
+  businessName               String    @map("business_name")
+  ownerName                  String    @map("owner_name")
+  taxId                      String?   @unique @map("tax_id")
+  businessType               String?   @map("business_type")
+  address                    String?
+  city                       String?
+  state                      String?
+  paystackCustomerCode       String?   @map("paystack_customer_code")
+  virtualAccountNumber       String?   @map("virtual_account_number")
+  virtualAccountBank         String?   @map("virtual_account_bank")
+  defaultProfitMargin        Decimal   @default(20.00) @map("default_profit_margin") @db.Decimal(5, 2)
+  taxReminderDay             Int       @default(25) @map("tax_reminder_day")
+  paystackSubaccountCode     String?   @map("paystack_subaccount_code")
+  settlementBankCode         String?   @map("settlement_bank_code")
+  settlementBankName         String?   @map("settlement_bank_name")
+  settlementAccountNumber    String?   @map("settlement_account_number")
+  settlementAccountName      String?   @map("settlement_account_name")
+  platformCommissionPct      Decimal   @default(0.00) @map("platform_commission_pct") @db.Decimal(5, 2)
+  settlementConnectedAt      DateTime? @map("settlement_connected_at")
+  autoSplitEnabled           Boolean   @default(false) @map("auto_split_enabled")
+  taxSplitPercentage         Decimal   @default(7.50) @map("tax_split_percentage") @db.Decimal(5, 2)
   // Set when Paystack sends `customeridentification.failed` or
   // `dedicatedaccount.assign.failed`. Lets the frontend stop polling
   // immediately with an actionable reason instead of spinning until a
   // client-side timeout. Cleared automatically on the next successful
   // validation/assignment attempt.
-  dvaFailureReason        String?   @map("dva_failure_reason")
-  dvaFailedAt             DateTime? @map("dva_failed_at")
-  logoUrl                 String?   @map("logo_url")
-  logoPublicId            String?   @map("logo_public_id")
+  dvaFailureReason           String?   @map("dva_failure_reason")
+  dvaFailedAt                DateTime? @map("dva_failed_at")
+  logoUrl                    String?   @map("logo_url")
+  logoPublicId               String?   @map("logo_public_id")
   // Payout account change lock — admin-granted one-time permission (24h expiry)
-  payoutChangePermitted   Boolean   @default(false) @map("payout_change_permitted")
-  payoutChangePermittedAt DateTime? @map("payout_change_permitted_at")
-  payoutChangePermittedBy String?   @map("payout_change_permitted_by")
-  payoutChangeUsedAt      DateTime? @map("payout_change_used_at")
+  payoutChangePermitted      Boolean   @default(false) @map("payout_change_permitted")
+  payoutChangePermittedAt    DateTime? @map("payout_change_permitted_at")
+  payoutChangePermittedBy    String?   @map("payout_change_permitted_by")
+  payoutChangeUsedAt         DateTime? @map("payout_change_used_at")
   // Voucher bonus — store-wide default extra % credited on top-ups (0–10). 0 = off.
-  voucherBonusPct            Decimal                 @default(0.00) @map("voucher_bonus_pct") @db.Decimal(5, 2)
+  voucherBonusPct            Decimal   @default(0.00) @map("voucher_bonus_pct") @db.Decimal(5, 2)
   // Per-business editable threshold for negative voucher deductions (manager <= threshold, owner > threshold)
-  voucherAdjustmentThreshold Decimal                 @default(50000.00) @map("voucher_adjustment_threshold") @db.Decimal(15, 2)
-  marketplaceSlotAllowance   Int                     @default(3) @map("marketplace_slot_allowance")
-  createdAt                  DateTime                @default(now()) @map("created_at")
-  updatedAt                  DateTime                @updatedAt @map("updated_at")
-  merchantId                 String                  @unique @map("merchant_id")
+  voucherAdjustmentThreshold Decimal   @default(50000.00) @map("voucher_adjustment_threshold") @db.Decimal(15, 2)
+  marketplaceSlotAllowance   Int       @default(3) @map("marketplace_slot_allowance")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
+  merchantId                 String    @unique @map("merchant_id")
 
-  auditLogs               AuditLog[]
-  user                    User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  primaryForUsers         User[]                   @relation("PrimaryBusiness")
-  customers               Customer[]
-  expenses                Expense[]
-  invoices                Invoice[]
-  taxReports              MonthlyTaxReport[]
-  taxProfile              BusinessTaxProfile?
-  reminders               Reminder[]
-  sales                   SalesTransaction[]
-  payments                TaxPayment[]
-  statements              TaxStatement[]
-  settlementPayouts       SettlementPayout[]
-  walletTransactions      WalletTransaction[]
-  credits                 CustomerCredit[]
-  members                 BusinessMember[]
-  invitations             Invitation[]
-  customerCards           CustomerCard[]
-  subscriptionSubmissions SubscriptionSubmission[]
-  feedbacks               UserFeedback[]
-  aiQueryLogs             AiQueryLog[]
-  voucherLedgerRequests   VoucherLedgerRequest[]
-  marketplaceProducts     MarketplaceProduct[]
+  auditLogs                AuditLog[]
+  user                     User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  primaryForUsers          User[]                    @relation("PrimaryBusiness")
+  customers                Customer[]
+  expenses                 Expense[]
+  invoices                 Invoice[]
+  taxReports               MonthlyTaxReport[]
+  taxProfile               BusinessTaxProfile?
+  reminders                Reminder[]
+  sales                    SalesTransaction[]
+  payments                 TaxPayment[]
+  statements               TaxStatement[]
+  settlementPayouts        SettlementPayout[]
+  walletTransactions       WalletTransaction[]
+  credits                  CustomerCredit[]
+  members                  BusinessMember[]
+  invitations              Invitation[]
+  customerCards            CustomerCard[]
+  subscriptionSubmissions  SubscriptionSubmission[]
+  feedbacks                UserFeedback[]
+  aiQueryLogs              AiQueryLog[]
+  voucherLedgerRequests    VoucherLedgerRequest[]
+  marketplaceProducts      MarketplaceProduct[]
   marketplaceSlotPurchases MarketplaceSlotPurchase[]
-  marketplaceBoosts       MarketplaceBoost[]
+  marketplaceBoosts        MarketplaceBoost[]
 
   @@index([userId])
   @@index([taxId])
@@ -398,24 +399,24 @@ model AuditLog {
 
 /// Customers - client master data per business, reused across invoices
 model Customer {
-  id         String             @id @default(uuid())
-  businessId String             @map("business_id")
-  name       String
-  email      String?
-  phone      String?
-  address    String?
-  city       String?
-  state      String?
-  taxId      String?            @map("tax_id")
-  notes      String?
-  isActive   Boolean            @default(true) @map("is_active")
+  id                    String                 @id @default(uuid())
+  businessId            String                 @map("business_id")
+  name                  String
+  email                 String?
+  phone                 String?
+  address               String?
+  city                  String?
+  state                 String?
+  taxId                 String?                @map("tax_id")
+  notes                 String?
+  isActive              Boolean                @default(true) @map("is_active")
   // Per-customer voucher bonus % — null = inherit Business.voucherBonusPct, 0 = explicitly no bonus
-  voucherBonusPct Decimal? @map("voucher_bonus_pct") @db.Decimal(5, 2)
-  createdAt  DateTime           @default(now()) @map("created_at")
-  updatedAt  DateTime           @updatedAt @map("updated_at")
-  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  invoices   Invoice[]
-  credits    CustomerCredit[]
+  voucherBonusPct       Decimal?               @map("voucher_bonus_pct") @db.Decimal(5, 2)
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  business              Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  invoices              Invoice[]
+  credits               CustomerCredit[]
   card                  CustomerCard?
   sales                 SalesTransaction[]
   voucherLedgerRequests VoucherLedgerRequest[]
@@ -507,6 +508,10 @@ model Reminder {
   @@index([businessId])
   @@index([businessId, referenceType, referenceId])
   @@map("reminders")
+}
+
+enum AccountCodePurpose {
+  admin_password_change
 }
 
 enum UserRole {
@@ -997,19 +1002,19 @@ model Invitation {
 
 /// Customer virtual store cards for change vouchers & credit balances
 model CustomerCard {
-  id                             String               @id @default(uuid())
-  businessId                     String               @map("business_id")
-  customerId                     String               @unique @map("customer_id")
-  cardCode                       String               @unique @map("card_code")
-  balance                        Decimal              @default(0.00) @db.Decimal(15, 2)
-  isActive                       Boolean              @default(true) @map("is_active")
-  pendingVerificationId          String?              @map("pending_verification_id")
-  pendingVerificationRequestedAt DateTime?            @map("pending_verification_requested_at")
-  pinHash                        String?              @map("pin_hash")
-  pinAttempts                    Int                  @default(0) @map("pin_attempts")
-  pinLockedUntil                 DateTime?            @map("pin_locked_until")
-  createdAt                      DateTime             @default(now()) @map("created_at")
-  updatedAt                      DateTime             @updatedAt @map("updated_at")
+  id                             String                 @id @default(uuid())
+  businessId                     String                 @map("business_id")
+  customerId                     String                 @unique @map("customer_id")
+  cardCode                       String                 @unique @map("card_code")
+  balance                        Decimal                @default(0.00) @db.Decimal(15, 2)
+  isActive                       Boolean                @default(true) @map("is_active")
+  pendingVerificationId          String?                @map("pending_verification_id")
+  pendingVerificationRequestedAt DateTime?              @map("pending_verification_requested_at")
+  pinHash                        String?                @map("pin_hash")
+  pinAttempts                    Int                    @default(0) @map("pin_attempts")
+  pinLockedUntil                 DateTime?              @map("pin_locked_until")
+  createdAt                      DateTime               @default(now()) @map("created_at")
+  updatedAt                      DateTime               @updatedAt @map("updated_at")
   business                       Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
   customer                       Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
   ledgers                        CustomerCardLedger[]
@@ -1134,8 +1139,8 @@ model SubscriptionSubmission {
   createdAt       DateTime                  @default(now()) @map("created_at")
   updatedAt       DateTime                  @updatedAt @map("updated_at")
 
-  user            User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  business        Business?                 @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  business Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt(sort: Desc)])
   @@index([userId])
@@ -1145,19 +1150,19 @@ model SubscriptionSubmission {
 
 /// In-app user feedback, ratings, and sentiment reviews
 model UserFeedback {
-  id              String    @id @default(uuid())
-  userId          String?   @map("user_id")
-  businessId      String?   @map("business_id")
-  userName        String?   @map("user_name")
-  userEmail       String?   @map("user_email")
-  rating          Int
-  sentiment       String?
-  tags            String[]
-  comment         String?   @db.Text
-  createdAt       DateTime  @default(now()) @map("created_at")
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  businessId String?  @map("business_id")
+  userName   String?  @map("user_name")
+  userEmail  String?  @map("user_email")
+  rating     Int
+  sentiment  String?
+  tags       String[]
+  comment    String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
 
-  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  business        Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  user     User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  business Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
 
   @@index([rating])
   @@index([createdAt(sort: Desc)])
@@ -1166,12 +1171,12 @@ model UserFeedback {
 
 /// Tracks AI Assistant CFO queries per user to enforce monthly plan quotas
 model AiQueryLog {
-  id             String    @id @default(uuid())
-  userId         String    @map("user_id")
-  businessId     String?   @map("business_id")
-  queryText      String    @map("query_text") @db.Text
-  responseLength Int?      @map("response_length")
-  createdAt      DateTime  @default(now()) @map("created_at")
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  businessId     String?  @map("business_id")
+  queryText      String   @map("query_text") @db.Text
+  responseLength Int?     @map("response_length")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   business Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
@@ -1181,18 +1186,18 @@ model AiQueryLog {
 }
 
 model Broadcast {
-  id               String   @id @default(uuid())
-  title            String   @db.VarChar(200)
-  body             String   @db.Text
-  audienceType     String   @map("audience_type") // 'all' | 'user'
-  audienceUserId   String?  @map("audience_user_id") // plain string, NOT a relation
-  createdById      String   @map("created_by")
-  status           String   @default("sent")
-  totalRecipients  Int      @default(0) @map("total_recipients")
-  sentEmailCount   Int      @default(0) @map("sent_email_count")
-  failedEmailCount Int      @default(0) @map("failed_email_count")
-  createdAt        DateTime @default(now()) @map("created_at")
-  createdBy        User     @relation(fields: [createdById], references: [id])
+  id               String        @id @default(uuid())
+  title            String        @db.VarChar(200)
+  body             String        @db.Text
+  audienceType     String        @map("audience_type") // 'all' | 'user'
+  audienceUserId   String?       @map("audience_user_id") // plain string, NOT a relation
+  createdById      String        @map("created_by")
+  status           String        @default("sent")
+  totalRecipients  Int           @default(0) @map("total_recipients")
+  sentEmailCount   Int           @default(0) @map("sent_email_count")
+  failedEmailCount Int           @default(0) @map("failed_email_count")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  createdBy        User          @relation(fields: [createdById], references: [id])
   messages         UserMessage[]
 
   @@index([createdById, createdAt(sort: Desc)])
@@ -1201,17 +1206,17 @@ model Broadcast {
 }
 
 model UserMessage {
-  id          String    @id @default(uuid())
-  userId      String    @map("user_id")
-  broadcastId String?   @map("broadcast_id")
-  title       String    @db.VarChar(200)
-  body        String    @db.Text
-  isRead      Boolean   @default(false) @map("is_read")
-  readAt      DateTime? @map("read_at")
-  emailStatus String    @default("pending") @map("email_status") // pending | sent | skipped | failed
-  emailError  String?   @map("email_error") @db.Text
-  createdAt   DateTime  @default(now()) @map("created_at")
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id          String     @id @default(uuid())
+  userId      String     @map("user_id")
+  broadcastId String?    @map("broadcast_id")
+  title       String     @db.VarChar(200)
+  body        String     @db.Text
+  isRead      Boolean    @default(false) @map("is_read")
+  readAt      DateTime?  @map("read_at")
+  emailStatus String     @default("pending") @map("email_status") // pending | sent | skipped | failed
+  emailError  String?    @map("email_error") @db.Text
+  createdAt   DateTime   @default(now()) @map("created_at")
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   broadcast   Broadcast? @relation(fields: [broadcastId], references: [id], onDelete: SetNull)
 
   @@index([userId, isRead, createdAt(sort: Desc)])
@@ -1233,7 +1238,7 @@ model BusinessTaxProfile {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  business          Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
   @@index([needsManualReview])
@@ -1242,55 +1247,55 @@ model BusinessTaxProfile {
 
 /// Marketplace products for SME showcases (max 3 products per business)
 model MarketplaceProduct {
-  id              String               @id @default(uuid())
-  businessId      String               @map("business_id")
-  name            String               @map("name")
-  slug            String               @unique @map("slug")
-  category        String               @map("category")
-  productType     ProductType          @default(physical) @map("product_type")
-  description     String               @db.Text
-  price           Decimal              @db.Decimal(15, 2)
-  compareAtPrice  Decimal?             @map("compare_at_price") @db.Decimal(15, 2)
-  currency        String               @default("NGN")
-  
+  id             String      @id @default(uuid())
+  businessId     String      @map("business_id")
+  name           String      @map("name")
+  slug           String      @unique @map("slug")
+  category       String      @map("category")
+  productType    ProductType @default(physical) @map("product_type")
+  description    String      @db.Text
+  price          Decimal     @db.Decimal(15, 2)
+  compareAtPrice Decimal?    @map("compare_at_price") @db.Decimal(15, 2)
+  currency       String      @default("NGN")
+
   // Stock & Inventory
-  stockQuantity   Int?                 @default(1) @map("stock_quantity")
-  trackInventory  Boolean              @default(true) @map("track_inventory")
-  
+  stockQuantity  Int?    @default(1) @map("stock_quantity")
+  trackInventory Boolean @default(true) @map("track_inventory")
+
   // Dynamic category attributes
-  attributes      Json?                @map("attributes")
+  attributes Json? @map("attributes")
 
   // Media & Assets
-  images          String[]             @default([])
-  
+  images String[] @default([])
+
   // Direct Action / Purchase Link
-  contactPhone    String?              @map("contact_phone")
-  contactWhatsapp String?              @map("contact_whatsapp")
-  purchaseUrl     String?              @map("purchase_url")
-  
+  contactPhone    String? @map("contact_phone")
+  contactWhatsapp String? @map("contact_whatsapp")
+  purchaseUrl     String? @map("purchase_url")
+
   // Moderation & Governance
   status          ProductListingStatus @default(draft)
   rejectionReason String?              @map("rejection_reason") @db.Text
   approvedAt      DateTime?            @map("approved_at")
   approvedBy      String?              @map("approved_by")
-  
+
   // Audit Timestamps
-  createdAt       DateTime             @default(now()) @map("created_at")
-  updatedAt       DateTime             @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
   // Tracking & Funnel Counters
-  viewCount       Int                  @default(0) @map("view_count")
-  contactCount    Int                  @default(0) @map("contact_count")
-  lastContactedAt DateTime?            @map("last_contacted_at")
-  expiresAt       DateTime?            @map("expires_at")
-  soldAt          DateTime?            @map("sold_at")
-  discountActive  Boolean              @default(dbgenerated()) @map("discount_active")
-  boostEndsAt     DateTime?            @map("boost_ends_at")
+  viewCount       Int       @default(0) @map("view_count")
+  contactCount    Int       @default(0) @map("contact_count")
+  lastContactedAt DateTime? @map("last_contacted_at")
+  expiresAt       DateTime? @map("expires_at")
+  soldAt          DateTime? @map("sold_at")
+  discountActive  Boolean   @default(dbgenerated()) @map("discount_active")
+  boostEndsAt     DateTime? @map("boost_ends_at")
 
-  business        Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  events          MarketplaceListingEvent[]
-  boosts          MarketplaceBoost[]
+  business Business                  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  events   MarketplaceListingEvent[]
+  boosts   MarketplaceBoost[]
 
   @@index([attributes], type: Gin)
   @@index([businessId])
@@ -1312,7 +1317,7 @@ model MarketplaceListingEvent {
   source      String?              @map("source")
   occurredAt  DateTime             @default(now()) @map("occurred_at")
 
-  product     MarketplaceProduct   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product MarketplaceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([productId, eventType, sessionHash])
   @@index([productId, eventType, occurredAt])
@@ -1337,24 +1342,24 @@ enum SlotPurchaseStatus {
 }
 
 model MarketplaceSlotPurchase {
-  id          String             @id @default(uuid())
-  businessId  String             @map("business_id")
-  slots       Int                @default(1)
-  unitPrice   Decimal            @db.Decimal(15, 2) @map("unit_price")
-  amount      Decimal            @db.Decimal(15, 2)
-  status      SlotPurchaseStatus @default(active)
-  paidVia     String             @map("paid_via") // wallet | proof
-  walletTxRef String?            @unique @map("wallet_tx_ref")
-  proofUrl    String?            @map("proof_url")
-  purchasedBy    String             @map("purchased_by")
-  idempotencyKey String?            @unique @map("idempotency_key")
-  reviewedBy     String?            @map("reviewed_by")
-  reviewedAt     DateTime?          @map("reviewed_at")
-  rejectionReason String?           @map("rejection_reason")
-  createdAt      DateTime           @default(now()) @map("created_at")
-  updatedAt      DateTime           @default(now()) @updatedAt @map("updated_at")
+  id              String             @id @default(uuid())
+  businessId      String             @map("business_id")
+  slots           Int                @default(1)
+  unitPrice       Decimal            @map("unit_price") @db.Decimal(15, 2)
+  amount          Decimal            @db.Decimal(15, 2)
+  status          SlotPurchaseStatus @default(active)
+  paidVia         String             @map("paid_via") // wallet | proof
+  walletTxRef     String?            @unique @map("wallet_tx_ref")
+  proofUrl        String?            @map("proof_url")
+  purchasedBy     String             @map("purchased_by")
+  idempotencyKey  String?            @unique @map("idempotency_key")
+  reviewedBy      String?            @map("reviewed_by")
+  reviewedAt      DateTime?          @map("reviewed_at")
+  rejectionReason String?            @map("rejection_reason")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @default(now()) @updatedAt @map("updated_at")
 
-  business    Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, status])
   @@map("marketplace_slot_purchases")
@@ -1389,11 +1394,30 @@ model MarketplaceBoost {
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @default(now()) @updatedAt @map("updated_at")
 
-  product        MarketplaceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
-  business       Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product  MarketplaceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  business Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([productId, status, endsAt])
   @@index([businessId, createdAt])
   @@index([status, endsAt])
   @@map("marketplace_boosts")
+}
+
+/// Short-lived one-time codes emailed to an account holder.
+/// The code itself is never stored — only an HMAC of it.
+model AccountSecurityCode {
+  id          String             @id @default(uuid())
+  userId      String             @map("user_id")
+  purpose     AccountCodePurpose
+  codeHash    String             @map("code_hash")
+  expiresAt   DateTime           @map("expires_at")
+  attempts    Int                @default(0)
+  consumedAt  DateTime?          @map("consumed_at")
+  usedAt      DateTime?          @map("used_at")
+  requestedIp String?            @map("requested_ip")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, createdAt(sort: Desc)])
+  @@map("account_security_codes")
 }

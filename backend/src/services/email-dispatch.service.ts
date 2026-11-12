@@ -59,6 +59,10 @@ import {
   generatePasswordChangedText,
 } from '@/lib/email/templates/password-changed';
 import {
+  generateAdminPasswordCodeHtml,
+  generateAdminPasswordCodeText,
+} from '@/lib/email/templates/admin-password-code';
+import {
   generatePinAlertHtml,
   generatePinAlertText,
 } from '@/lib/email/templates/pin-alert';
@@ -638,6 +642,41 @@ export async function dispatchPasswordChangedEmail(
       method,
       err: err instanceof Error ? err.message : String(err),
     });
+  }
+}
+
+export async function dispatchAdminPasswordCodeEmail(
+  userId: string,
+  code: string,
+  meta: { ip?: string; userAgent?: string } = {},
+): Promise<{ delivered: boolean }> {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.email) return { delivered: false };
+
+    const data = {
+      code,
+      expiryMinutes: 10,
+      userEmail: user.email,
+      requestIp: meta.ip,
+      requestUserAgent: meta.userAgent,
+      requestedAt: formatHumanDateTime(),
+    };
+
+    const result = await sendEmail({
+      to: user.email,
+      subject: 'WallX admin password change — verification code',
+      html: generateAdminPasswordCodeHtml(data),
+      text: generateAdminPasswordCodeText(data),
+    });
+
+    return { delivered: result.delivered };
+  } catch (err) {
+    logger.warn('Failed to dispatch admin password code email', {
+      userId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return { delivered: false };
   }
 }
 

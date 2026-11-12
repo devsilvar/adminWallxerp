@@ -368,6 +368,9 @@ export const config = {
     blindIndexKey:
       process.env.BLIND_INDEX_KEY ||
       'dev-tax-wallx-blind-index-key-32b-secret!',
+    // One-time code hashing. Falls back to the JWT access secret so no new
+    // required env var is introduced; set OTP_PEPPER to rotate independently.
+    otpPepper: process.env.OTP_PEPPER || process.env.JWT_ACCESS_SECRET!,
   },
 
   // PII Encryption

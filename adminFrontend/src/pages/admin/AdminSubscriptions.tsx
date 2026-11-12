@@ -1,3 +1,4 @@
+import { getAccessToken } from '@/lib/session.ts';
 import { useState, useEffect, useCallback } from 'react';
 import {
   CreditCard,
@@ -181,7 +182,7 @@ export default function AdminSubscriptions() {
       return sub.receiptUrl;
     }
 
-    const token = localStorage.getItem('accessToken') || '';
+    const token = getAccessToken() || '';
     const base = (api.defaults.baseURL || '/api/v1').replace(/\/+$/, '');
 
     let url = sub.receiptUrl || `/admin/subscriptions/${sub.id}/receipt`;

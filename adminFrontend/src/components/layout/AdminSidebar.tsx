@@ -17,6 +17,7 @@ import {
   Package,
   Star,
   Megaphone,
+  Settings,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/stores/auth.store.ts';
@@ -85,6 +86,7 @@ export default function AdminSidebar({
     { to: '/admin/reviews', label: 'Reviews', icon: Star },
     { to: '/admin/broadcasts', label: 'Broadcasts', icon: Megaphone },
     { to: '/admin/ai-settings', label: 'AI Settings', icon: Bot },
+    { to: '/admin/settings', label: 'Settings', icon: Settings },
   ];
 
   const sidebarContent = (

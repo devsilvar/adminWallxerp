@@ -51,6 +51,8 @@ export default function AdminLayout() {
       crumbs.push({ label: 'Subscriptions', to: '/admin/subscriptions' });
     } else if (path.startsWith('/admin/reviews')) {
       crumbs.push({ label: 'User Reviews', to: '/admin/reviews' });
+    } else if (path.startsWith('/admin/settings')) {
+      crumbs.push({ label: 'Settings', to: '/admin/settings' });
     }
 
     return crumbs;
@@ -128,7 +130,11 @@ export default function AdminLayout() {
               />
             </Link>
 
-            <div className='flex items-center gap-2 border-l border-hairline pl-3'>
+            <Link
+              to='/admin/settings'
+              className='flex items-center gap-2 border-l border-hairline pl-3 transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 rounded'
+              title='Admin Settings'
+            >
               <span className='flex h-7 w-7 items-center justify-center rounded-full bg-primary-50 text-[11px] font-semibold text-primary-700'>
                 {user?.email?.charAt(0).toUpperCase() || 'A'}
               </span>
@@ -140,7 +146,7 @@ export default function AdminLayout() {
                   Super Admin
                 </p>
               </div>
-            </div>
+            </Link>
           </div>
         </header>
 

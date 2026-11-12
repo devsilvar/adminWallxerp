@@ -93,6 +93,26 @@ async function main() {
   // Clean up earlier typo (devreruit → devrecruit) if it was seeded before
   await prisma.user.deleteMany({ where: { email: 'yusuf@devreruit.org' } });
 
+  // Platform admin (owner-requested)
+  const richmondAdmin = await prisma.user.upsert({
+    where: { email: 'richmond@wallx.co' },
+    update: {
+      role: 'admin',
+      isVerified: true,
+      isActive: true,
+      passwordHash: await hashPassword('Innovation@101'),
+    },
+    create: {
+      email: 'richmond@wallx.co',
+      passwordHash: await hashPassword('Innovation@101'),
+      role: 'admin',
+      isVerified: true,
+      isActive: true,
+    },
+  });
+
+  console.log(`✅ Ensured admin user: ${richmondAdmin.email} (role=admin)\n`);
+
   // =================================
   // 1. CREATE TEST USERS
   // =================================
@@ -538,6 +558,7 @@ async function main() {
   console.log('\n🔐 Test Login Credentials:');
   console.log('Admin: admin@paymytax.com / Admin@123456');
   console.log('Admin: yusuf@devrecruit.org / Admin@123456');
+  console.log('Admin: richmond@wallx.co / Innovation@101');
   console.log('User:  john@example.com / Password123!');
   console.log('\n');
 }

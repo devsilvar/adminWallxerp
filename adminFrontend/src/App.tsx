@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
@@ -9,6 +9,7 @@ import PageLoader from '@/components/ui/PageLoader.tsx';
 import ScrollToTop from '@/components/ScrollToTop.tsx';
 import { useAuthStore } from '@/stores/auth.store.ts';
 import { getSSEClient } from '@/lib/sse-client.ts';
+import { useAdminIdle } from '@/hooks/useAdminIdle.ts';
 
 // Admin pages — code-split and lazy-loaded
 const AdminLogin = lazy(() => import('@/pages/admin/AdminLogin.tsx'));
@@ -33,35 +34,31 @@ const AdminSubscriptions = lazy(
 const AdminReviews = lazy(() => import('@/pages/admin/AdminReviews.tsx'));
 const AdminBroadcasts = lazy(() => import('@/pages/admin/AdminBroadcasts.tsx'));
 const AdminMarketplace = lazy(() => import('@/pages/admin/AdminMarketplace.tsx'));
+const AdminSettings = lazy(() => import('@/pages/admin/AdminSettings.tsx'));
 const NotFound = lazy(() => import('@/pages/NotFound.tsx'));
 
 function AppShell() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const user = useAuthStore((s) => s.user);
   const fetchMe = useAuthStore((s) => s.fetchMe);
-  const [bootReady, setBootReady] = useState(false);
+  const hasCheckedAuth = useAuthStore((s) => s.hasCheckedAuth);
+
+  useAdminIdle();
 
   useEffect(() => {
-    let cancelled = false;
-    async function boot() {
-      if (isAuthenticated && !user) {
-        try {
-          await fetchMe();
-        } finally {
-          if (!cancelled) setBootReady(true);
-        }
-      } else {
-        setBootReady(true);
+    if (!isAuthenticated || user) return;
+
+    void fetchMe();
+
+    // Hard watchdog: if the session check has not settled in 10s, the
+    // session is unusable. Sign out rather than spin forever.
+    const watchdog = setTimeout(() => {
+      if (!useAuthStore.getState().hasCheckedAuth) {
+        useAuthStore.getState().logout();
       }
-    }
-    boot();
-    const t = setTimeout(() => {
-      if (!cancelled) setBootReady(true);
-    }, 2800);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
+    }, 10_000);
+
+    return () => clearTimeout(watchdog);
   }, [isAuthenticated, user, fetchMe]);
 
   useEffect(() => {
@@ -69,7 +66,7 @@ function AppShell() {
     getSSEClient().connect();
   }, [isAuthenticated, user]);
 
-  if (!bootReady && isAuthenticated && !user) {
+  if (isAuthenticated && !user && !hasCheckedAuth) {
     return <PageLoader minHeight="min-h-screen" message="Restoring session…" />;
   }
 
@@ -108,6 +105,7 @@ function AppShell() {
                 <Route path='/admin/marketplace' element={<AdminMarketplace />} />
                 <Route path='/admin/reviews' element={<AdminReviews />} />
                 <Route path='/admin/broadcasts' element={<AdminBroadcasts />} />
+                <Route path='/admin/settings' element={<AdminSettings />} />
               </Route>
             </Route>
             <Route path='*' element={<NotFound />} />

@@ -5,14 +5,14 @@ import PageLoader from '@/components/ui/PageLoader.tsx';
 export default function AdminRoute() {
   const user = useAuthStore((s) => s.user);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const hasCheckedAuth = useAuthStore((s) => s.hasCheckedAuth);
 
   if (!isAuthenticated) return <Navigate to="/admin/login" replace />;
-
-  if (!user) {
+  if (!hasCheckedAuth && !user) {
     return <PageLoader minHeight="min-h-screen" message="Verifying session…" />;
   }
-
-  if (user.role !== 'admin') return <Navigate to="/dashboard" replace />;
+  if (!user) return <Navigate to="/admin/login" replace />;
+  if (user.role !== 'admin') return <Navigate to="/admin/login" replace />;
 
   return <Outlet />;
 }

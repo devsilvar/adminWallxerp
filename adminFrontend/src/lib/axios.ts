@@ -1,3 +1,4 @@
+import { getAccessToken, getRefreshToken, setAccessToken } from '@/lib/session.ts';
 import axios from 'axios';
 import axiosRetry, { isNetworkError, exponentialDelay } from 'axios-retry';
 
@@ -135,7 +136,7 @@ axiosRetry(api, {
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
+  const token = getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -192,7 +193,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       // 1. Cross-tab synchronization check:
       // If another tab already refreshed the token, localStorage will have a newer token
-      const storedToken = localStorage.getItem('accessToken');
+      const storedToken = getAccessToken();
       const authHeader = (
         originalRequest.headers?.Authorization ||
         originalRequest.headers?.get?.('Authorization')
@@ -221,7 +222,7 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const refreshToken = localStorage.getItem('refreshToken');
+      const refreshToken = getRefreshToken();
       if (!refreshToken) {
         isRefreshing = false;
         return Promise.reject(error);
@@ -234,12 +235,12 @@ api.interceptors.response.use(
         // the session was intentionally destroyed — discard the new token
         // instead of resurrecting a zombie session (root cause of the
         // "logout bounces back to dashboard + trial modal" loop).
-        if (localStorage.getItem('refreshToken') !== refreshToken) {
+        if (getRefreshToken() !== refreshToken) {
           processQueue(error, null);
           return Promise.reject(error);
         }
         const newToken = data.data.accessToken;
-        localStorage.setItem('accessToken', newToken);
+        setAccessToken(newToken);
         api.defaults.headers.common.Authorization = `Bearer ${newToken}`;
         setAuthorizationHeader(originalRequest, newToken);
         processQueue(null, newToken);

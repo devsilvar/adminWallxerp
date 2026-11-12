@@ -1,3 +1,4 @@
+import { getAccessToken, setTokens, clearTokens } from '@/lib/session.ts';
 import { create } from 'zustand';
 import api from '@/lib/axios.ts';
 import { useAdminStatsStore } from '@/stores/admin.stats.store.ts';
@@ -7,6 +8,7 @@ interface AuthState {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  hasCheckedAuth: boolean;
 
   login: (email: string, password: string) => Promise<void>;
   register: (
@@ -21,17 +23,22 @@ interface AuthState {
   setLoading: (loading: boolean) => void;
 }
 
+// Bumped by login(), setAuthSession() and logout(). fetchMe compares this
+// before and after its request so it can tell "the session was destroyed
+// while I was in flight" apart from "the interceptor rotated my token".
+let sessionEpoch = 0;
 let fetchMeInProgress: Promise<void> | null = null;
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  isAuthenticated: !!localStorage.getItem('accessToken'),
+  isAuthenticated: !!getAccessToken(),
   isLoading: false,
+  hasCheckedAuth: false,
 
   login: async (email, password) => {
     const { data } = await api.post('/auth/login', { email, password });
-    localStorage.setItem('accessToken', data.data.accessToken);
-    localStorage.setItem('refreshToken', data.data.refreshToken);
+    setTokens(data.data.accessToken, data.data.refreshToken);
+    sessionEpoch += 1;
     set({ isAuthenticated: true });
   },
 
@@ -49,9 +56,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   setAuthSession: (user, accessToken, refreshToken) => {
-    localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('refreshToken', refreshToken);
-    set({ user, isAuthenticated: true });
+    setTokens(accessToken, refreshToken);
+    sessionEpoch += 1;
+    set({ user, isAuthenticated: true, hasCheckedAuth: true });
   },
 
 
@@ -62,6 +69,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // in on the same tab sees the previous user's businesses/invoices/
   // reminders flash in the sidebar before the refetch completes.
   logout: () => {
+    sessionEpoch += 1;
+
     // ─── Clear Axios Default Auth Header (prevent zombie token) ──
     // api.defaults.headers holds the last refreshed token in-memory.
     // Clearing localStorage alone leaves it there, so the next
@@ -75,8 +84,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
 
     // ─── Clear Authentication Tokens ───────────────────────────────
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
+    clearTokens();
 
     // ─── Clear Business & User Context ────────────────────────────
     localStorage.removeItem('activeBusinessId');
@@ -122,35 +130,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     useAdminStatsStore.getState().clear();
 
     // ─── Reset Auth State ──────────────────────────────────────────
-    set({ user: null, isAuthenticated: false });
+    set({ user: null, isAuthenticated: false, hasCheckedAuth: true });
   },
 
   fetchMe: async () => {
     if (fetchMeInProgress) return fetchMeInProgress;
 
-    const tokenAtStart = localStorage.getItem('accessToken');
-    if (!tokenAtStart) return;
+    const tokenAtStart = getAccessToken();
+    if (!tokenAtStart) {
+      set({ hasCheckedAuth: true });
+      return;
+    }
+
+    const epochAtStart = sessionEpoch;
 
     fetchMeInProgress = (async () => {
       try {
         const { data } = await api.get('/auth/me');
-        // Guard: don't resurrect a session that was explicitly logged out
-        // while this request was in-flight (the classic "have to click
-        // logout 3 times" race). Token cleared/rotated mid-flight means
-        // the caller already invalidated the session — ignore the stale
-        // 200 and let the logout stand.
-        const currentToken = localStorage.getItem('accessToken');
-        if (currentToken !== tokenAtStart || !currentToken) return;
-        if (!get().isAuthenticated && !currentToken) return;
+        // The session was destroyed while this request was in flight.
+        if (sessionEpoch !== epochAtStart) return;
         set({ user: data.data, isAuthenticated: true });
-      } catch {
-        // Only run the full wipe if this fetchMe was still the active
-        // session. If an explicit logout already cleared the token,
-        // the 401 is expected — don't double-fire logout/redirect.
-        if (localStorage.getItem('accessToken') === tokenAtStart) {
+      } catch (err) {
+        // Only a 401 means the token is genuinely bad. A cold start, a 502 or
+        // a dropped packet must NOT sign the admin out.
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 401 && sessionEpoch === epochAtStart) {
           get().logout();
         }
       } finally {
+        set({ hasCheckedAuth: true });
         fetchMeInProgress = null;
       }
     })().catch((e) => {

@@ -249,6 +249,26 @@ export const voucherOtpRequestRateLimiter = rateLimit({
 });
 
 /**
+ * Admin password-code limiter. Keyed per admin, not per IP, so a shared
+ * office network cannot lock the whole team out.
+ */
+export const adminPasswordCodeRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: config.app.isDevelopment ? 1000 : 3,
+  skip: skipLocalhost,
+  keyGenerator: (req) => `admin_pwd_code:${(req as any).user?.userId ?? req.ip}`,
+  validate: { keyGeneratorIpFallback: false, ip: false },
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'CODE_RATE_LIMIT_EXCEEDED',
+      message: 'Too many code requests. Please wait before trying again.',
+    },
+  },
+});
+
+/**
  * Rate limiter for voucher PIN lookup.
  * Limits lookups to 20 attempts per 15 minutes per business + user/ip to block brute-force enumeration.
  */
