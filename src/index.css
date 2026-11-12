@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* 
+we have to use loal font */
+
 
 /* ─── Latin-only font subsets (removes Cyrillic/Greek/Vietnamese = 50% fewer files) ─── */
 /* Montserrat: 400 (Regular for subscription body) and 600 (SemiBold) */
