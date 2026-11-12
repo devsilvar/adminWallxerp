@@ -29,3 +29,26 @@ pnpm-debug.log*
 .env.*
 !.env.example
 .npmrc
+
+# =================================
+# Secrets, backups, dumps — never commit (hardened 2026-11-12)
+# =================================
+.env.development.local
+.env.production.local
+.env.test.local
+*.bak
+.vercel/
+# Database dumps / seed artifacts contain user emails and password hashes
+dump*.json
+db-dump*.json
+seed-output*.json
+seed-*.json
+*-seed.json
+*.dump
+*.sql.gz
+# Credentials
+credentials*.json
+*.pem
+*.key
+*.p12
+*.pfx

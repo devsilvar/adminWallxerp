@@ -43,3 +43,28 @@ dist-ssr
 prisma/seed.ts
 prisma/seed.js
 prisma/seed
+
+# =================================
+# Secrets, backups, dumps — never commit (hardened 2026-11-12)
+# =================================
+.env.*
+!.env.example
+.env.development.local
+.env.production.local
+.env.test.local
+*.bak
+.vercel/
+# Database dumps / seed artifacts contain user emails and password hashes
+dump*.json
+db-dump*.json
+seed-output*.json
+seed-*.json
+*-seed.json
+*.dump
+*.sql.gz
+# Credentials
+credentials*.json
+*.pem
+*.key
+*.p12
+*.pfx

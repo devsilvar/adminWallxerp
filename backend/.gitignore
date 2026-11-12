@@ -62,7 +62,39 @@ uploads/
 *.dylib
 
 # =================================
+# Secrets — never commit (hardened 2026-11-12)
+# These patterns only stop NEW files being added. Anything already tracked
+# (e.g. .env.bak, backups/*.json) needs `git rm --cached` to actually leave
+# the repo — see the note at the bottom of this file.
+# =================================
+.env.*
+!.env.example
+.env.development.local
+.env.production.local
+.env.test.local
+*.bak
+*.dump
+*.sql.gz
+.vercel/
+# Local database dumps / seed artifacts — these contain user emails,
+# password hashes, phone numbers and transaction PIN hashes.
+backups/
+dump*.json
+db-dump*.json
+seed-output*.json
+seed-*.json
+*-seed.json
+# Credentials
+credentials*.json
+service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# =================================
 # NOTE: package-lock.json IS tracked.
 # `npm ci` on Render/CI requires it. Do not add it back to this ignore list.
-# Same for prisma/seed.ts and *.md — they belong in source control.
+# prisma/seed.ts is also tracked: it is source code, and it reads its
+# credentials from env at runtime — it does not embed secrets.
 # =================================

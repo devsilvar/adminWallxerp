@@ -33,7 +33,45 @@ pnpm-debug.log*
 .env.development
 .env.production
 .env.test
+.env.*
 !.env.example
+.env.development.local
+.env.production.local
+.env.test.local
+*.bak
+.vercel/
+
+# =================================
+# Backups, dumps, seed artifacts — never commit
+# DB dumps contain user emails, password hashes, phone numbers, PIN hashes
+# =================================
+backups/
+dump*.json
+db-dump*.json
+seed-output*.json
+seed-*.json
+*-seed.json
+*.dump
+.sql.gz
+# Credentials
+credentials*.json
+service-account*.json
+*.pem
+*.key
+.p12
+*.pfx
+
+# Embedded repos have their own .gitignore; these are the backstop for the
+# parent repo, which also tracks backend/ frontend/ marketplaceFrontend/ etc.
+backend/.env*
+!backend/.env.example
+frontend/.env*
+!frontend/.env.example
+marketplaceFrontend/.env*
+!marketplaceFrontend/.env.example
+adminFrontend/.env*
+!adminFrontend/.env.example
+backend/backups/
 
 # =================================
 # OS / Editor files
