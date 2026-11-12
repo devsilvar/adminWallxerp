@@ -1,0 +1,71 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.production
+.env.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Documentation & notes
+*.md
+*.txt
+!frontendplan.md
+!rules.txt
+!responsiveui.md
+
+# Executables
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Database seed files
+prisma/seed.ts
+prisma/seed.js
+prisma/seed
+
+# =================================
+# Secrets, backups, dumps — never commit (hardened 2026-11-12)
+# =================================
+.env.*
+!.env.example
+.env.development.local
+.env.production.local
+.env.test.local
+*.bak
+.vercel/
+# Database dumps / seed artifacts contain user emails and password hashes
+dump*.json
+db-dump*.json
+seed-output*.json
+seed-*.json
+*-seed.json
+*.dump
+*.sql.gz
+# Credentials
+credentials*.json
+service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx

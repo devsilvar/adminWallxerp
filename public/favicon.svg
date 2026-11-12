@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- WallXERP by WallX Favicon - Calculator Grid Design -->
+  <defs>
+    <style>
+      .calc-box { fill: #5B4BA6; }
+      .calc-symbol { fill: #ffffff; font-family: 'Arial', sans-serif; font-weight: bold; font-size: 8px; }
+    </style>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="32" height="32" rx="4" fill="#ffffff" />
+  
+  <!-- Calculator Grid (2x2) -->
+  <!-- Top Left: + -->
+  <rect x="3" y="3" width="11" height="11" rx="1.5" class="calc-box" />
+  <text x="8.5" y="11.5" text-anchor="middle" class="calc-symbol">+</text>
+  
+  <!-- Top Right: - -->
+  <rect x="18" y="3" width="11" height="11" rx="1.5" class="calc-box" />
+  <text x="23.5" y="11" text-anchor="middle" class="calc-symbol">−</text>
+  
+  <!-- Bottom Left: × -->
+  <rect x="3" y="18" width="11" height="11" rx="1.5" class="calc-box" />
+  <text x="8.5" y="26" text-anchor="middle" class="calc-symbol">×</text>
+  
+  <!-- Bottom Right: = -->
+  <rect x="18" y="18" width="11" height="11" rx="1.5" class="calc-box" />
+  <text x="23.5" y="25.5" text-anchor="middle" class="calc-symbol" style="font-size: 7px;">=</text>
+</svg>

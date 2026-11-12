@@ -1,0 +1,125 @@
+import { lazy, Suspense, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+
+import ErrorBoundary from '@/components/ErrorBoundary.tsx';
+import AdminRoute from '@/routes/AdminRoute.tsx';
+import AdminLayout from '@/components/layout/AdminLayout.tsx';
+import PageLoader from '@/components/ui/PageLoader.tsx';
+import ScrollToTop from '@/components/ScrollToTop.tsx';
+import { useAuthStore } from '@/stores/auth.store.ts';
+import { getSSEClient } from '@/lib/sse-client.ts';
+import { useAdminIdle } from '@/hooks/useAdminIdle.ts';
+
+// Admin pages — code-split and lazy-loaded
+const AdminLogin = lazy(() => import('@/pages/admin/AdminLogin.tsx'));
+const AdminDashboard = lazy(() => import('@/pages/admin/AdminDashboard.tsx'));
+const AdminUsers = lazy(() => import('@/pages/admin/AdminUsers.tsx'));
+const AdminUserDetail = lazy(() => import('@/pages/admin/AdminUserDetail.tsx'));
+const AdminBusinesses = lazy(() => import('@/pages/admin/AdminBusinesses.tsx'));
+const AdminAuditLogs = lazy(() => import('@/pages/admin/AdminAuditLogs.tsx'));
+const AdminWithdrawals = lazy(
+  () => import('@/pages/admin/AdminWithdrawals.tsx'),
+);
+const AdminTransactions = lazy(
+  () => import('@/pages/admin/AdminTransactions.tsx'),
+);
+const AdminUnverifiedInflows = lazy(
+  () => import('@/pages/admin/AdminUnverifiedInflows.tsx'),
+);
+const AdminAISettings = lazy(() => import('@/pages/admin/AdminAISettings.tsx'));
+const AdminSubscriptions = lazy(
+  () => import('@/pages/admin/AdminSubscriptions.tsx'),
+);
+const AdminReviews = lazy(() => import('@/pages/admin/AdminReviews.tsx'));
+const AdminBroadcasts = lazy(() => import('@/pages/admin/AdminBroadcasts.tsx'));
+const AdminMarketplace = lazy(() => import('@/pages/admin/AdminMarketplace.tsx'));
+const AdminSettings = lazy(() => import('@/pages/admin/AdminSettings.tsx'));
+const NotFound = lazy(() => import('@/pages/NotFound.tsx'));
+
+function AppShell() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user = useAuthStore((s) => s.user);
+  const fetchMe = useAuthStore((s) => s.fetchMe);
+  const hasCheckedAuth = useAuthStore((s) => s.hasCheckedAuth);
+
+  useAdminIdle();
+
+  useEffect(() => {
+    if (!isAuthenticated || user) return;
+
+    void fetchMe();
+
+    // Hard watchdog: if the session check has not settled in 10s, the
+    // session is unusable. Sign out rather than spin forever.
+    const watchdog = setTimeout(() => {
+      if (!useAuthStore.getState().hasCheckedAuth) {
+        useAuthStore.getState().logout();
+      }
+    }, 10_000);
+
+    return () => clearTimeout(watchdog);
+  }, [isAuthenticated, user, fetchMe]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+    getSSEClient().connect();
+  }, [isAuthenticated, user]);
+
+  if (isAuthenticated && !user && !hasCheckedAuth) {
+    return <PageLoader minHeight="min-h-screen" message="Restoring session…" />;
+  }
+
+  return (
+    <>
+      <ScrollToTop />
+      <Toaster
+        position='top-right'
+        toastOptions={{
+          duration: 4000,
+          style: {
+            background: '#1e293b',
+            color: '#f8fafc',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+          },
+        }}
+      />
+      <ErrorBoundary>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path='/' element={<Navigate to='/admin' replace />} />
+            <Route path='/admin/login' element={<AdminLogin />} />
+            <Route element={<AdminRoute />}>
+              <Route element={<AdminLayout />}>
+                <Route path='/admin' element={<AdminDashboard />} />
+                <Route path='/admin/users' element={<AdminUsers />} />
+                <Route path='/admin/users/:userId' element={<AdminUserDetail />} />
+                <Route path='/admin/businesses' element={<AdminBusinesses />} />
+                <Route path='/admin/withdrawals' element={<AdminWithdrawals />} />
+                <Route path='/admin/settlement/withdrawals' element={<AdminWithdrawals />} />
+                <Route path='/admin/transactions' element={<AdminTransactions />} />
+                <Route path='/admin/unverified-inflows' element={<AdminUnverifiedInflows />} />
+                <Route path='/admin/audit-logs' element={<AdminAuditLogs />} />
+                <Route path='/admin/ai-settings' element={<AdminAISettings />} />
+                <Route path='/admin/subscriptions' element={<AdminSubscriptions />} />
+                <Route path='/admin/marketplace' element={<AdminMarketplace />} />
+                <Route path='/admin/reviews' element={<AdminReviews />} />
+                <Route path='/admin/broadcasts' element={<AdminBroadcasts />} />
+                <Route path='/admin/settings' element={<AdminSettings />} />
+              </Route>
+            </Route>
+            <Route path='*' element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppShell />
+    </BrowserRouter>
+  );
+}
