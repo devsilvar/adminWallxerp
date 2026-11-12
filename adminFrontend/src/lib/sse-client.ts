@@ -1,3 +1,4 @@
+import { getAccessToken } from '@/lib/session.ts';
 import api from '@/lib/axios';
 
 export class SSEClient {
@@ -13,7 +14,7 @@ export class SSEClient {
     if (this.es && (this.es.readyState === EventSource.CONNECTING || this.es.readyState === EventSource.OPEN)) {
       return;
     }
-    const token = localStorage.getItem('accessToken');
+    const token = getAccessToken();
     if (!token) return;
 
     let ticket: string;
