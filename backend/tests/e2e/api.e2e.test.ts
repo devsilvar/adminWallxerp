@@ -235,6 +235,178 @@ describe('WallXERP E2E', () => {
   });
 
   // ═══════════════════════════════════════
+  // AUTH — fullName support (Phase 11)
+  // RTM: REQ-FN-01 … REQ-FN-06
+  // Evidence tier: EXECUTED (supertest + real DB)
+  // ═══════════════════════════════════════
+  describe('Auth — fullName support', () => {
+    // Isolated email so tests don't collide with the main TEST_EMAIL user
+    const FN_EMAIL = `fn-${Date.now()}@e2e.com`;
+    const FN_EMAIL2 = `fn2-${Date.now()}@e2e.com`;
+    let fnToken = '';
+    let fnToken2 = '';
+    let fnUserId = '';
+
+    // REQ-FN-01 (positive): register with fullName → 201, GET /me returns fullName
+    it('POST register with fullName → 201 + GET /me returns fullName [REQ-FN-01 positive]', async () => {
+      const reg = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: FN_EMAIL, password: 'TestPass@123', fullName: 'Grace Hopper' });
+
+      expect(reg.status).toBe(201);
+      expect(reg.body.success).toBe(true);
+      fnToken = reg.body.data.accessToken;
+      fnUserId = reg.body.data.user?.id ?? reg.body.data.userId ?? '';
+
+      const me = await request(app)
+        .get('/api/v1/auth/me')
+        .set({ Authorization: `Bearer ${fnToken}` });
+
+      expect(me.status).toBe(200);
+      expect(me.body.data.fullName).toBe('Grace Hopper');
+    });
+
+    // REQ-FN-01 (boundary): fullName exactly 2 chars (min) → 201
+    it('POST register with fullName = 2 chars (min boundary) → 201 [REQ-FN-01 boundary-min]', async () => {
+      const reg = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: `fn-min-${Date.now()}@e2e.com`, password: 'TestPass@123', fullName: 'AB' });
+      expect(reg.status).toBe(201);
+    });
+
+    // REQ-FN-01 (boundary): fullName = 1 char (min-1, below minimum) → 400
+    it('POST register with fullName = 1 char (below min) → 400 [REQ-FN-01 boundary-min-1]', async () => {
+      const reg = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: `fn-short-${Date.now()}@e2e.com`, password: 'TestPass@123', fullName: 'A' });
+      expect(reg.status).toBe(400);
+    });
+
+    // REQ-FN-02 (positive): register WITHOUT fullName → 201 (backward compat)
+    it('POST register without fullName → 201 backward compat [REQ-FN-02 positive]', async () => {
+      const reg = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: FN_EMAIL2, password: 'TestPass@123' });
+
+      expect(reg.status).toBe(201);
+      fnToken2 = reg.body.data.accessToken;
+
+      const me = await request(app)
+        .get('/api/v1/auth/me')
+        .set({ Authorization: `Bearer ${fnToken2}` });
+      expect(me.status).toBe(200);
+      // fullName absent or null — both acceptable
+      expect(me.body.data.fullName == null || me.body.data.fullName === '').toBe(true);
+    });
+
+    // REQ-FN-03 (negative): whitespace-only fullName → 400
+    it('POST register with whitespace-only fullName → 400 [REQ-FN-03 negative]', async () => {
+      const reg = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: `fn-ws-${Date.now()}@e2e.com`, password: 'TestPass@123', fullName: '   ' });
+      expect(reg.status).toBe(400);
+    });
+
+    // REQ-FN-03 (boundary): fullName exactly 100 chars (max) → 201
+    it('POST register with fullName = 100 chars (max boundary) → 201 [REQ-FN-03 boundary-max]', async () => {
+      const name100 = 'A'.repeat(100);
+      const reg = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: `fn-max-${Date.now()}@e2e.com`, password: 'TestPass@123', fullName: name100 });
+      expect(reg.status).toBe(201);
+    });
+
+    // REQ-FN-03 (boundary): fullName = 101 chars (max+1) → 400
+    it('POST register with fullName = 101 chars (above max) → 400 [REQ-FN-03 boundary-max+1]', async () => {
+      const name101 = 'A'.repeat(101);
+      const reg = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: `fn-long-${Date.now()}@e2e.com`, password: 'TestPass@123', fullName: name101 });
+      expect(reg.status).toBe(400);
+    });
+
+    // REQ-FN-04 (positive): user WITH fullName creates business WITHOUT ownerName → 201 (auto-resolve)
+    it('POST /businesses without ownerName, user has fullName → 201 auto-resolved [REQ-FN-04 positive]', async () => {
+      const res = await request(app)
+        .post('/api/v1/businesses')
+        .set({ Authorization: `Bearer ${fnToken}` })
+        .send({
+          businessName: 'FN Auto-Resolve Biz',
+          businessType: 'retail',
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.data).toHaveProperty('id');
+      // ownerName must be populated with the user's fullName
+      expect(res.body.data.ownerName).toBe('Grace Hopper');
+    });
+
+    // REQ-FN-05 (negative): user WITHOUT fullName creates business WITHOUT ownerName → 400 OWNER_NAME_REQUIRED
+    it('POST /businesses without ownerName, user has no fullName → 400 OWNER_NAME_REQUIRED [REQ-FN-05 negative]', async () => {
+      const res = await request(app)
+        .post('/api/v1/businesses')
+        .set({ Authorization: `Bearer ${fnToken2}` })
+        .send({
+          businessName: 'FN No-Owner Biz',
+          businessType: 'retail',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error?.code).toBe('OWNER_NAME_REQUIRED');
+    });
+
+    // REQ-FN-06 (positive): PATCH /auth/me { fullName } → 200, owned business ownerName synced
+    it('PATCH /auth/me fullName → 200 + owned business ownerName synced [REQ-FN-06 positive]', async () => {
+      // First create a business (ownerName is auto-filled from current fullName 'Grace Hopper')
+      const bizRes = await request(app)
+        .post('/api/v1/businesses')
+        .set({ Authorization: `Bearer ${fnToken}` })
+        .send({ businessName: 'FN Sync Biz', businessType: 'technology' });
+      expect(bizRes.status).toBe(201);
+      const syncBizId = bizRes.body.data.id;
+
+      // Now update fullName
+      const patch = await request(app)
+        .patch('/api/v1/auth/me')
+        .set({ Authorization: `Bearer ${fnToken}` })
+        .send({ fullName: 'Ada Lovelace' });
+      expect(patch.status).toBe(200);
+
+      // Verify GET /me reflects new name
+      const me = await request(app)
+        .get('/api/v1/auth/me')
+        .set({ Authorization: `Bearer ${fnToken}` });
+      expect(me.status).toBe(200);
+      expect(me.body.data.fullName).toBe('Ada Lovelace');
+
+      // Verify the business's ownerName was synced
+      const biz = await request(app)
+        .get(`/api/v1/businesses/${syncBizId}`)
+        .set({ Authorization: `Bearer ${fnToken}` });
+      expect(biz.status).toBe(200);
+      expect(biz.body.data.ownerName).toBe('Ada Lovelace');
+    });
+
+    // REQ-FN-06 (negative): PATCH /auth/me with whitespace-only fullName → 400 (validation)
+    it('PATCH /auth/me whitespace fullName → 400 [REQ-FN-06 negative]', async () => {
+      const patch = await request(app)
+        .patch('/api/v1/auth/me')
+        .set({ Authorization: `Bearer ${fnToken}` })
+        .send({ fullName: '   ' });
+      expect(patch.status).toBe(400);
+    });
+
+    // REQ-FN-06 (boundary): PATCH /auth/me fullName = 2 chars (min) → 200
+    it('PATCH /auth/me fullName = 2 chars (min boundary) → 200 [REQ-FN-06 boundary-min]', async () => {
+      const patch = await request(app)
+        .patch('/api/v1/auth/me')
+        .set({ Authorization: `Bearer ${fnToken}` })
+        .send({ fullName: 'AB' });
+      expect(patch.status).toBe(200);
+    });
+  });
+
+  // ═══════════════════════════════════════
   // ADMIN LOGIN - Before rate limiter burns out
   // ═══════════════════════════════════════
   describe('Admin Login', () => {

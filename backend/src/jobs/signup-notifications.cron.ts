@@ -37,6 +37,7 @@ import config from '@/config';
 import { dispatchNewSignupNotificationEmails } from '@/services/email-dispatch.service';
 import { isTestAccountEmail } from '@/lib/test-accounts';
 import { formatLagosDateTime } from '@/lib/format';
+import { resolveUserDisplayName } from '@/services/auth/auth.service';
 
 // Every minute. The fresh-user query is cheap and narrow (pending marker +
 // createdAt window), so a tight cadence keeps the delay close to the configured
@@ -114,8 +115,12 @@ export async function runSignupNotificationSweep(opts?: {
       email: true,
       fullName: true,
       phone: true,
+      primaryBusinessId: true,
       createdAt: true,
       acquisitionSource: true,
+      businesses: {
+        select: { id: true, ownerName: true, createdAt: true },
+      },
     },
     orderBy: { createdAt: 'asc' },
     take: MAX_USERS_PER_SWEEP,
@@ -141,9 +146,11 @@ export async function runSignupNotificationSweep(opts?: {
 
     result.processed++;
 
+    const displayName = resolveUserDisplayName(user, user.businesses);
+
     const delivery = await dispatchNewSignupNotificationEmails({
       userEmail: user.email,
-      fullName: user.fullName,
+      fullName: displayName,
       phone: user.phone,
       userId: user.id,
       signedUpAt: formatLagosDateTime(user.createdAt),

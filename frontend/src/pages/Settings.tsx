@@ -631,8 +631,15 @@ function ProfilePanel({
   onEditBusiness: () => void;
   onUpdateBvn: () => void;
 }) {
-  const initial = user?.email?.charAt(0).toUpperCase() || 'U';
-  const displayName = user?.email?.split('@')[0] ?? 'Account';
+  const initial = (user?.fullName?.trim()?.charAt(0) || user?.email?.charAt(0) || 'U').toUpperCase();
+  const displayName = user?.fullName?.trim() || user?.email?.split('@')[0] || 'Account';
+  const [editingName, setEditingName] = useState<string>(user?.fullName || '');
+  const [savingName, setSavingName] = useState(false);
+
+  useEffect(() => {
+    setEditingName(user?.fullName || '');
+  }, [user?.fullName]);
+
   const [selectedPrimaryId, setSelectedPrimaryId] = useState<string>(
     user?.primaryBusinessId || '',
   );
@@ -641,6 +648,30 @@ function ProfilePanel({
   useEffect(() => {
     setSelectedPrimaryId(user?.primaryBusinessId || '');
   }, [user?.primaryBusinessId]);
+
+  const handleSaveFullName = async () => {
+    const trimmed = editingName.trim();
+    if (trimmed.length < 2) {
+      toast.error('Name must be at least 2 characters');
+      return;
+    }
+    if (trimmed.length > 100) {
+      toast.error('Name cannot exceed 100 characters');
+      return;
+    }
+    setSavingName(true);
+    try {
+      await api.patch('/auth/me', { fullName: trimmed });
+      toast.success('Full name updated successfully');
+      await useAuthStore.getState().fetchMe();
+    } catch (err: any) {
+      toast.error(err.response?.data?.error?.message || 'Failed to update name');
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const isNameDirty = (user?.fullName || '').trim() !== editingName.trim();
 
   const handleSavePrimaryBusiness = async () => {
     setSavingPrimary(true);
@@ -689,6 +720,37 @@ function ProfilePanel({
               )}
             </div>
           </div>
+        </div>
+      </Card>
+
+      {/* Profile editor — Full Name */}
+      <Card
+        title='Profile details'
+        subtitle='Your name as the account owner'
+      >
+        <div className='p-5 space-y-4'>
+          <div className='flex flex-col sm:flex-row items-stretch sm:items-end gap-3'>
+            <div className='flex-1'>
+              <Input
+                label='Full name'
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                placeholder='e.g. Amaka Obi'
+                maxLength={100}
+              />
+            </div>
+            <Button
+              onClick={handleSaveFullName}
+              isLoading={savingName}
+              disabled={!isNameDirty || editingName.trim().length < 2}
+              className='shrink-0'
+            >
+              <Save className='h-4 w-4 mr-1.5' /> Save
+            </Button>
+          </div>
+          <p className='text-xs text-gray-500'>
+            Updating your full name automatically synchronizes your owner name across the businesses you own.
+          </p>
         </div>
       </Card>
 

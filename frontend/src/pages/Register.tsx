@@ -91,6 +91,8 @@ export default function Register() {
     }
   }, [rawPlan]);
 
+  const [fullName, setFullName] = useState('');
+  const [fullNameError, setFullNameError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [localDigits, setLocalDigits] = useState('');
@@ -136,6 +138,18 @@ export default function Register() {
       return;
     }
 
+    const trimmedName = fullName.trim();
+    if (!trimmedName || trimmedName.length < 2) {
+      setFullNameError('Please enter your full name (at least 2 characters)');
+      toast.error('Please enter your full name (at least 2 characters)');
+      return;
+    }
+    if (trimmedName.length > 100) {
+      setFullNameError('Name cannot exceed 100 characters');
+      toast.error('Name cannot exceed 100 characters');
+      return;
+    }
+
     setIsLoading(true);
     try {
       const acquisitionSource = srcParam === 'marketplace' ? 'marketplace' : undefined;
@@ -146,6 +160,7 @@ export default function Register() {
         selectedPlan,
         acquisitionSource,
         acceptedTerms,
+        trimmedName,
       );
       const userEmail = result.email || email;
       sessionStorage.setItem('pendingVerificationEmail', userEmail);
@@ -251,6 +266,20 @@ export default function Register() {
       </div>
 
       <form onSubmit={handleSubmit} className='space-y-6'>
+        <Input
+          label='Full name'
+          type='text'
+          value={fullName}
+          onChange={(e) => {
+            setFullName(e.target.value);
+            if (fullNameError) setFullNameError(null);
+          }}
+          placeholder='e.g. Amaka Obi'
+          required
+          error={fullNameError ?? undefined}
+          autoComplete='name'
+        />
+
         <Input
           label='Email address'
           type='email'

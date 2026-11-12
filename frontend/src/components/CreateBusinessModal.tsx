@@ -49,13 +49,23 @@ export default function CreateBusinessModal({
   const [isLoading, setIsLoading] = useState(false);
   const [form, setForm] = useState({
     businessName: '',
-    ownerName: '',
+    ownerName: user?.fullName?.trim() || '',
     businessType: 'sole_proprietorship',
     taxId: '',
     address: '',
     city: '',
     state: '',
   });
+
+  // Prefill ownerName from user profile when modal opens if not already customized
+  useEffect(() => {
+    if (isOpen && user?.fullName?.trim()) {
+      setForm((prev) => ({
+        ...prev,
+        ownerName: prev.ownerName || user.fullName!.trim(),
+      }));
+    }
+  }, [isOpen, user?.fullName]);
 
   if (!isOpen || !isOwnerAccount) return null;
 
@@ -91,7 +101,7 @@ export default function CreateBusinessModal({
       
       setForm({
         businessName: '',
-        ownerName: '',
+        ownerName: user?.fullName?.trim() || '',
         businessType: 'sole_proprietorship',
         taxId: '',
         address: '',

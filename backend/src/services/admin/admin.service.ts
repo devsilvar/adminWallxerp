@@ -18,6 +18,7 @@ import { isTestAccountEmail } from '@/lib/test-accounts';
 import { formatLagosDateTime } from '@/lib/format';
 import logger from '@/lib/logger';
 import { emitToAdmins } from './realtime-admin.helper';
+import { resolveUserDisplayName } from '@/services/auth/auth.service';
 
 export async function getDashboardStats() {
   const [totalUsers, totalBusinesses, totalTaxReports, recentSignups] =
@@ -1833,8 +1834,12 @@ export async function notifyUserSignup(userId: string, adminUserId: string) {
       email: true,
       fullName: true,
       phone: true,
+      primaryBusinessId: true,
       createdAt: true,
       acquisitionSource: true,
+      businesses: {
+        select: { id: true, ownerName: true, createdAt: true },
+      },
     },
   });
 
@@ -1852,9 +1857,11 @@ export async function notifyUserSignup(userId: string, adminUserId: string) {
     };
   }
 
+  const displayName = resolveUserDisplayName(user, user.businesses);
+
   const delivery = await dispatchNewSignupNotificationEmails({
     userEmail: user.email,
-    fullName: user.fullName,
+    fullName: displayName,
     phone: user.phone,
     userId: user.id,
     signedUpAt: formatLagosDateTime(user.createdAt),

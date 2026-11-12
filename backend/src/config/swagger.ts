@@ -215,7 +215,7 @@ const options: swaggerJsdoc.Options = {
         // ─── Business ────────────────────────────────────────
         CreateBusinessInput: {
           type: 'object',
-          required: ['businessName', 'ownerName', 'businessType'],
+          required: ['businessName', 'businessType'],
           properties: {
             businessName: { type: 'string', minLength: 2, maxLength: 200, example: 'Acme Ltd' },
             ownerName: { type: 'string', minLength: 2, maxLength: 200, example: 'John Doe' },

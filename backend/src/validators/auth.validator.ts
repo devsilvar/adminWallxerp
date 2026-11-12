@@ -17,6 +17,12 @@ export const registerSchema = z.object({
   requestedPlan: z.enum(['free', 'starter', 'business', 'scale']).optional(),
   acquisitionSource: z.enum(['marketplace']).optional(),
   acceptedTerms: z.boolean().optional(),
+  fullName: z
+    .string()
+    .trim()
+    .min(2, 'Name must be at least 2 characters')
+    .max(100, 'Name must be at most 100 characters')
+    .optional(),
 });
 
 export const loginSchema = z.object({

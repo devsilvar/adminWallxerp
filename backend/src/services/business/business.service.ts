@@ -75,6 +75,7 @@ export async function createBusiness(userId: string, input: CreateBusinessInput,
     where: { id: userId },
     select: {
       id: true,
+      fullName: true,
       primaryBusinessId: true,
       settlementBankCode: true,
       settlementBankName: true,
@@ -99,9 +100,21 @@ export async function createBusiness(userId: string, input: CreateBusinessInput,
     );
   }
 
+  // Resolve ownerName: explicit field wins, then fall back to User.fullName.
+  // If neither is present, reject with a clear error.
+  const resolvedOwnerName = input.ownerName?.trim() || user?.fullName?.trim() || null;
+  if (!resolvedOwnerName) {
+    throw new AppError(
+      400,
+      'Owner name is required. Provide ownerName or add a full name to your profile first.',
+      'OWNER_NAME_REQUIRED'
+    );
+  }
+
   const business = await db.business.create({
     data: {
       ...input,
+      ownerName: resolvedOwnerName,
       userId,
       merchantId,
       // Auto-inherit central DVA credentials

@@ -1,11 +1,17 @@
 /**
- * Internal New Sign-Up Notification Template
+ * Internal New Sign-Up Notification Template — WallX ERP
  *
  * Sent to the WallX internal recipient list (config.signupNotifications.recipients)
  * by the signup-notifications cron, roughly five minutes after a merchant
  * registers. Not a customer-facing email — it is an operational heads-up for the
  * growth/support team, so the layout is denser than the customer templates.
+ *
+ * OWNER CONSTRAINT (binding): This is the ONLY email file changed by the
+ * full-name feature. Do NOT touch lib/email/index.ts, email-dispatch.service.ts,
+ * or config/index.ts.
  */
+
+import { escapeHtml } from '../escape';
 
 export interface NewSignupNotificationData {
   userEmail: string;
@@ -24,14 +30,29 @@ function detailRow(label: string, value: string): string {
                 </tr>`;
 }
 
+/** Subject line helper */
+export function generateNewSignupNotificationSubject(data: NewSignupNotificationData): string {
+  const name = data.fullName?.trim() || data.userEmail;
+  return `New WallX ERP account — ${escapeHtml(name)}`;
+}
+
 export function generateNewSignupNotificationHtml(data: NewSignupNotificationData): string {
+  const safeFullName = data.fullName?.trim() ? escapeHtml(data.fullName.trim()) : 'Not provided';
+  const safeEmail = escapeHtml(data.userEmail);
+  const safePhone = data.phone?.trim() ? escapeHtml(data.phone.trim()) : 'Not provided';
+  const safeSignedUpAt = escapeHtml(data.signedUpAt);
+  const safeAcquisition = data.acquisitionSource?.trim() ? escapeHtml(data.acquisitionSource.trim()) : 'Direct';
+  const safeUserId = escapeHtml(data.userId);
+
+  const bannerDisplayName = data.fullName?.trim() ? escapeHtml(data.fullName.trim()) : safeEmail;
+
   const rows = [
-    detailRow('Email', data.userEmail),
-    detailRow('Full name', data.fullName ?? 'Not provided'),
-    detailRow('Phone', data.phone ?? 'Not provided'),
-    detailRow('Signed up', data.signedUpAt),
-    detailRow('Acquisition', data.acquisitionSource ?? 'Direct'),
-    detailRow('User ID', data.userId),
+    detailRow('Email', safeEmail),
+    detailRow('Full name', safeFullName),
+    detailRow('Phone', safePhone),
+    detailRow('Signed up', safeSignedUpAt),
+    detailRow('Acquisition', safeAcquisition),
+    detailRow('User ID', safeUserId),
   ].join('');
 
   return `
@@ -54,9 +75,6 @@ export function generateNewSignupNotificationHtml(data: NewSignupNotificationDat
               <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">
                 WallX ERP
               </h1>
-              <p style="margin: 6px 0 0; color: #c084fc; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">
-                Internal Sign-Up Alert
-              </p>
             </td>
           </tr>
 
@@ -67,7 +85,7 @@ export function generateNewSignupNotificationHtml(data: NewSignupNotificationDat
                 New Account Created
               </p>
               <h2 style="margin: 6px 0 0; color: #0f172a; font-size: 20px; font-weight: 800; letter-spacing: -0.4px;">
-                ${data.userEmail}
+                ${bannerDisplayName}
               </h2>
             </td>
           </tr>
@@ -83,8 +101,12 @@ export function generateNewSignupNotificationHtml(data: NewSignupNotificationDat
                 ${rows}
               </table>
 
-              <p style="margin: 24px 0 0; color: #94a3b8; font-size: 12px; line-height: 1.6;">
-                Automated message from the sign-up notification job. Sent roughly five minutes after registration.
+              <p style="margin: 24px 0 0; color: #334155; font-size: 13px; line-height: 1.6;">
+                — WallX Product
+              </p>
+              <p style="margin: 8px 0 0; color: #94a3b8; font-size: 11px; line-height: 1.6;">
+                You are receiving this because you are on the WallX internal sign-up notification list.
+                WallX ERP, Lagos, Nigeria.
               </p>
             </td>
           </tr>
@@ -97,16 +119,21 @@ export function generateNewSignupNotificationHtml(data: NewSignupNotificationDat
 }
 
 export function generateNewSignupNotificationText(data: NewSignupNotificationData): string {
+  const name = data.fullName?.trim() || 'Not provided';
+  const phone = data.phone?.trim() || 'Not provided';
+  const source = data.acquisitionSource?.trim() || 'Direct';
+
   return [
     'WALLX ERP — NEW SIGN-UP',
     '',
     `Email: ${data.userEmail}`,
-    `Full name: ${data.fullName ?? 'Not provided'}`,
-    `Phone: ${data.phone ?? 'Not provided'}`,
+    `Full name: ${name}`,
+    `Phone: ${phone}`,
     `Signed up: ${data.signedUpAt}`,
-    `Acquisition: ${data.acquisitionSource ?? 'Direct'}`,
+    `Acquisition: ${source}`,
     `User ID: ${data.userId}`,
     '',
-    'Automated message from the sign-up notification job.',
+    '— WallX Product',
+    'You are receiving this because you are on the WallX internal sign-up notification list.',
   ].join('\n');
 }

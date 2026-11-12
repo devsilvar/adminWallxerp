@@ -201,6 +201,7 @@ export async function register(input: RegisterInput) {
         email: input.email,
         passwordHash,
         phone: input.phone,
+        fullName: input.fullName?.trim() || null,       // M1: store name at sign-up; null when absent
         acquisitionSource: input.acquisitionSource ?? null,
         isVerified: false,
         verificationTokenHash,
@@ -216,7 +217,7 @@ export async function register(input: RegisterInput) {
         await tx.subscriptionSubmission.create({
           data: {
             userId: created.id,
-            customerName: created.email.split('@')[0] || created.email,
+            customerName: created.fullName?.trim() || created.email.split('@')[0] || created.email,  // M3: use real name when available
             email: created.email,
             phone: created.phone ?? null,
             plan: canonical,
@@ -504,11 +505,14 @@ export async function updateMe(userId: string, input: { phone?: string; fullName
     data: updateData,
   });
 
-  // If user updated their fullName, also sync business.ownerName on businesses they own
-  if (updateData.fullName !== undefined) {
+  // Propagate fullName to all owned businesses as ownerName — only when the new
+  // name is a non-empty string. Business.ownerName is NOT NULL; never write null
+  // or '' to it. The validator's min(2) already blocks empty strings from the API,
+  // but this guard is the safety net for direct service calls.
+  if (updateData.fullName) {
     await prisma.business.updateMany({
       where: { userId },
-      data: { ownerName: updateData.fullName || '' },
+      data: { ownerName: updateData.fullName },
     });
   }
 
@@ -890,5 +894,46 @@ export async function resendVerification(email: string) {
     message: 'If an account with that email exists, a verification link has been sent.',
     verificationLink: devVerificationLink,
   };
+}
+
+/**
+ * Resolves the best available display name for a user, following the same
+ * precedence as the client-side resolveGreetingName (Dashboard.tsx:392-406):
+ *
+ *   1. User.fullName (trimmed, non-empty)
+ *   2. The ownerName of the user's primary business (trimmed, non-empty)
+ *   3. The ownerName of the user's earliest-created owned business (by createdAt)
+ *   4. null  →  callers print "Not provided"
+ *
+ * Pass a pre-fetched businesses array to avoid an extra DB round-trip in hot
+ * paths like the cron sweep.
+ */
+export function resolveUserDisplayName(
+  user?: { fullName?: string | null; primaryBusinessId?: string | null } | null,
+  ownedBusinesses?: Array<{ id: string; ownerName?: string | null; createdAt: Date | string }> | null,
+): string | null {
+  // 1. Canonical user name
+  const name = user?.fullName?.trim();
+  if (name) return name;
+
+  const businesses = (ownedBusinesses || []).filter(
+    (b): b is { id: string; ownerName: string; createdAt: Date | string } =>
+      typeof b.ownerName === 'string' && b.ownerName.trim().length > 0
+  );
+
+  if (businesses.length === 0) return null;
+
+  // 2. Primary business owner name
+  if (user?.primaryBusinessId) {
+    const primary = businesses.find((b) => b.id === user.primaryBusinessId);
+    if (primary) return primary.ownerName.trim();
+  }
+
+  // 3. Earliest-created owned business
+  const earliest = [...businesses].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  )[0];
+
+  return earliest ? earliest.ownerName.trim() : null;
 }
 
