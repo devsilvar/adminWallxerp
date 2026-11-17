@@ -251,7 +251,7 @@ export type RemittanceStatus = 'collected' | 'remitting' | 'remitted';
 
 // ─── Invoices ───────────────────────────────────────────────
 
-export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
+export type InvoiceStatus = 'draft' | 'sent' | 'partial' | 'paid' | 'overdue' | 'cancelled';
 
 export type InvoicePaymentMethod =
   | 'cash'
@@ -291,6 +291,20 @@ export interface InvoiceLine {
   sortOrder?: number;
 }
 
+export interface InvoicePayment {
+  id: string;
+  amount: number;
+  paymentDate: string;
+  method: InvoicePaymentMethod;
+  reference: string | null;
+  notes: string | null;
+  voidedAt: string | null;
+  voidedBy: string | null;
+  voidReason: string | null;
+  createdAt: string;
+  createdBy: string | null;
+}
+
 export interface Invoice {
   id: string;
   businessId: string;
@@ -313,6 +327,8 @@ export interface Invoice {
   vatAmount: number;
   discount: number;
   total: number;
+  amountPaid: number;
+  balance: number;
   currency: string;
 
   notes: string | null;
@@ -320,8 +336,10 @@ export interface Invoice {
 
   linkedSaleId: string | null;
   linkedSale?: SalesTransaction | null;
+  overdueAt?: string | null;
 
   lines?: InvoiceLine[];
+  payments?: InvoicePayment[];
   _count?: { lines: number };
 
   createdAt: string;
@@ -358,6 +376,27 @@ export interface InvoiceListQuery {
 export interface MarkInvoicePaidPayload {
   paymentMethod: InvoicePaymentMethod;
   paymentDate?: string;
+}
+
+export interface RecordInvoicePaymentPayload {
+  amount: number;
+  paymentDate?: string;
+  paymentMethod: InvoicePaymentMethod;
+  reference?: string;
+  notes?: string;
+}
+
+export interface ResolveOverpaymentPayload {
+  amount: number;
+  paymentDate?: string;
+  paymentMethod: InvoicePaymentMethod;
+  reference?: string;
+  notes?: string;
+  resolution: 'voucher';
+}
+
+export interface VoidInvoicePaymentPayload {
+  reason: string;
 }
 
 export interface SendInvoiceWhatsAppResult {

@@ -26,6 +26,44 @@ export function formatNaira(
   })}`;
 }
 
+/**
+ * Format currency amount with the given currency code.
+ * Falls back to NGN (₦) if currency is not recognized.
+ */
+export function formatCurrency(
+  amount: number | string | undefined | null,
+  currency: string = 'NGN',
+  compact = false
+): string {
+  if (amount === undefined || amount === null || amount === '') {
+    return currency === 'NGN' ? '₦0.00' : `${currency} 0.00`;
+  }
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(num)) {
+    return currency === 'NGN' ? '₦0.00' : `${currency} 0.00`;
+  }
+
+  // Use formatNaira for NGN
+  if (currency === 'NGN') {
+    return formatNaira(num, compact);
+  }
+
+  // Generic formatting for other currencies
+  if (compact) {
+    if (Math.abs(num) >= 1_000_000) {
+      return `${currency} ${(num / 1_000_000).toFixed(1)}M`;
+    }
+    if (Math.abs(num) >= 1_000) {
+      return `${currency} ${(num / 1_000).toFixed(1)}K`;
+    }
+  }
+
+  return `${currency} ${num.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
 export function formatDate(date: string | Date | undefined | null): string {
   if (!date) return '';
   const d = typeof date === 'string' ? new Date(date) : date;
