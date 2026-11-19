@@ -34,6 +34,7 @@ const AdminSubscriptions = lazy(
 const AdminReviews = lazy(() => import('@/pages/admin/AdminReviews.tsx'));
 const AdminBroadcasts = lazy(() => import('@/pages/admin/AdminBroadcasts.tsx'));
 const AdminMarketplace = lazy(() => import('@/pages/admin/AdminMarketplace.tsx'));
+const AdminDisputes = lazy(() => import('@/pages/admin/AdminDisputes.tsx'));
 const AdminSettings = lazy(() => import('@/pages/admin/AdminSettings.tsx'));
 const NotFound = lazy(() => import('@/pages/NotFound.tsx'));
 
@@ -103,6 +104,7 @@ function AppShell() {
                 <Route path='/admin/ai-settings' element={<AdminAISettings />} />
                 <Route path='/admin/subscriptions' element={<AdminSubscriptions />} />
                 <Route path='/admin/marketplace' element={<AdminMarketplace />} />
+                <Route path='/admin/disputes' element={<AdminDisputes />} />
                 <Route path='/admin/reviews' element={<AdminReviews />} />
                 <Route path='/admin/broadcasts' element={<AdminBroadcasts />} />
                 <Route path='/admin/settings' element={<AdminSettings />} />

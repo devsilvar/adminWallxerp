@@ -18,6 +18,7 @@ import {
   Star,
   Megaphone,
   Settings,
+  LifeBuoy,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/stores/auth.store.ts';
@@ -83,6 +84,7 @@ export default function AdminSidebar({
     { to: '/admin/transactions', label: 'Transactions', icon: ArrowLeftRight },
     { to: '/admin/unverified-inflows', label: 'Unverified Inflows', icon: ArrowDownLeft },
     { to: '/admin/audit-logs', label: 'Audit Logs', icon: ScrollText },
+    { to: '/admin/disputes', label: 'Disputes', icon: LifeBuoy },
     { to: '/admin/reviews', label: 'Reviews', icon: Star },
     { to: '/admin/broadcasts', label: 'Broadcasts', icon: Megaphone },
     { to: '/admin/ai-settings', label: 'AI Settings', icon: Bot },
